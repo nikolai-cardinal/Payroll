@@ -22,6 +22,7 @@ ui.createMenu('Technician Tools')
   .addItem('Update All Rates', 'updateAllTechnicianRates')
   .addItem('Create New Sheet', 'createNewTechnicianSheet')
   .addItem('All Spiff/Bonus', 'processAllSpiffBonusWithCustomers')
+  .addItem('All PBP', 'processAllPBP')
   .addToUi();
 }
 
@@ -49,37 +50,68 @@ if (isProcessing) {
   }
    var range = e.range;
   var sheet = range.getSheet();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheetName = sheet.getName();
   var column = range.getColumn();
   var row = range.getRow();
   var value = range.getValue();
-   // Check if this is the Hourly + Spiff Pay sheet and the Action column
-  if (sheetName === 'Hourly + Spiff Pay' && column === 7) { // Column G (Action)
-    // Only process rows after the header (row > 2)
-    if (row > 2) {
+  
+  // Get rates sheet mapping - use the one from SpiffBonusUtilities
+  var ratesMapping = getRatesSheetMapping();
+
+  // Check if this is the Hourly + Spiff Pay sheet and the Action column
+  if (sheetName === 'Hourly + Spiff Pay' && column === ratesMapping.actionColumn) {
+    // Only process rows after the header
+    if (row >= ratesMapping.dataStartRow) {
       // Get the technician name from column A
-      var techName = sheet.getRange(row, 1).getValue();
+      var techName = sheet.getRange(row, ratesMapping.nameColumn).getValue();
+      if (!techName) {
+         console.warn(`Skipping row ${row} because technician name is empty.`);
+         isProcessing = false;
+         return; 
+      }
+
       // Check which action was selected
       if (value === "Timesheet") {
         // Update timesheet for this specific technician
         updateHoursForTechnician(techName, row, column);
       } else if (value === "Spiff/Bonus") {
-        // Update spiff/bonus with customer details
-        updateSpiffBonusWithCustomersList(techName, row, column);
-      } else if (value === "PBP") { // Assuming you might add a PBP action here
-         // Call the PBP function (now located in PBP_Logic.gs)
+        // Get the technician's sheet
+        var techSheet = ss.getSheetByName(techName);
+        if (!techSheet) {
+          console.error(`Technician sheet not found for: ${techName}`);
+          setActionStatus(sheet, row, column, 'Error: Tech Sheet Not Found');
+          SpreadsheetApp.getUi().alert(`Error: Could not find a sheet named "${techName}".`);
+        } else {
+          // Get the 'Spiff/Bonus' sheet
+          var spiffBonusSheet = ss.getSheetByName('Spiff/Bonus'); // Adjust name if different
+          if (!spiffBonusSheet) {
+            console.error("'Spiff/Bonus' sheet not found.");
+            setActionStatus(sheet, row, column, 'Error: Spiff Sheet Missing');
+            SpreadsheetApp.getUi().alert("Error: Could not find the 'Spiff/Bonus' sheet.");
+          } else {
+            // Call the main processing function from SpiffBonusSheetOperations
+            // Pass the ratesSheet (sheet), triggerRow (row), and triggerCol (column)
+            processSpiffAndBonus(techSheet, techName, spiffBonusSheet, sheet, row, column);
+          }
+        }
+      } else if (value === "PBP") { 
+         // Call updatePBPForTechnician from PBP/PBPMain.js
          updatePBPForTechnician(techName, row, column);
+      } else {
+         // If value is something else (like Ready or Complete), reset status
+         setActionStatus(sheet, row, column, 'Ready'); 
       }
     }
   }
 } catch (error) {
-  console.error("Error in onEdit: " + error.message);
+  console.error("Error in onEdit: " + error.message + " Stack: " + error.stack);
+  // Try to reset status to Error if possible
+  if (sheet && row && column) {
+      try { setActionStatus(sheet, row, column, 'Error'); } catch (e) { console.error("Failed to set error status."); }
+  }
 } finally {
-  // In Google Apps Script, we can't use setTimeout
-  // Instead, we'll just set the flag to false after this execution
   isProcessing = false;
-  // Note: In Google Apps Script environment, there's no direct equivalent to setTimeout
-  // We are removing this mechanism completely and simply letting the flag be reset immediately
 }
 }
 
@@ -90,6 +122,7 @@ if (isProcessing) {
 * Gets the field mappings for the Hourly + Spiff Pay sheet
 * @return {Object} An object containing column indexes for important fields
 */
+/* REMOVED - Use SpiffBonusUtilities.getRatesSheetMapping() instead 
 function getRatesSheetMapping() {
 return {
   nameColumn: 1,       // Column A - Technician name
@@ -99,6 +132,7 @@ return {
   dataStartRow: 3      // Data starts at row 3
 };
 }
+*/
 
 
 
@@ -232,12 +266,18 @@ for (var i = 0; i < data.length; i++) {
 function updateAllTechnicianRates() { SpreadsheetApp.getUi().alert('updateAllTechnicianRates function needs to be defined.'); }
 function createNewTechnicianSheet() { SpreadsheetApp.getUi().alert('createNewTechnicianSheet function needs to be defined.'); }
 // processAllSpiffBonusWithCustomers is now defined in Spiff/Bonus/SpiffBonusMain.gs
+// processAllPBP is defined in PBP/PBPMain.gs
 
 // --- Placeholder functions potentially called by onEdit actions ---
 // You would need to define these or ensure they exist elsewhere in your project.
-function updateHoursForTechnician(techName, row, column) { SpreadsheetApp.getUi().alert('updateHoursForTechnician function needs to be defined for: ' + techName); setActionStatus(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Hourly + Spiff Pay'), row, column, 'Not Implemented'); }
+function updateHoursForTechnician(techName, row, column) { 
+  var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Hourly + Spiff Pay');
+  SpreadsheetApp.getUi().alert('updateHoursForTechnician function needs to be defined for: ' + techName);
+  setActionStatus(ratesSheet, row, column, 'Error: Not Implemented'); 
+}
 
 // updateSpiffBonusWithCustomersList is now defined in Spiff/Bonus/SpiffBonusMain.gs
+// updatePBPForTechnician is defined in PBP/PBPMain.gs
 
 /**
  * Sets the status in the Action column of the rates sheet.
@@ -305,10 +345,10 @@ function updateTopSummarySpiffYard(techSheet, totalSpiff, totalYard) {
 // Note: getRatesSheetMapping was moved to SpiffBonusUtilities.gs, but a copy might exist here still.
 // Let's remove the duplicate from Main.gs if it exists.
 /**
-* Gets the field mappings for the Hourly + Spiff Pay sheet - REMOVING DUPLICATE FROM Main.gs
+* Gets the field mappings for the Hourly + Spiff Pay sheet - REMOVING DUPLICATE
 * @return {Object} An object containing column indexes for important fields
 */
-/* REMOVING
+/* REMOVING THIS BLOCK
 function getRatesSheetMapping() {
 return {
   nameColumn: 1,       // Column A - Technician name

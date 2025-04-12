@@ -1,287 +1,656 @@
 /**
-* Cardinal Payroll System - Spiff/Bonus Utilities
-* Contains general helper functions used by the Spiff/Bonus logic.
+* Cardinal Payroll System - Spiff/Bonus Sheet Operations
+* Contains functions for calculating Spiff/Bonus amounts and modifying technician sheets.
 */
 
 /**
-* Creates an object mapping expected "Spiff/Bonus" sheet column headers to their 1-based column index.
-* Uses flexible matching to accommodate variations in header names.
+* Manages the number of rows in a given section of a sheet.
+* Adds or deletes rows to match the required number, starting from a specific row.
+* Assumes the section to manage is contiguous.
 *
-* @param {Sheet} sheet - The Spiff/Bonus sheet object.
-* @return {Object} An object where keys are standardized header names (e.g., 'customerName')
-*                  and values are the corresponding 1-based column indices.
-*                  Returns null for keys if the header is not found.
+* @param {Sheet} sheet The sheet to modify.
+* @param {number} dataStartRow The 1-based row index where the data section begins.
+* @param {number} currentRows The number of rows currently occupied by data (or available space).
+* @param {number} requiredRows The target number of rows needed for the data (including totals, etc.).
 */
-function getSpiffBonusHeaderMap(sheet) {
- if (!sheet) {
-   console.error("getSpiffBonusHeaderMap: Sheet object is required.");
-   return {}; // Return empty map if no sheet provided
- }
- var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
- var map = {
-   customerName: null,
-   jobBusinessUnit: null,
-   completionDate: null,
-   soldBy: null,
-   assignedTechnician: null,
-   bonusAmount: null,
-   actualBonusAmount: null, // For cases where bonus amount is boolean/true
-   itemName: null,
-   crossSaleGroup: null
- };
+function manageSheetRows(sheet, dataStartRow, currentRows, requiredRows) {
+  if (!sheet || dataStartRow <= 0 || currentRows < 0 || requiredRows < 0) {
+    console.error("manageSheetRows: Invalid parameters.");
+    return; // Or throw error
+  }
 
- for (var c = 0; c < headers.length; c++) {
-   var h = (headers[c] || "").toString().trim().toLowerCase();
-   var columnIndex = c + 1;
+  if (requiredRows > currentRows) {
+    // Need to add more rows
+    var rowsToAdd = requiredRows - currentRows;
+    // Insert rows *after* the last current row. If currentRows is 0, insert after the row *before* dataStartRow.
+    var insertAfterRow = (currentRows > 0) ? (dataStartRow + currentRows - 1) : (dataStartRow - 1);
+    if (insertAfterRow < 1) insertAfterRow = 1; // Cannot insert before row 1
 
-   // Match based on common variations
-   if (!map.customerName && h.includes("customer") && (h.includes("name") || h.includes("client"))) {
-     map.customerName = columnIndex;
-   }
-   else if (!map.jobBusinessUnit && (h.includes("business") && h.includes("unit") || h.includes("bu") || h === "dept")) {
-     map.jobBusinessUnit = columnIndex;
-   }
-   else if (!map.completionDate && ((h.includes("completion") || h.includes("complete")) && h.includes("date"))) {
-     map.completionDate = columnIndex;
-   }
-   else if (!map.completionDate && (h === "date" || h === "job date")) { // Allow fallback generic date
-     map.completionDate = columnIndex;
-   }
-   else if (!map.soldBy && (h.includes("sold") && h.includes("by"))) {
-     map.soldBy = columnIndex;
-   }
-   else if (!map.assignedTechnician && (h === "tech" || h === "technician" || h === "assigned tech")) {
-     map.assignedTechnician = columnIndex;
-   }
-   else if (!map.bonusAmount && (h.includes("bonus") || h.includes("spiff") || h.includes("commission") || h.includes("amt") || h.includes("amount") || h.includes("$"))) {
-     // Prioritize finding the *main* bonus amount column first
-     if (h === "bonus" || h === "bonus amount" || h === "spiff" || h === "spiff amount") { // More specific names take precedence
-         map.bonusAmount = columnIndex;
-     }
-   }
-   else if (!map.itemName && ((h.includes("item") && h.includes("name")) || h === "task" || h === "service" || h === "description")) {
-     map.itemName = columnIndex;
-   }
- }
+    // Ensure we don't try inserting after a row that doesn't exist if sheet is very short
+    var maxRows = sheet.getMaxRows();
+    if (insertAfterRow > maxRows) {
+       console.warn("manageSheetRows: Attempting to insert rows after a row beyond the sheet max rows. Appending instead.");
+       sheet.insertRows(maxRows + 1, rowsToAdd); // Append if needed
+    } else {
+       sheet.insertRowsAfter(insertAfterRow, rowsToAdd);
+    }
+    console.log(`Inserted ${rowsToAdd} rows after row ${insertAfterRow} in sheet ${sheet.getName()}`);
 
- // --- Refinements and Fallbacks ---
+  } else if (requiredRows < currentRows) {
+    // Need to remove excess rows
+    var rowsToDelete = currentRows - requiredRows;
+    var deleteStartRow = dataStartRow + requiredRows;
+    // Safety check: ensure deleteStartRow is valid
+    if (deleteStartRow > sheet.getLastRow()) {
+        console.warn(`manageSheetRows: Calculated delete start row (${deleteStartRow}) is beyond the last row (${sheet.getLastRow()}). Skipping deletion.`);
+        return;
+    }
+     // Safety check: ensure rowsToDelete doesn't exceed available rows below deleteStartRow
+    var availableRowsToDelete = sheet.getLastRow() - deleteStartRow + 1;
+    if (rowsToDelete > availableRowsToDelete) {
+        console.warn(`manageSheetRows: Attempting to delete ${rowsToDelete} rows, but only ${availableRowsToDelete} are available starting from row ${deleteStartRow}. Adjusting count.`);
+        rowsToDelete = availableRowsToDelete;
+    }
 
- // If the primary bonus amount wasn't found with specific terms, try broader terms again
- if (!map.bonusAmount) {
-    for (var c2 = 0; c2 < headers.length; c2++) {
-        var h2 = (headers[c2] || "").toString().trim().toLowerCase();
-        var colIdx2 = c2 + 1;
-        if (h2.includes("bonus") || h2.includes("spiff") || h2.includes("commission") || h2.includes("amt") || h2.includes("amount") || h2.includes("$")) {
-            map.bonusAmount = colIdx2;
-            console.log(`Fallback found bonusAmount: '${headers[c2]}' in column ${colIdx2}`);
-            break; // Take the first match found this way
+    if (rowsToDelete > 0) {
+        sheet.deleteRows(deleteStartRow, rowsToDelete);
+        console.log(`Deleted ${rowsToDelete} rows starting from row ${deleteStartRow} in sheet ${sheet.getName()}`);
+    }
+  }
+  // If requiredRows === currentRows, do nothing.
+}
+
+
+/**
+* Writes the collected Spiff data into the designated rows on the technician sheet.
+* Assumes rows have been managed (cleared and sized correctly) beforehand.
+* Calculates and returns the total spiff amount based ONLY on items where Sold By Technician is empty.
+*
+* @param {Sheet} techSheet The technician's sheet object.
+* @param {number} spiffHeaderRow The 1-based row index of the Spiff section's header row (titles).
+* @param {Array<Object>} customerData An array of objects, each representing a spiff entry.
+*                                     Expected properties: customerName, jobBusinessUnit, completionDate, commission, itemName, 
+*                                     ***AND soldByTechnician*** (this property must be added during data collection).
+* @return {number} The calculated total spiff amount considering all entries.
+*/
+function writeSpiffDataToSheet(techSheet, spiffHeaderRow, customerData) {
+  if (!techSheet || spiffHeaderRow <= 0 || !customerData) {
+    console.error("writeSpiffDataToSheet: Invalid parameters.");
+    return 0; // Return 0 if invalid parameters
+  }
+
+  var dataWriteStartRow = spiffHeaderRow + 1;
+  var numCols = 5; // Number of columns to write (A-E)
+  var filteredTotalSpiff = 0; // Initialize the total
+
+  // Check if there is data to write before proceeding
+  if (!customerData || customerData.length === 0) {
+      console.log("No spiff data provided to writeSpiffDataToSheet for " + techSheet.getName() + ".");
+      // The total row should still be added by addSpiffTotalRow, passing the filtered total (0)
+      return filteredTotalSpiff; // Return 0 if no data
+  }
+
+  var tz = Session.getScriptTimeZone() || 'America/New_York'; // Get timezone for date formatting
+
+  // Prepare data array for efficient writing AND calculate total
+  var dataToWrite = customerData.map(function(c) {
+    // Calculate total: Include commission for all entries
+    // Ensure commission is treated as a number
+    var commissionAmount = Number(c.commission || 0);
+    filteredTotalSpiff += commissionAmount; // Include all commissions
+
+    var dateObj = tryParseDate(c.completionDate); // Use utility function from SpiffBonusUtilities
+    var displayDate = dateObj
+      ? Utilities.formatDate(dateObj, tz, 'MM/dd/yyyy') // Format date as MM/DD/YYYY
+      : (c.completionDate || ""); // Use original string if parsing fails
+
+    return [
+      c.customerName || "",       // Column A: Customer Name
+      c.jobBusinessUnit || "",   // Column B: Business Unit
+      displayDate,              // Column C: Completion Date (formatted)
+      commissionAmount,         // Column D: Commission Amount (use the numeric value)
+      c.itemName || ""          // Column E: Item Name
+    ];
+  });
+
+  // Write data in bulk
+  var targetRange = techSheet.getRange(dataWriteStartRow, 1, dataToWrite.length, numCols);
+  targetRange.setValues(dataToWrite);
+
+  // Apply number formatting to the Commission column (Column D)
+  techSheet.getRange(dataWriteStartRow, 4, dataToWrite.length, 1).setNumberFormat('$' + '#,##0.00');
+  // Apply date formatting to the Completion Date column (Column C)
+  techSheet.getRange(dataWriteStartRow, 3, dataToWrite.length, 1).setNumberFormat('MM/dd/yyyy');
+
+  console.log(`Wrote ${dataToWrite.length} spiff entries to sheet ${techSheet.getName()} starting at row ${dataWriteStartRow}.`);
+  console.log(`Calculated Filtered Total Spiff: ${filteredTotalSpiff}`);
+
+  // Return the calculated total
+  return filteredTotalSpiff; 
+}
+
+
+/**
+* Adds the "Total" row below the written spiff data.
+* Sets the total value based on the pre-calculated filtered amount.
+*
+* @param {Sheet} techSheet The technician's sheet object.
+* @param {number} spiffHeaderRow The 1-based row index of the Spiff section's header row.
+* @param {number} dataRowCount The number of actual spiff data rows written (used to position the total row).
+* @param {number} filteredTotalSpiff The pre-calculated total spiff amount to display.
+*/
+function addSpiffTotalRow(techSheet, spiffHeaderRow, dataRowCount, filteredTotalSpiff) {
+  if (!techSheet || spiffHeaderRow <= 0 || dataRowCount < 0 || filteredTotalSpiff === undefined || filteredTotalSpiff === null) {
+    console.error("addSpiffTotalRow: Invalid parameters.");
+    return;
+  }
+
+  var dataStartRow = spiffHeaderRow + 1;
+  var totalRowIndex = dataStartRow + dataRowCount; // Row where the total should go
+
+  // Ensure filteredTotal is a number
+  var totalValue = Number(filteredTotalSpiff || 0);
+
+  // Clear the total row first (across relevant columns, e.g., A to E)
+  techSheet.getRange(totalRowIndex, 1, 1, 5).clearContent().setFontWeight(null); // Clear content and reset font weight
+
+  // Set "Total" label in Column A
+  techSheet.getRange(totalRowIndex, 1).setValue("Total").setFontWeight("bold");
+
+  // Set the calculated VALUE in Column D
+  techSheet.getRange(totalRowIndex, 4).setValue(totalValue).setNumberFormat('$' + '#,##0.00').setFontWeight("bold");
+  console.log(`Added Total row at ${totalRowIndex} with calculated value ${totalValue} in sheet ${techSheet.getName()}.`);
+  
+  // REMOVED formula logic
+  /*
+  if (dataRowCount > 0) {
+    var sumStartRow = dataStartRow;
+    var sumEndRow = totalRowIndex - 1;
+    var formula = '=SUM(D' + sumStartRow + ':D' + sumEndRow + ')';
+    techSheet.getRange(totalRowIndex, 4).setFormula(formula).setNumberFormat('$' + '#,##0.00').setFontWeight("bold");
+    console.log(`Added Total row at ${totalRowIndex} with formula ${formula} in sheet ${techSheet.getName()}.`);
+  } else {
+    // If no data rows, just put $0.00
+    techSheet.getRange(totalRowIndex, 4).setValue(0).setNumberFormat('$' + '#,##0.00').setFontWeight("bold");
+    console.log(`Added Total row at ${totalRowIndex} with value $0.00 (no data) in sheet ${techSheet.getName()}.`);
+  }
+  */
+}
+
+
+/**
+* Updates the top summary section of the technician's sheet with the calculated total Spiff amount.
+* Also recalculates "Total Sales Pay" and "Total Pay" based on related fields.
+*
+* @param {Sheet} techSheet - The technician sheet object.
+* @param {number} totalSpiff - The total SPIFF amount calculated from the 'Spiff/Bonus' sheet.
+* @param {number} spiffCount - The number of SPIFF entries (optional)
+*/
+function updateTopSummarySpiffs(techSheet, totalSpiff, spiffCount) {
+  if (!techSheet) {
+      console.error("updateTopSummarySpiffs: techSheet parameter is missing.");
+      return;
+  }
+  console.log(`Updating top summary for ${techSheet.getName()} with Total Spiff: ${totalSpiff}`);
+
+  // Default spiff count to 1 if not provided
+  var numSpiffs = (spiffCount !== undefined) ? spiffCount : 1;
+
+  // --- Constants for Columns (1-based) ---
+  const LABEL_COLUMN = 1; // Column A in 1-based indexing
+  const TOTAL_COLUMN = 2; // Column B for count/number values
+  const PAY_COLUMN = 3;   // Column C for monetary values (previously was VALUE_COLUMN = 4)
+
+  // --- Get Data from a Fixed Range ---
+  // Read the first 60 rows and first 5 columns (A-E) to ensure summary is captured.
+  const searchRange = techSheet.getRange(1, 1, 60, 5); // Rows 1-60, Columns A-E
+  const sheetData = searchRange.getValues();
+
+  // Initialize row indices
+  var totalSpiffRow = -1;
+  var totalSalesPayRow = -1;
+  var totalPayRow = -1;
+  var installPayRow = -1;
+  var leadSetRow = -1;
+  var totalHourlyPayRow = -1;
+
+  // --- Find Rows Using Exact Matching Only ---
+  for (var i = 0; i < sheetData.length; i++) {
+    var rowIndex = i + 1; // 1-based row index
+    // Adjusted index for sheetData array (which is 0-based). Column B is index 1.
+    var labelValue = sheetData[i][0]; // CORRECTED: Check Column A (index 0) for labels
+
+    if (labelValue && typeof labelValue === 'string') {
+      var labelText = labelValue.trim();
+      var normalizedLabel = labelText.replace(/\s+/g, ' ');
+      var labelLower = normalizedLabel.toLowerCase();
+
+      // Removed verbose logging for brevity in production, can be re-enabled for debug
+      // console.log(`Row ${rowIndex}: Checking normalized label: "${labelLower}"`); 
+
+      switch (labelLower) {
+        case "total spiff":
+          if (totalSpiffRow < 0) totalSpiffRow = rowIndex;
+          break;
+        case "total sales pay":
+          if (totalSalesPayRow < 0) totalSalesPayRow = rowIndex;
+          break;
+        case "total pay":
+          if (totalPayRow < 0) totalPayRow = rowIndex;
+          break;
+        case "total install pay":
+          if (installPayRow < 0) installPayRow = rowIndex;
+          break;
+        case "lead set sale":
+          if (leadSetRow < 0) leadSetRow = rowIndex;
+          break;
+        case "total hourly pay":
+          if (totalHourlyPayRow < 0) totalHourlyPayRow = rowIndex;
+          break;
+      }
+    }
+  }
+
+  console.log(`Final row mappings (Exact Match Only): TotalSpiff=${totalSpiffRow}, TotalSales=${totalSalesPayRow}, TotalPay=${totalPayRow}, Install=${installPayRow}, Lead=${leadSetRow}, TotalHourly=${totalHourlyPayRow}`);
+
+  // --- Update "Total Spiff" Line --- (Value in Column B for count, Column C for amount)
+  if (totalSpiffRow > 0) {
+    try {
+      // Update Column B with the number of spiffs
+      techSheet.getRange(totalSpiffRow, TOTAL_COLUMN).setValue(numSpiffs);
+      // Update Column C with the total spiff amount
+      techSheet.getRange(totalSpiffRow, PAY_COLUMN).setValue(totalSpiff).setNumberFormat('$'+'#,##0.00');
+      console.log(`Updated 'Total Spiff' on row ${totalSpiffRow}, Col B to ${numSpiffs}, Col C to ${totalSpiff}`);
+    } catch (e) {
+      console.error(`Error updating 'Total Spiff' row (${totalSpiffRow}): ${e.message}`);
+    }
+  } else {
+    console.error("CRITICAL: Could not find exact match for 'Total Spiff' row in top summary for " + techSheet.getName() + ". Summary update aborted."); // Log as error
+    return; // Stop further processing in this function if Total Spiff row is missing
+  }
+
+  // --- Recalculate "Total Sales Pay" --- (Value in Column C)
+  if (totalSalesPayRow > 0) {
+    try {
+      var installVal = (installPayRow > 0) ? Number(techSheet.getRange(installPayRow, PAY_COLUMN).getValue() || 0) : 0;
+      var leadVal = (leadSetRow > 0) ? Number(techSheet.getRange(leadSetRow, PAY_COLUMN).getValue() || 0) : 0;
+      var numericTotalSpiff = Number(totalSpiff || 0);
+      
+      // Correction: Total Sales Pay = Total Spiff + Install + Lead Set
+      var totalSales = numericTotalSpiff + installVal + leadVal;
+
+      techSheet.getRange(totalSalesPayRow, PAY_COLUMN).setValue(totalSales).setNumberFormat('$'+'#,##0.00');
+      console.log(`Updated 'Total Sales Pay' on row ${totalSalesPayRow}, Col C to ${totalSales}`);
+    } catch (e) {
+      console.error(`Error updating 'Total Sales Pay' row (${totalSalesPayRow}): ${e.message}`);
+    }
+  } else {
+    console.warn("Could not find exact match for 'Total Sales Pay' row in top summary for " + techSheet.getName());
+  }
+
+  // --- Recalculate "Total Pay" --- (Value in Column C)
+  if (totalPayRow > 0 && totalHourlyPayRow > 0 && totalSalesPayRow > 0) {
+    try {
+      var hourlyPay = Number(techSheet.getRange(totalHourlyPayRow, PAY_COLUMN).getValue() || 0);
+      var salesPay = Number(techSheet.getRange(totalSalesPayRow, PAY_COLUMN).getValue() || 0);
+
+      var totalPay = hourlyPay + salesPay;
+      techSheet.getRange(totalPayRow, PAY_COLUMN).setValue(totalPay).setNumberFormat('$'+'#,##0.00');
+      console.log(`Updated 'Total Pay' on row ${totalPayRow}, Col C to ${totalPay}`);
+    } catch (e) {
+      console.error(`Error updating 'Total Pay' row (${totalPayRow}): ${e.message}`);
+    }
+  } else {
+    console.warn(`Could not find one or more required rows (exact match) for 'Total Pay' calculation in ${techSheet.getName()}: Total Pay (${totalPayRow}), Total Hourly (${totalHourlyPayRow}), Total Sales (${totalSalesPayRow})`);
+  }
+}
+
+
+/**
+* Clears the data area within the Spiff section before writing new data or if no data exists.
+* Also removes formatting and borders, writes a clean Total row, and deletes excess rows.
+* @param {Sheet} sheet - The technician sheet to clear.
+*/
+function clearSpiffDataSection(sheet) {
+  if (!sheet) return;
+  try {
+    var spiffSectionRow = findSpiffCustomerDataSection(sheet); // Depends on function in SpiffBonusUtilities
+    if (spiffSectionRow <= 0) {
+      console.log("Clear Spiff Data: Spiff section not found in " + sheet.getName());
+      return;
+    }
+    var spiffHeaderRow = spiffSectionRow + 1; // Assuming header is directly below section title
+    var spiffDataStartRow = spiffHeaderRow + 1;
+    var nextSectionRow = findNextSectionStart(sheet, spiffHeaderRow + 1); // Depends on function in SpiffBonusUtilities
+    
+    if (nextSectionRow <= 0) {
+       nextSectionRow = sheet.getLastRow() + 1;
+       console.log("Clear Spiff Data: No next section found, using last row + 1 (" + nextSectionRow + ") as boundary for " + sheet.getName());
+    }
+
+    var rowsToClear = 0;
+    if (spiffDataStartRow < nextSectionRow) {
+        rowsToClear = nextSectionRow - spiffDataStartRow;
+    } else {
+        console.log("Clear Spiff Data: Data start row is not before next section row. Assuming empty section in " + sheet.getName());
+    }
+
+    var numColsToClear = 10; // Clear columns A-J
+
+    if (rowsToClear > 0) {
+      var rangeToClear = sheet.getRange(spiffDataStartRow, 1, rowsToClear, numColsToClear);
+      rangeToClear.clear({contentsOnly: false, formatOnly: false, commentsOnly: false, validationsOnly: false});
+      rangeToClear.setBorder(false,false,false,false,false,false);
+      console.log("Cleared Spiff data content/format for " + sheet.getName() + " from row " + spiffDataStartRow + " for " + rowsToClear + " rows.");
+    } else {
+      // Even if no data rows, clear the potential total row area
+      sheet.getRange(spiffDataStartRow, 1, 1, numColsToClear)
+           .clear({contentsOnly: false, formatOnly: false, commentsOnly: false, validationsOnly: false})
+           .setBorder(false,false,false,false,false,false);
+      console.log("Clear Spiff Data: No existing data rows found/needed to clear in " + sheet.getName() + ". Ensured total row area is clear.");
+    }
+
+    // Write a clean 'Total' row
+    var amountCol = 4; // Column D for Spiffs
+    var totalLabelCol = 1; // Column A for Label
+    sheet.getRange(spiffDataStartRow, totalLabelCol).setValue("Total").setFontWeight("bold");
+    sheet.getRange(spiffDataStartRow, amountCol).setValue(0).setNumberFormat("$#,##0.00").setFontWeight("bold");
+    sheet.getRange(spiffDataStartRow, 1, 1, Math.max(5, amountCol))
+         .setBorder(null, null, true, null, null, null, "black", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
+    // Delete any extra rows *between* the new Total row and the previously determined next section start
+    var firstRowToDelete = spiffDataStartRow + 1;
+    if (nextSectionRow > firstRowToDelete) {
+        var numRowsToDelete = nextSectionRow - firstRowToDelete;
+        // Boundary check: don't delete past the last row of the sheet
+        var lastRow = sheet.getLastRow();
+        if (firstRowToDelete > lastRow) {
+            console.log("No extra rows to delete after clearing spiff section (start row beyond last row).");
+        } else {
+           if ((firstRowToDelete + numRowsToDelete - 1) > lastRow) {
+               numRowsToDelete = lastRow - firstRowToDelete + 1; // Adjust count if it exceeds sheet bounds
+           }
+           if (numRowsToDelete > 0) {
+              sheet.deleteRows(firstRowToDelete, numRowsToDelete);
+              console.log("Deleted " + numRowsToDelete + " extra rows after clearing spiff section, starting from row " + firstRowToDelete + " in " + sheet.getName());
+           } else {
+              console.log("No valid extra rows detected to delete after adjustment.");
+           }
         }
+    } else {
+        console.log("No extra rows detected to delete after clearing spiff section in " + sheet.getName());
     }
- }
 
- // Look for 'Actual Bonus Amount' or similar, often in the column *after* the main bonus column
- if (map.bonusAmount) {
-   var nextIndex = map.bonusAmount; // This is 1-based index + 1 = next column
-   if (nextIndex < headers.length) { // Check if next column exists
-     var nextHeader = (headers[nextIndex] || "").toString().trim().toLowerCase();
-     // Check if the *next* column seems like an amount column (useful if main one is boolean)
-     if (nextHeader.includes("actual") || nextHeader.includes("$") || nextHeader.includes("amount") || nextHeader.includes("value")) {
-       map.actualBonusAmount = nextIndex + 1; // map.bonusAmount is 1-based, headers is 0-based, so +1 gets 1-based next col index
-       console.log(`Found actualBonusAmount: '${headers[nextIndex]}' in column ${map.actualBonusAmount}`);
-     }
-   }
- }
-
- // If 'Sold By' wasn't found, specifically check for "Sold By Technician"
- if (!map.soldBy) {
-   for (var c3 = 0; c3 < headers.length; c3++) {
-     var hh = (headers[c3] || "").toString().trim(); // Case-sensitive check might be needed?
-     if (hh === "Sold By Technician") {
-       map.soldBy = c3 + 1;
-       console.log(`Found Sold By column: '${hh}' in column ${map.soldBy}`);
-       break;
-     }
-   }
- }
-
- // Add logic to find 'Cross Sale Group'
- if (!map.crossSaleGroup) {
-   for (var c4 = 0; c4 < headers.length; c4++) {
-     var h4 = (headers[c4] || "").toString().trim().toLowerCase();
-     var colIdx4 = c4 + 1;
-     if (h4.includes("cross") && h4.includes("sale") && h4.includes("group")) {
-       map.crossSaleGroup = colIdx4;
-       console.log(`Found crossSaleGroup: '${headers[c4]}' in column ${colIdx4}`);
-       break;
-     }
-   }
- }
- // If still not found, try a simpler match (e.g., check column J explicitly if headers are consistent)
- if (!map.crossSaleGroup && headers.length >= 10) { // Check if Column J exists
-    var headerJ = (headers[9] || "").toString().trim().toLowerCase(); // Index 9 is Column J
-    if (headerJ.includes("cross") && headerJ.includes("sale")) {
-        map.crossSaleGroup = 10; // Default to Column J (index 10)
-        console.log(`Assumed crossSaleGroup: '${headers[9]}' in column 10 (J)`);
-    }
- }
-
- // Last resort: If specific key headers are *still* missing, assign defaults or log warnings
- // Example: Default 'Sold By' to column F (index 6) if absolutely necessary
- if (!map.soldBy) {
-   console.warn("Could not find 'Sold By' column header. Defaulting to Column F (index 6). This may be incorrect.");
-   map.soldBy = 6;
- }
-
- // Log any headers that were not successfully mapped
- for (var key in map) {
-    if (map[key] === null) {
-        console.warn(`Header key '${key}' could not be mapped to a column in the Spiff/Bonus sheet.`);
-    }
- }
-
- console.log("Spiff/Bonus Header Map: ", map);
- return map;
+  } catch (e) {
+    console.error("Error clearing spiff data section for " + sheet.getName() + ": " + e);
+    // SpreadsheetApp.getUi().alert("Error clearing spiff section for " + sheet.getName() + ": " + e.message);
+  }
 }
 
-
 /**
-* Finds the first row within a specified range that exactly matches the given text in a specific column.
-* Search is case-insensitive and trims whitespace.
-*
-* @param {Sheet} sheet - The sheet object to search in.
-* @param {string} textToFind - The text to search for.
-* @param {number} column_one_indexed - The 1-based column index to search within.
-* @param {number} [startRow=1] - Optional 1-based start row for the search.
-* @param {number} [endRow] - Optional 1-based end row for the search (defaults to sheet's last row).
-* @param {boolean} [allowPartialMatch=false] - Whether to allow partial matches.
-* @return {number} The 1-based row number where the text was found, or -1 if not found.
-*/
-function findRowWithText(sheet, textToFind, column_one_indexed, startRow, endRow, allowPartialMatch) {
- if (!sheet || !textToFind || !column_one_indexed || column_one_indexed < 1) {
-   console.error("findRowWithText: Invalid parameters. Requires sheet, textToFind, and valid column_one_indexed.");
-   return -1;
- }
- var searchCol = column_one_indexed;
- var begin = startRow || 1;
- var maxRow = endRow || sheet.getLastRow();
- var isPartialMatch = allowPartialMatch || false;
+ * Calculates the total Spiff/Bonus amount for a given technician based on matching criteria
+ * in the Spiff/Bonus sheet data.
+ * Handles potential merged cells by relying on the array populated by getValues().
+ * Bonus Rule: +$25 for each row where:
+ *   1) Tech Name == Sold By (F) AND Tech Name == Assigned Tech (G)
+ *   OR
+ *   2) Sold By (F) is EMPTY AND Tech Name == Assigned Tech (G)
+ *
+ * @param {Sheet} spiffBonusSheet The actual 'Spiff/Bonus' sheet object (used only for potential logging/context, not direct cell reads here).
+ * @param {string} technicianName The name of the technician to calculate for.
+ * @param {Object} headerMap An object mapping standardized header names to column indices (1-based),
+ *                           obtained from getSpiffBonusHeaderMap(). Requires 'soldBy' and 'assignedTechnician'.
+ * @param {Array<Array>} spiffBonusData 2D array of data from the 'Spiff/Bonus' sheet (including headers).
+ * @return {number} The total calculated bonus amount for the technician.
+ */
+function calculateSpiffAndBonus(spiffBonusSheet, technicianName, headerMap, spiffBonusData) {
+  var totalBonus = 0;
+  const bonusAmount = 25;
 
- if (begin > maxRow) {
-     console.log(`findRowWithText: Start row (${begin}) is after end row (${maxRow}). No search performed.`);
-     return -1;
- }
+  // Validate required header map keys
+  if (!headerMap || headerMap.soldBy === null || headerMap.assignedTechnician === null) {
+    console.error("calculateSpiffAndBonus: Invalid headerMap. Missing 'soldBy' or 'assignedTechnician' column index.");
+    SpreadsheetApp.getUi().alert("Error: Could not find required 'Sold By' or 'Technician' columns in the Spiff/Bonus sheet. Please check headers.");
+    return 0; // Return 0 if headers are missing
+  }
+  console.log(`Calculating bonus for ${technicianName}. SoldBy Col: ${headerMap.soldBy}, AssignedTech Col: ${headerMap.assignedTechnician}`);
 
- // Optimize by getting values in a batch if searching multiple rows
- var numRowsToSearch = maxRow - begin + 1;
- if (numRowsToSearch <= 0) return -1;
+  // Get 0-based indices for accessing array data
+  const soldByIndex = headerMap.soldBy - 1;
+  const assignedIndex = headerMap.assignedTechnician - 1;
 
- try {
-   var range = sheet.getRange(begin, searchCol, numRowsToSearch, 1);
-   var values = range.getValues();
-   var searchTextLower = textToFind.trim().toLowerCase();
+  // Start from row 1 to skip header row in the data array
+  for (var i = 1; i < spiffBonusData.length; i++) {
+    var rowData = spiffBonusData[i];
+    var sheetRowIndex = i + 1; // Corresponding 1-based row index in the sheet (for logging)
 
-   for (var i = 0; i < values.length; i++) {
-     var cellValue = values[i][0];
-     if (cellValue && typeof cellValue === 'string') {
-       var cellLower = cellValue.trim().toLowerCase();
-       
-       if ((isPartialMatch && cellLower.includes(searchTextLower)) || 
-           (!isPartialMatch && cellLower === searchTextLower)) {
-         return begin + i; // Return the 1-based row index
-       }
-     }
-   }
- } catch (e) {
-     console.error(`findRowWithText: Error getting range or values (Row ${begin}, Col ${searchCol}, NumRows ${numRowsToSearch}): ${e.message}`);
-     // Fallback to row-by-row if batch fails (though unlikely for single column read)
-     for (var r = begin; r <= maxRow; r++) {
-         try {
-             var val = sheet.getRange(r, searchCol).getValue();
-             if (val && typeof val === 'string') {
-               var valLower = val.trim().toLowerCase();
-               if ((isPartialMatch && valLower.includes(searchTextLower)) || 
-                   (!isPartialMatch && valLower === searchTextLower)) {
-                 return r;
-               }
-             }
-         } catch (singleRowError) {
-             console.error(`findRowWithText: Error reading single cell (Row ${r}, Col ${searchCol}): ${singleRowError.message}`);
-             // Potentially break or continue depending on desired error handling
-         }
-     }
- }
+    // Ensure rowData has enough columns based on indices
+    if (rowData.length <= Math.max(soldByIndex, assignedIndex)) {
+      // console.warn(`Skipping sheet row ${sheetRowIndex} due to insufficient columns in data array.`); // Reduced verbosity
+      continue;
+    }
 
- return -1; // Not found
+    // --- Get values directly from the data array ---
+    // Relying on getValues() to correctly populate values for merged cells across the merged range.
+    var soldByValue = rowData[soldByIndex];
+    var assignedValue = rowData[assignedIndex];
+
+    // Normalize names (use toString() to handle potential non-string values)
+    var soldByTrimmed = (soldByValue || "").toString().trim();
+    var assignedTrimmed = (assignedValue || "").toString().trim();
+    var techNameTrimmed = technicianName.trim();
+
+    // Condition 1: Tech name matches both Sold By and Assigned
+    if (soldByTrimmed === techNameTrimmed && assignedTrimmed === techNameTrimmed) {
+      totalBonus += bonusAmount;
+      // console.log(`Row ${sheetRowIndex}: Match Condition 1 for ${techNameTrimmed}. Bonus: ${totalBonus}`);
+      continue; // Don't double count if both conditions could be met
+    }
+
+    // Condition 2: Sold By is empty AND Tech name matches Assigned
+    if (!soldByTrimmed && assignedTrimmed === techNameTrimmed) {
+      totalBonus += bonusAmount;
+      // console.log(`Row ${sheetRowIndex}: Match Condition 2 for ${techNameTrimmed}. Bonus: ${totalBonus}`);
+    }
+  }
+
+  console.log(`Total calculated Spiff/Bonus for ${technicianName}: ${totalBonus}`);
+  return totalBonus;
 }
 
-
 /**
-* Attempts to parse a value (string, number, or Date object) into a valid JavaScript Date object.
-* Handles common date formats like MM/DD/YYYY and ISO strings.
-*
-* @param {*} input - The value to parse (can be a string, number representing milliseconds, or a Date object).
-* @return {Date|null} A valid Date object if parsing is successful, otherwise null.
-*/
-function tryParseDate(input) {
- if (!input) return null;
+ * Main processing function triggered by the "Spiff/Bonus" action.
+ * Gets data, calculates the bonus using the new logic, and updates the tech summary.
+ * Handles setting the action status ('Complete' or 'Error').
+ *
+ * @param {Sheet} techSheet The technician's sheet object.
+ * @param {string} technicianName The name of the technician being processed.
+ * @param {Sheet} spiffBonusSheet The 'Spiff/Bonus' sheet object.
+ * @param {Sheet} ratesSheet The 'Hourly + Spiff Pay' sheet where the action was triggered.
+ * @param {number} triggerRow The row number in ratesSheet where the action was triggered.
+ * @param {number} triggerCol The column number in ratesSheet where the action was triggered.
+ */
+function processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, triggerRow, triggerCol) {
+  var ui = SpreadsheetApp.getUi();
+  var summaryInfo = []; // Array to collect detailed information
 
- // If it's already a valid Date object
- if (input instanceof Date && !isNaN(input.getTime())) {
-   return input;
- }
+  try {
+    // --- 1. Validate Sheets (already validated in caller before reaching here) ---
+    if (!techSheet || !technicianName || !spiffBonusSheet || !ratesSheet || !triggerRow || !triggerCol) {
+      console.error("processSpiffAndBonus: Missing required parameters.");
+      setActionStatus(ratesSheet, triggerRow, triggerCol, 'Error: Missing Params');
+      return;
+    }
 
- try {
-   // Try direct parsing (handles ISO strings, potentially other formats)
-   var d = new Date(input);
-   if (!isNaN(d.getTime())) return d;
+    console.log(`Starting Spiff/Bonus processing for: ${technicianName}`);
 
-   // If it's a string, try common spreadsheet format (e.g., M/D/YYYY)
-   if (typeof input === 'string') {
-     var parts = input.split(/[/\-]/); // Split by slash, backslash, or hyphen
-     if (parts.length === 3) {
-       // Attempt MM/DD/YYYY or M/D/YYYY
-       var year = parseInt(parts[2], 10);
-       var month = parseInt(parts[0], 10);
-       var day = parseInt(parts[1], 10);
+    // --- 2. Get Header Map and Data - ONLY ONCE ---
+    var headerMap = getSpiffBonusHeaderMap(spiffBonusSheet);
+    if (!headerMap || headerMap.soldBy === null || headerMap.assignedTechnician === null) {
+      console.error("Failed to get valid header map from Spiff/Bonus sheet.");
+      ui.alert(`Error processing ${technicianName}: Could not find required 'Sold By' or 'Technician' columns in the Spiff/Bonus sheet. Please check headers.`);
+      setActionStatus(ratesSheet, triggerRow, triggerCol, 'Error: Headers');
+      return;
+    }
 
-       // Basic sanity check for year (e.g., 4 digits)
-       if (year > 1000 && year < 3000 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-         // Note: JavaScript Date constructor month is 0-indexed
-         d = new Date(year, month - 1, day);
-         // Double-check that the constructed date matches the input parts (handles invalid dates like 2/30)
-         if (!isNaN(d.getTime()) && d.getFullYear() === year && (d.getMonth() + 1) === month && d.getDate() === day) {
-            return d;
-         }
-       }
-     }
-   }
+    // --- 3. Get all data from Spiff/Bonus sheet ONCE ---
+    var spiffBonusData = spiffBonusSheet.getDataRange().getValues();
 
-   // Could add more specific parsing logic here if needed (e.g., for DD-MMM-YYYY)
+    // --- 4. Calculate the total bonus ONCE ---
+    console.log(`Calculating bonus for Jonathan Fuentes. SoldBy Col: ${headerMap.soldBy}, AssignedTech Col: ${headerMap.assignedTechnician}`);
+    // We'll use this for consistent bonus calculation from the customer data
+    // var calculatedBonus = calculateSpiffAndBonus(spiffBonusSheet, technicianName, headerMap, spiffBonusData);
+    // console.log(`Total calculated Spiff/Bonus for ${technicianName}: ${calculatedBonus}`);
 
- } catch(e) {
-   // Ignore parsing errors, will return null below
-   console.log(`tryParseDate: Error parsing input '${input}': ${e.message}`);
- }
+    // --- 5. Collect customer data for the technician ---
+    var customerData = [];
+    var totalYardSpiffAmount = 0;
+    var totalSpiffAmount = 0; // Track the total spiff amount from the customer data
+    var tz = Session.getScriptTimeZone() || 'America/New_York';
+    
+    // Only process if we have headers we need
+    if (headerMap.customerName && headerMap.jobBusinessUnit && headerMap.completionDate && 
+        headerMap.bonusAmount && headerMap.itemName && headerMap.soldBy) {
+      
+      // Filter data for rows matching this technician
+      for (var i = 1; i < spiffBonusData.length; i++) { // Skip header row
+        var row = spiffBonusData[i];
+        var soldBy = row[headerMap.soldBy - 1] || "";
+        
+        // Skip if 'Sold By' doesn't match the technician
+        if (soldBy !== technicianName) continue;
+        
+        var crossSaleGroup = headerMap.crossSaleGroup ? (row[headerMap.crossSaleGroup - 1] || "") : "";
+        var custName = row[headerMap.customerName - 1] || "";
+        var busUnit = row[headerMap.jobBusinessUnit - 1] || "";
+        var dateVal = row[headerMap.completionDate - 1] || "";
+        var itemName = row[headerMap.itemName - 1] || "";
+        
+        // Extract bonus amount
+        var bonusAmountRaw = row[headerMap.bonusAmount - 1];
+        var actualBonusVal = headerMap.actualBonusAmount ? row[headerMap.actualBonusAmount - 1] : null;
+        
+        // Convert bonus to number
+        var bonusAmt = 0;
+        if (typeof bonusAmountRaw === 'string' && bonusAmountRaw.includes('$')) {
+          bonusAmt = parseFloat(bonusAmountRaw.replace(/[^0-9.-]+/g,''));
+        } else if (bonusAmountRaw === true || bonusAmountRaw === 'true') {
+          if (actualBonusVal !== null) {
+            if (typeof actualBonusVal === 'string' && actualBonusVal.includes('$')) {
+              bonusAmt = parseFloat(actualBonusVal.replace(/[^0-9.-]+/g,''));
+            } else {
+              bonusAmt = parseFloat(actualBonusVal || 0);
+            }
+          }
+        } else {
+          bonusAmt = parseFloat(bonusAmountRaw || 0);
+        }
+        
+        // Add to customer data if valid amount
+        if (!isNaN(bonusAmt) && bonusAmt > 0) {
+          totalSpiffAmount += bonusAmt; // Accumulate the total spiff amount
+          
+          customerData.push({
+            customerName: custName,
+            jobBusinessUnit: busUnit,
+            completionDate: dateVal,
+            commission: bonusAmt,
+            itemName: itemName,
+            soldByTechnician: soldBy // Add this for writing to sheet
+          });
+          
+          // Check for YARD in Cross Sale Group
+          if (crossSaleGroup && typeof crossSaleGroup === 'string' && crossSaleGroup.toUpperCase().includes("YARD")) {
+            var yardMatch = crossSaleGroup.toUpperCase().match(/YARD(\d+)/);
+            if (yardMatch && yardMatch[1]) {
+              var yardAmount = parseFloat(yardMatch[1]);
+              if (!isNaN(yardAmount)) {
+                totalYardSpiffAmount += yardAmount;
+              } else {
+                totalYardSpiffAmount += bonusAmt;
+              }
+            } else {
+              totalYardSpiffAmount += bonusAmt;
+            }
+          }
+        }
+      }
+    }
+    
+    // Use the calculated total from customer data for consistency
+    var calculatedBonus = totalSpiffAmount;
+    console.log(`Total calculated Spiff/Bonus from customer data for ${technicianName}: ${calculatedBonus}`);
 
- console.log(`tryParseDate: Could not parse '${input}' into a valid Date object.`);
- return null;
+    // --- 6. Update technician's summary sheet ---
+    console.log(`Updating top summary for ${technicianName} with Total Spiff: ${calculatedBonus}`);
+    updateTopSummarySpiffs(techSheet, calculatedBonus, customerData.length);
+
+    // --- 7. Clear and write Spiff customer data ---
+    // Find the Spiff section in technician's sheet
+    var spiffSectionRow = findSpiffCustomerDataSection(techSheet);
+    if (spiffSectionRow <= 0) {
+      console.error(`Could not find Spiff section in ${technicianName}'s sheet.`);
+      setActionStatus(ratesSheet, triggerRow, triggerCol, 'Error: No Spiff Section');
+      return;
+    }
+    
+    // Clear existing data and prepare the section
+    clearSpiffDataSection(techSheet);
+    
+    // Write data to the sheet
+    var spiffHeaderRow = spiffSectionRow + 1;
+    
+    // Manage rows needed for spiff data
+    var currentDataRows = 1; // Just the total row after clearing
+    var rowsNeeded = customerData.length + 1; // Data + total row
+    manageSheetRows(techSheet, spiffHeaderRow + 1, currentDataRows, rowsNeeded);
+    
+    // Write spiff data and add total row
+    var filteredTotal = writeSpiffDataToSheet(techSheet, spiffHeaderRow, customerData);
+    addSpiffTotalRow(techSheet, spiffHeaderRow, customerData.length, filteredTotal);
+
+    // --- 8. Create summary for popup ---
+    summaryInfo.push("SPIFF Bonus Update for: " + technicianName);
+    summaryInfo.push("Total Calculated SPIFF: $" + calculatedBonus.toFixed(2));
+    summaryInfo.push("Number of SPIFF Entries: " + customerData.length);
+    if (totalYardSpiffAmount > 0) {
+      summaryInfo.push("Yard Sign SPIFF: $" + totalYardSpiffAmount.toFixed(2));
+    }
+    
+    if (customerData.length > 0) {
+      summaryInfo.push("\nSPIFF DETAILS:");
+      customerData.forEach(function(entry, index) {
+        // Format the date properly using MM/DD/YYYY
+        var formattedDate = "";
+        try {
+          var dateObj = tryParseDate(entry.completionDate);
+          if (dateObj) {
+            formattedDate = Utilities.formatDate(dateObj, tz, 'MM/dd/yyyy');
+          } else {
+            formattedDate = entry.completionDate || "";
+          }
+        } catch (e) {
+          formattedDate = entry.completionDate || "";
+        }
+        
+        summaryInfo.push("\nEntry #" + (index + 1) + ":");
+        summaryInfo.push("• Customer: " + entry.customerName);
+        summaryInfo.push("• Unit: " + entry.jobBusinessUnit);
+        summaryInfo.push("• Date: " + formattedDate);
+        summaryInfo.push("• Item: " + entry.itemName);
+        summaryInfo.push("• Amount: $" + entry.commission.toFixed(2));
+      });
+    }
+    
+    ui.alert(summaryInfo.join("\n"));
+
+    // --- 9. Set final status ---
+    console.log(`Successfully processed Spiff/Bonus and updated summary for: ${technicianName}`);
+    setActionStatus(ratesSheet, triggerRow, triggerCol, 'Complete');
+
+  } catch (e) {
+    console.error(`Error during processSpiffAndBonus for ${technicianName}: ${e.message} Stack: ${e.stack}`);
+    ui.alert(`An error occurred processing Spiff/Bonus for ${technicianName}. Please check the logs.`);
+    setActionStatus(ratesSheet, triggerRow, triggerCol, 'Error');
+  }
 }
-
-
-/**
-* Returns a standard mapping object for columns in the "Hourly + Spiff Pay" sheet.
-* This helps centralize the column definitions used across different functions.
-*
-* @return {Object} An object with keys for common fields (nameColumn, actionColumn, etc.)
-*                  and values representing their 1-based column index and the data start row.
-*/
-function getRatesSheetMapping() {
- // These indices correspond to the columns in the 'Hourly + Spiff Pay' sheet
- return {
-   nameColumn: 1,       // Column A: Technician Name
-   positionColumn: 2,   // Column B: Position
-   rateColumn: 4,       // Column D: Base Rate (example, might not be used by Spiff directly)
-   actionColumn: 7,     // Column G: Action Dropdown
-   dataStartRow: 3      // Row number where the actual technician data begins (below headers)
- };
-} 
