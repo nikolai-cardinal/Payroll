@@ -1,0 +1,223 @@
+/**
+* Payroll System - PBP Calculation Logic
+* Processes PBP entries from the Spiff/Bonus sheet, determines roles,
+* calculates splits, and finds the technician's share.
+*/
+
+
+/**
+* Processes PBP entries from Spiff/Bonus data and calculates shares.
+* @param {string} technicianName - The name of the technician being processed.
+* @param {Array<Array>} spiffBonusData - 2D array of data from 'Spiff/Bonus' sheet.
+* @param {Array<Array>} ratesData - 2D array of data from 'Hourly + Spiff Pay' sheet.
+* @return {object} An object containing { entries: Array<object>, totalShare: number }.
+*/
+function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
+ var allPbpEntries = [];
+ var totalTechnicianShare = 0;
+ 
+ // Track unique entries to prevent duplicates
+ var processedEntries = {};
+
+ // Loop through Spiff/Bonus data (skip header row)
+ for (var i = 1; i < spiffBonusData.length; i++) {
+   var row = spiffBonusData[i];
+   var primaryTechnician = row[6]; // Column G
+   var assignedTechsString = row[7] ? row[7].toString() : ""; // Column H
+   var crossSaleGroup = row[9]; // Column J
+
+
+   // --- Initial Check: Is this a PBP row involving the current tech? ---
+   var pbpMatch = crossSaleGroup ? crossSaleGroup.toString().match(/pbp\s*(\d+(\.\d+)?)/i) : null;
+   var entryPbpAmount = (pbpMatch && pbpMatch[1]) ? parseFloat(pbpMatch[1]) : 0;
+
+
+   if (entryPbpAmount <= 0) {
+     continue; // Skip if not PBP or zero amount
+   }
+
+
+   var techIsInvolved = (primaryTechnician === technicianName) ||
+                        (assignedTechsString && assignedTechsString.toLowerCase().includes(technicianName.toLowerCase()));
+
+
+   if (!techIsInvolved) {
+     continue; // Skip if current tech not involved in this PBP entry
+   }
+
+   // Generate a unique identifier for this entry based on key fields
+   var customerName = row[1] || ""; // Column B
+   var completionDate = row[3] || ""; // Column D
+   var itemName = row[10] || ""; // Column K
+   
+   // Create a unique key combining customer, date, item, and amount
+   var entryKey = customerName.toString().trim() + "|" + 
+                 completionDate.toString().trim() + "|" + 
+                 itemName.toString().trim() + "|" + 
+                 entryPbpAmount;
+   
+   // Skip if we've already processed an identical entry
+   if (processedEntries[entryKey]) {
+     console.log("Skipping duplicate PBP entry for " + customerName + " on " + completionDate);
+     continue;
+   }
+   
+   // Mark this entry as processed
+   processedEntries[entryKey] = true;
+
+   // --- Determine Roles and Splits for this Job ---
+   var jobTechnicians = []; // Array of { name, role, defaultSplit }
+   var leadCount = 0;
+   var assistantCount = 0;
+   var totalPayingTechs = 0; // Leads + Assistants
+
+
+   // Parse names from Col H, fallback to Col G
+   var assignedNames = [];
+    if (assignedTechsString) {
+        assignedNames = assignedTechsString.split(",").map(function(name) {
+            return name.replace(/\(\d+%\)/, "").trim();
+        }).filter(function(name){ return name.length > 0; });
+    }
+   if (assignedNames.length === 0 && primaryTechnician) {
+        assignedNames.push(primaryTechnician.trim());
+    } else if (assignedNames.length === 0 && !primaryTechnician) {
+        console.log("Skipping row " + (i+1) + ": No technicians found in Col G or H.");
+        continue;
+    }
+    // Ensure primary tech is included and list is unique
+   if (primaryTechnician && !assignedNames.some(function(name) { return name.toLowerCase() === primaryTechnician.trim().toLowerCase(); })) {
+       assignedNames.push(primaryTechnician.trim());
+   }
+   var uniqueNames = Array.from(new Set(assignedNames.map(name => name.toLowerCase())))
+                        .map(lowerName => assignedNames.find(name => name.toLowerCase() === lowerName)); // Get original casing back
+
+
+
+
+   // Determine role and count paying techs
+   uniqueNames.forEach(function(name) {
+     var defaultSplit = getTechnicianDefaultSplit(name, ratesData); // Calls helper below
+     var role = "None";
+     if (defaultSplit === 65) {
+       role = "Lead";
+       leadCount++;
+       totalPayingTechs++;
+     } else if (defaultSplit === 35) {
+       role = "Assistant";
+       assistantCount++;
+       totalPayingTechs++;
+     }
+     jobTechnicians.push({ name: name, role: role, defaultSplit: defaultSplit });
+   });
+
+
+   // --- Calculate Split Percentage for the Current Technician ---
+   var currentTechShare = 0;
+   var currentTechSplitPercent = 0;
+   var currentTechRole = "None";
+
+
+   var currentTechJobInfo = jobTechnicians.find(function(tech) {
+     return tech.name.toLowerCase() === technicianName.toLowerCase();
+   });
+
+
+   if (currentTechJobInfo) {
+     currentTechRole = currentTechJobInfo.role;
+   } else {
+       console.log("Warning: Technician " + technicianName + " not found among assigned techs for row " + (i+1) + ". Setting share to 0.");
+       currentTechRole = "None"; // Should not happen if techIsInvolved is true, but safeguard
+   }
+
+
+   // Apply split rules ONLY if the tech has a paying role (Lead/Assistant)
+    if (currentTechRole !== "None" && totalPayingTechs > 0) {
+         if (totalPayingTechs === 1) {
+             currentTechSplitPercent = 100;
+         } else if (totalPayingTechs === 2) {
+             if (leadCount === 1 && assistantCount === 1) { currentTechSplitPercent = (currentTechRole === "Lead") ? 65 : 35; }
+             else if (leadCount === 2 && assistantCount === 0) { currentTechSplitPercent = 50; }
+             else if (leadCount === 0 && assistantCount === 2) { currentTechSplitPercent = 50; } // 2 Assistants -> 50/50
+             else { currentTechSplitPercent = 100 / totalPayingTechs; } // Fallback
+         } else if (totalPayingTechs === 3) {
+             if (leadCount === 1 && assistantCount === 2) { currentTechSplitPercent = (currentTechRole === "Lead") ? 46 : 27; }
+             else if (leadCount === 2 && assistantCount === 1) { currentTechSplitPercent = (currentTechRole === "Lead") ? 38 : 24; }
+             else { currentTechSplitPercent = 100 / totalPayingTechs; } // Fallback
+         } else if (totalPayingTechs === 4) {
+             if (leadCount === 2 && assistantCount === 2) { currentTechSplitPercent = (currentTechRole === "Lead") ? 30 : 20; }
+             else if (leadCount === 3 && assistantCount === 1) { currentTechSplitPercent = (currentTechRole === "Lead") ? 30 : 10; }
+             else { currentTechSplitPercent = 100 / totalPayingTechs; } // Fallback
+         } else { // More than 4 paying techs
+             currentTechSplitPercent = 100 / totalPayingTechs;
+         }
+         currentTechShare = entryPbpAmount * (currentTechSplitPercent / 100);
+    } else {
+        // Tech is involved (e.g., listed in Col H) but has Role 'None' or no paying techs found
+        currentTechShare = 0;
+        currentTechSplitPercent = 0;
+        if (currentTechRole === "None") {
+             console.log("Row " + (i+1) + ": Technician " + technicianName + " has role 'None' for this job. Share is 0.");
+        } else {
+             console.log("Row " + (i+1) + ": No paying technicians (Lead/Assistant) found for split. Share is 0.");
+        }
+    }
+
+
+   // --- Store Processed Entry ---
+   var splitDetailsForPopup = jobTechnicians.filter(t => t.role !== "None").map(t => t.name + " (" + t.role + ")");
+
+
+   allPbpEntries.push({
+     customerName: customerName,
+     jobBusinessUnit: row[2], // Column C
+     completionDate: completionDate,
+     itemName: itemName,
+     totalPbp: entryPbpAmount,
+     technicianShare: currentTechShare,
+     roleForJob: currentTechRole,
+     splitPercentage: currentTechSplitPercent,
+     splitDetails: splitDetailsForPopup
+   });
+
+
+   totalTechnicianShare += currentTechShare;
+ } // End loop through spiffBonusData
+
+
+ return {
+   entries: allPbpEntries,
+   totalShare: totalTechnicianShare
+ };
+}
+
+
+
+
+/**
+* Helper function to get the default split percentage for a technician
+* from the 'Hourly + Spiff Pay' sheet data. (Belongs with Calculation logic)
+* @param {string} techName - The name of the technician.
+* @param {Array<Array>} ratesData - The 2D array of data from 'Hourly + Spiff Pay'.
+* @return {number} The default split percentage (e.g., 65, 35, 0) or 0 if not found.
+*/
+function getTechnicianDefaultSplit(techName, ratesData) {
+if (!techName || !ratesData) return 0;
+var nameColIndex = 0; // Column A
+var splitColIndex = 7; // Column H
+
+
+for (var i = 1; i < ratesData.length; i++) { // Skip header
+  if (ratesData[i][nameColIndex] && ratesData[i][nameColIndex].toString().trim().toLowerCase() === techName.trim().toLowerCase()) {
+    var splitValue = ratesData[i][splitColIndex];
+    if (typeof splitValue === "string" && splitValue.includes("%")) {
+      return parseFloat(splitValue.replace("%", "")) || 0;
+    } else if (typeof splitValue === "number") {
+      return splitValue < 1 ? splitValue * 100 : splitValue; // Handle decimal or whole number %
+    }
+    return 0;
+  }
+}
+return 0; // Not found
+}
+

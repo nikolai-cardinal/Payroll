@@ -1,0 +1,112 @@
+/**
+* Payroll System - PBP Main Coordinator
+* Contains the main entry point for PBP updates, coordinates calls
+* to calculation and sheet operations, and handles status reporting.
+*/
+
+/**
+* Updates PBP for a specific technician when Action is set to PBP.
+* This is the main entry point called from Main.gs or triggers.
+* @param {string} technicianName - The name of the technician to update.
+* @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered.
+* @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered.
+*/
+function updatePBPForTechnician(technicianName, actionRow, actionColumn) {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var techSheet;
+  var ratesSheet;
+  var spiffBonusSheet;
+  var summaryInfo = []; // Array to collect detailed information for the popup
+
+  try {
+    // --- 1. Setup and Sheet Validation ---
+    ratesSheet = ss.getSheetByName("Hourly + Spiff Pay");
+    spiffBonusSheet = ss.getSheetByName("Spiff/Bonus");
+    techSheet = ss.getSheetByName(technicianName);
+
+    if (!ratesSheet || !spiffBonusSheet || !techSheet) {
+      var missingSheet = !ratesSheet ? "Hourly + Spiff Pay" : !spiffBonusSheet ? "Spiff/Bonus" : "Technician: " + technicianName;
+      ui.alert("Error: Required sheet not found: " + missingSheet);
+      // Attempt to set error status on the sheet where the action occurred (likely ratesSheet)
+      var sheetForStatus = ratesSheet || ss.getActiveSheet(); // Fallback to active sheet
+      setActionStatus(sheetForStatus, actionRow, actionColumn, "⚠️ Error");
+      return;
+    }
+
+    // Get Data for lookups - Fetch ONCE for efficiency
+    var spiffBonusData = spiffBonusSheet.getDataRange().getValues();
+    var ratesData = ratesSheet.getDataRange().getValues(); // Used for default splits
+
+    // --- 2. Perform Calculations (Delegate to PBPCalculation.gs) ---
+    console.log("Starting PBP calculation for: " + technicianName);
+    var calculationResult = calculatePbpEntries(technicianName, spiffBonusData, ratesData); // Calls function in PBPCalculation.gs
+
+    var allPbpEntries = calculationResult.entries;
+    var totalTechnicianShare = calculationResult.totalShare;
+    console.log("Calculation complete. Entries found: " + allPbpEntries.length + ", Total Share: $" + totalTechnicianShare.toFixed(2));
+
+    // --- 3. Handle No Entries Found ---
+    if (allPbpEntries.length === 0) {
+      var techExists = ratesData.some(function(rateRow) {
+           return rateRow[0] && rateRow[0].toString().trim().toLowerCase() === technicianName.trim().toLowerCase();
+      });
+      if (techExists) {
+         ui.alert("No PBP entries found for " + technicianName + " in the Spiff/Bonus tab for this period.");
+         // Update summary to 0 and clear section (Delegate to PBPSheetOperations.gs)
+         updateTopSummaryInstallPay(techSheet, 0, 0); // Calls function in PBPSheetOperations.gs
+         clearInstallDataSection(techSheet); // Calls function in PBPSheetOperations.gs
+         setActionStatus(ratesSheet, actionRow, actionColumn, "Complete"); // Mark as complete even if 0 entries
+      } else {
+         ui.alert("Technician " + technicianName + " not found in Hourly + Spiff Pay tab.");
+         setActionStatus(ratesSheet, actionRow, actionColumn, "⚠️ Error");
+      }
+      return;
+    }
+
+    // --- 4. Update Technician Sheet (Delegate to PBPSheetOperations.gs) ---
+    console.log("Starting sheet update for: " + technicianName);
+    writePbpDataToSheet(techSheet, allPbpEntries, totalTechnicianShare); // Calls function in PBPSheetOperations.gs
+    console.log("Sheet update finished for: " + technicianName);
+
+    // --- 5. Prepare and Show Summary Popup ---
+    summaryInfo.push("PBP Update for: " + technicianName);
+    summaryInfo.push("Total Calculated PBP Share: $" + totalTechnicianShare.toFixed(2));
+    summaryInfo.push("Number of PBP Entries Processed: " + allPbpEntries.length);
+    summaryInfo.push("\nPBP DETAILS:");
+    // (Build detailed summary string - same as before)
+    for (var k = 0; k < allPbpEntries.length; k++) {
+     var entry = allPbpEntries[k];
+     summaryInfo.push("\nEntry #" + (k+1) + ":");
+     summaryInfo.push("• Customer: " + entry.customerName);
+     summaryInfo.push("• Date: " + formatDate(entry.completionDate)); // Calls function in PBPUtilities.gs
+     summaryInfo.push("• Item: " + entry.itemName);
+     summaryInfo.push("• Job Total PBP: $" + entry.totalPbp.toFixed(2));
+     summaryInfo.push("• Tech Role (Job): " + entry.roleForJob + " (" + entry.splitPercentage.toFixed(1) + "%)");
+     summaryInfo.push("• Calculated Tech Share: $" + entry.technicianShare.toFixed(2));
+     if (entry.splitDetails && entry.splitDetails.length > 1) {
+       summaryInfo.push("• Split Team: " + entry.splitDetails.join(", "));
+     } else if (entry.splitDetails && entry.splitDetails.length === 1) {
+        summaryInfo.push("• Split Team: " + entry.splitDetails[0] + " (100%)");
+     } else {
+        summaryInfo.push("• Split Team: N/A (No split applicable)");
+     }
+    }
+    ui.alert(summaryInfo.join("\n"));
+
+    // --- 6. Final Status Update ---
+    setActionStatus(ratesSheet, actionRow, actionColumn, "Complete");
+
+  } catch (error) {
+    console.error("Error updating PBP for " + technicianName + ": " + error.message + " Stack: " + error.stack);
+    var errorMsg = "Error updating PBP: " + error.toString();
+    ui.alert(errorMsg);
+    // Attempt to set error status
+    try {
+      var sheetForError = ratesSheet || ss.getActiveSheet(); // Fallback
+      setActionStatus(sheetForError, actionRow, actionColumn, "⚠️ Error");
+    } catch (e) {
+      console.error("Failed to set error status: " + e.message);
+    }
+  }
+}

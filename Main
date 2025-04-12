@@ -1,0 +1,331 @@
+/**
+* Cardinal Payroll System - Main Script
+* This script contains the core functions for the payroll system.
+*/
+
+
+
+
+// Processing control variables
+var isProcessing = false;
+var processingTimeoutId = null; // Changed variable name from processingTimeout
+
+
+
+
+/**
+* Creates the custom menu when the spreadsheet opens
+*/
+function onOpen() {
+var ui = SpreadsheetApp.getUi();
+ui.createMenu('Technician Tools')
+  .addItem('Update All Rates', 'updateAllTechnicianRates')
+  .addItem('Create New Sheet', 'createNewTechnicianSheet')
+  .addItem('All Spiff/Bonus', 'processAllSpiffBonusWithCustomers')
+  .addToUi();
+}
+
+
+
+
+/**
+* Handles edit events in the spreadsheet
+* @param {Object} e - The edit event object
+*/
+function onEdit(e) {
+// If already processing, exit immediately
+if (isProcessing) {
+  console.log("Already processing, skipping this execution");
+  return;
+}
+ try {
+  // Set processing flag
+  isProcessing = true;
+   // Clear any existing timeout - modified to use Utilities.sleep instead of setTimeout
+  if (processingTimeoutId) {
+    // In Google Apps Script, we can't clear a timeout like in browser JS
+    // So we'll just ignore the previous timeout ID
+    processingTimeoutId = null;
+  }
+   var range = e.range;
+  var sheet = range.getSheet();
+  var sheetName = sheet.getName();
+  var column = range.getColumn();
+  var row = range.getRow();
+  var value = range.getValue();
+   // Check if this is the Hourly + Spiff Pay sheet and the Action column
+  if (sheetName === 'Hourly + Spiff Pay' && column === 7) { // Column G (Action)
+    // Only process rows after the header (row > 2)
+    if (row > 2) {
+      // Get the technician name from column A
+      var techName = sheet.getRange(row, 1).getValue();
+      // Check which action was selected
+      if (value === "Timesheet") {
+        // Update timesheet for this specific technician
+        updateHoursForTechnician(techName, row, column);
+      } else if (value === "Spiff/Bonus") {
+        // Update spiff/bonus with customer details
+        updateSpiffBonusWithCustomersList(techName, row, column);
+      } else if (value === "PBP") { // Assuming you might add a PBP action here
+         // Call the PBP function (now located in PBP_Logic.gs)
+         updatePBPForTechnician(techName, row, column);
+      }
+    }
+  }
+} catch (error) {
+  console.error("Error in onEdit: " + error.message);
+} finally {
+  // In Google Apps Script, we can't use setTimeout
+  // Instead, we'll just set the flag to false after this execution
+  isProcessing = false;
+  // Note: In Google Apps Script environment, there's no direct equivalent to setTimeout
+  // We are removing this mechanism completely and simply letting the flag be reset immediately
+}
+}
+
+
+
+
+/**
+* Gets the field mappings for the Hourly + Spiff Pay sheet
+* @return {Object} An object containing column indexes for important fields
+*/
+function getRatesSheetMapping() {
+return {
+  nameColumn: 1,       // Column A - Technician name
+  positionColumn: 2,   // Column B - Position
+  rateColumn: 4,       // Column D - Base Rate
+   actionColumn: 7,     // Column G - Action column
+  dataStartRow: 3      // Data starts at row 3
+};
+}
+
+
+
+
+/**
+* Gets the field mappings for a technician sheet
+* @param {Sheet} sheet - The technician sheet to map
+* @return {Object} An object containing row and column indexes for important fields
+*/
+function getTechnicianSheetMapping(sheet) {
+if (!sheet) {
+  return {
+    hourlyRateRow: 5,
+    regHoursRow: 6,
+    otHoursRow: 7,
+    ptoHoursRow: 8,
+    totalHourlyPayRow: 9,
+    totalSalesPayRow: 15,
+    totalPayRow: 17,
+    positionRow: 2,
+    payPeriodRow: 3,
+    valueColumn: 2,
+     calculatedValueColumn: 3,
+    ptoRateColumn: 14
+  };
+}
+ // Find rows by label text
+var mapping = {
+  hourlyRateRow: findRowWithText(sheet, "Hourly Rate", 0),
+  regHoursRow: findRowWithText(sheet, "Regular Hours", 0),
+  otHoursRow: findRowWithText(sheet, "Overtime Hours", 0),
+  ptoHoursRow: findRowWithText(sheet, "PTO", 0),
+  totalHourlyPayRow: findRowWithText(sheet, "Total Hourly Pay", 0),
+  totalSalesPayRow: findRowWithText(sheet, "Total Sales Pay", 0),
+  totalPayRow: findRowWithText(sheet, "Total Pay", 0),
+  positionRow: findRowWithText(sheet, "Position", 0),
+  payPeriodRow: 3
+};
+ // If any key fields are not found, fall back to the known structure
+if (mapping.hourlyRateRow === -1) mapping.hourlyRateRow = 5;
+if (mapping.regHoursRow === -1) mapping.regHoursRow = 6;
+if (mapping.otHoursRow === -1) mapping.otHoursRow = 7;
+if (mapping.ptoHoursRow === -1) mapping.ptoHoursRow = 8;
+if (mapping.totalHourlyPayRow === -1) mapping.totalHourlyPayRow = 9;
+if (mapping.totalSalesPayRow === -1) mapping.totalSalesPayRow = 15;
+if (mapping.totalPayRow === -1) mapping.totalPayRow = 17;
+if (mapping.positionRow === -1) mapping.positionRow = 2;
+ // Set the standard columns
+mapping.valueColumn = 2; // B column
+mapping.calculatedValueColumn = 3;  // C column
+mapping.ptoRateColumn = 14;  // N column
+ return mapping;
+}
+
+
+
+
+/**
+* Helper function to find a row that contains specific text in a specific column
+* @param {Sheet} sheet - The sheet to search in
+* @param {string} text - The text to search for
+* @param {number} columnIndex - The column index to search in (0-based)
+* @param {number} maxRows - Maximum number of rows to search
+* @return {number} The row number (1-based) or -1 if not found
+*/
+function findRowWithText(sheet, text, columnIndex, maxRows) {
+if (!sheet) return -1;
+var maxRows = maxRows || 30; // Default to searching first 30 rows
+var data = sheet.getRange(1, columnIndex + 1, maxRows, 1).getValues();
+for (var i = 0; i < data.length; i++) {
+  if (data[i][0] === text) {
+    return i + 1; // Convert to 1-based index
+  }
+}
+ return -1; // Not found
+}
+
+
+
+
+/**
+* Gets the current pay period from Hourly + Spiff Pay sheet
+* @return {string} The current pay period string
+*/
+function getCurrentPayPeriod() {
+try {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+   if (!ratesSheet) {
+    console.error("Hourly + Spiff Pay sheet not found!");
+    return "Current Pay Period";
+  }
+   // Get pay period from cell F1
+  var payPeriod = ratesSheet.getRange(1, 6).getValue();
+   // If it's a date object, format it appropriately
+  if (payPeriod instanceof Date) {
+    payPeriod = Utilities.formatDate(payPeriod, Session.getScriptTimeZone(), "M/dd - M/dd Matisse");
+  }
+   return payPeriod.toString() || "Current Pay Period";
+} catch (error) {
+  console.error("Error in getCurrentPayPeriod: " + error.message);
+  return "Current Pay Period";
+}
+}
+
+
+
+
+/**
+* Helper function to find a technician's row in the rates sheet
+* @param {Sheet} sheet - The rates sheet to search in
+* @param {string} techName - The technician name to find
+* @param {number} startRow - The row to start searching from
+* @return {number} The row number (1-based) or -1 if not found
+*/
+function findTechnicianRow(sheet, techName, startRow) {
+if (!sheet) return -1;
+ var nameColumn = 1; // Assuming technician name is in column A
+var data = sheet.getRange(startRow, nameColumn, sheet.getLastRow() - startRow + 1, 1).getValues();
+for (var i = 0; i < data.length; i++) {
+  if (data[i][0] === techName) {
+    return startRow + i; // Convert to actual row number
+  }
+}
+ return -1; // Not found
+}
+
+
+// --- Placeholder functions potentially called by onOpen menu items ---
+// You would need to define these or ensure they exist elsewhere in your project.
+function updateAllTechnicianRates() { SpreadsheetApp.getUi().alert('updateAllTechnicianRates function needs to be defined.'); }
+function createNewTechnicianSheet() { SpreadsheetApp.getUi().alert('createNewTechnicianSheet function needs to be defined.'); }
+// processAllSpiffBonusWithCustomers is now defined in Spiff/Bonus/SpiffBonusMain.gs
+
+// --- Placeholder functions potentially called by onEdit actions ---
+// You would need to define these or ensure they exist elsewhere in your project.
+function updateHoursForTechnician(techName, row, column) { SpreadsheetApp.getUi().alert('updateHoursForTechnician function needs to be defined for: ' + techName); setActionStatus(SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Hourly + Spiff Pay'), row, column, 'Not Implemented'); }
+
+// updateSpiffBonusWithCustomersList is now defined in Spiff/Bonus/SpiffBonusMain.gs
+
+/**
+ * Sets the status in the Action column of the rates sheet.
+ * @param {Sheet} ratesSheet The 'Hourly + Spiff Pay' sheet object.
+ * @param {number} row The 1-based row index.
+ * @param {number} col The 1-based column index (should be the Action column).
+ * @param {string} status The status to set (e.g., 'Complete', 'Error', 'Processing...').
+ */
+function setActionStatus(ratesSheet, row, col, status) {
+  if (!ratesSheet || !row || !col || !status) {
+    console.error("setActionStatus: Invalid parameters provided.");
+    return;
+  }
+  try {
+    ratesSheet.getRange(row, col).setValue(status);
+  } catch (e) {
+    console.error(`Failed to set status to '${status}' at row ${row}, col ${col}: ${e.message}`);
+    // Consider adding a UI alert here if this failure is critical
+    // SpreadsheetApp.getUi().alert(`Failed to update status for row ${row}. Please check logs.`);
+  }
+}
+
+
+// --- Helper Functions for Spiff/Bonus Update (These were moved to Spiff/Bonus folder) ---
+
+/**
+ * Finds the row number containing "Spiff [Customer Data]". - MOVED to SpiffBonusSheetOperations.gs
+ * Searches column A for the text.
+ * @param {Sheet} sheet The sheet object to search within.
+ * @return {number} The 1-based row index of the section header, or -1 if not found.
+ */
+/* MOVED
+function findSpiffCustomerDataSection(sheet) {
+  // ... implementation moved ...
+}
+*/
+
+/**
+* Finds the row number of the *next* section header after the Spiff section. - MOVED TO APPROPRIATE FILE IF NEEDED, seems unused now.
+* Assumes section headers are non-empty cells in column A.
+* @param {Sheet} sheet The sheet object to search within.
+* @param {number} spiffStartRow The 1-based row index of the "Spiff [Customer Data]" header.
+* @return {number} The 1-based row index of the next section header, or -1 if not found soon after.
+*/
+/* MOVED or DELETED
+function findNextSectionAfterSpiff(sheet, spiffStartRow) {
+    // ... implementation moved or deleted ...
+}
+*/
+
+/**
+ * Updates the summary section at the top of the technician's sheet for Spiff and Yard Sign Pay. - MOVED to SpiffBonusSheetOperations.gs
+ * IMPORTANT: This assumes the "Total Pay" cell already has a formula.
+ * @param {Sheet} techSheet The technician's sheet object.
+ * @param {number} totalSpiff The total calculated spiff amount.
+ * @param {number} totalYard The total calculated yard sign amount.
+ */
+/* MOVED
+function updateTopSummarySpiffYard(techSheet, totalSpiff, totalYard) {
+  // ... implementation moved ...
+}
+*/
+
+
+// Note: getRatesSheetMapping was moved to SpiffBonusUtilities.gs, but a copy might exist here still.
+// Let's remove the duplicate from Main.gs if it exists.
+/**
+* Gets the field mappings for the Hourly + Spiff Pay sheet - REMOVING DUPLICATE FROM Main.gs
+* @return {Object} An object containing column indexes for important fields
+*/
+/* REMOVING
+function getRatesSheetMapping() {
+return {
+  nameColumn: 1,       // Column A - Technician name
+  positionColumn: 2,   // Column B - Position
+  rateColumn: 4,       // Column D - Base Rate
+   actionColumn: 7,     // Column G - Action column
+  dataStartRow: 3      // Data starts at row 3
+};
+}
+*/
+
+/**
+* Gets the field mappings for a technician sheet - Keep this one as it seems generic/used by other parts?
+* @param {Sheet} sheet - The technician sheet to map
+* @return {Object} An object containing row and column indexes for important fields
+*/
+// ... existing code ...
+
+
+

@@ -1,0 +1,309 @@
+/**
+* Cardinal Payroll System - Spiff/Bonus Main Logic
+* Contains the primary functions triggered for Spiff/Bonus updates.
+*/
+
+/**
+* Updates spiff/bonus for a specific technician with proper spacing management.
+* This is the main function called when 'Spiff/Bonus' is selected in the Action column.
+*
+* @param {string} technicianName - The name of the technician to update
+* @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
+* @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
+*/
+function updateSpiffBonusWithCustomersList(technicianName, actionRow, actionColumn) {
+ var ui = SpreadsheetApp.getUi();
+  try {
+   // Core sheets
+   var ss = SpreadsheetApp.getActiveSpreadsheet();
+   var spiffBonusTab = ss.getSheetByName('Spiff/Bonus');
+   var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+   if (!spiffBonusTab) {
+     ui.alert('Spiff/Bonus tab not found!');
+     resetActionDropdown(ratesSheet, actionRow, actionColumn);
+     return;
+   }
+
+   // 1) Identify needed columns from Spiff/Bonus
+   var bonusHeaderMap = getSpiffBonusHeaderMap(spiffBonusTab);
+   bonusHeaderMap.actualBonusAmount = 9; // Hardcode: Column I is index 9 - This might need review or removal depending on current sheet structure
+
+   // Check if required headers exist (adjust required headers as needed)
+   var requiredHeaders = ['customerName','jobBusinessUnit','completionDate','soldBy','bonusAmount','itemName'];
+   var missingHeaders = [];
+   for (var i = 0; i < requiredHeaders.length; i++) {
+     var headerKey = requiredHeaders[i];
+     // Check if the key exists and is not null/undefined
+     if (!(headerKey in bonusHeaderMap) || bonusHeaderMap[headerKey] == null) {
+       missingHeaders.push(headerKey);
+     }
+   }
+   if (missingHeaders.length > 0) {
+     ui.alert('Missing expected columns in Spiff/Bonus sheet: ' + missingHeaders.join(', '));
+     resetActionDropdown(ratesSheet, actionRow, actionColumn);
+     return;
+   }
+
+   // 2) Collect spiff/bonus data for this technician
+   var dataStartRow = 2; // Assume headers are in row 1
+   if (spiffBonusTab.getLastRow() < dataStartRow) {
+     ui.alert('No data found in the Spiff/Bonus sheet.');
+     resetActionDropdown(ratesSheet, actionRow, actionColumn);
+     return;
+   }
+   var rowCount = spiffBonusTab.getLastRow() - dataStartRow + 1;
+   var spiffDataRange = spiffBonusTab.getRange(dataStartRow, 1, rowCount, spiffBonusTab.getLastColumn());
+   var spiffDataVals = spiffDataRange.getValues();
+   if (!spiffDataVals || !spiffDataVals.length) {
+     ui.alert('No data rows found in Spiff/Bonus sheet for processing.');
+     resetActionDropdown(ratesSheet, actionRow, actionColumn);
+     return;
+   }
+
+   var totalSpiffAmount = 0;
+   var customerData = [];
+   var totalYardSpiffAmount = 0; // Initialize yard spiff total
+   
+   // Log all Cross Sale Group values found for debugging
+   console.log(`Looking for Cross Sale Group values for technician ${technicianName} in column ${bonusHeaderMap.crossSaleGroup}`);
+   
+   // Parse and filter spiff rows
+   for (var r = 0; r < spiffDataVals.length; r++) {
+     var row = spiffDataVals[r];
+     if (!row || row.every(function(cell) { return !cell; })) continue; // skip empty rows
+
+     var soldBy = row[bonusHeaderMap.soldBy - 1] || "";
+     // Skip if 'Sold By' doesn't match the technician
+     if (soldBy !== technicianName) continue;
+     
+     var crossSaleGroup = bonusHeaderMap.crossSaleGroup ? (row[bonusHeaderMap.crossSaleGroup - 1] || "") : "";
+     var custName = row[bonusHeaderMap.customerName - 1] || "";
+     
+     console.log(`Found row for ${technicianName}, customer "${custName}" with Cross Sale Group: "${crossSaleGroup}"`);
+
+     // Extract data using the map, providing defaults
+     var bonusAmountRaw = row[bonusHeaderMap.bonusAmount - 1];
+     var actualBonusVal = bonusHeaderMap.actualBonusAmount ? row[bonusHeaderMap.actualBonusAmount - 1] : null; // Handle if actualBonusAmount wasn't found
+     var busUnit = row[bonusHeaderMap.jobBusinessUnit - 1] || "";
+     var dateVal = row[bonusHeaderMap.completionDate - 1] || "";
+     var itemName = row[bonusHeaderMap.itemName - 1] || "";
+
+     // Convert bonus to number (logic adapted from original)
+     var bonusAmt = 0;
+     if (typeof bonusAmountRaw === 'string' && bonusAmountRaw.includes('$')) {
+       bonusAmt = parseFloat(bonusAmountRaw.replace(/[^0-9.-]+/g,''));
+     } else if (bonusAmountRaw === true || bonusAmountRaw === 'true') {
+       // Use actual bonus value if primary is 'true' or boolean true
+       if (actualBonusVal !== null) {
+         if (typeof actualBonusVal === 'string' && actualBonusVal.includes('$')) {
+           bonusAmt = parseFloat(actualBonusVal.replace(/[^0-9.-]+/g,''));
+         } else {
+           bonusAmt = parseFloat(actualBonusVal || 0);
+         }
+       } else {
+         console.log("Warning: Bonus amount was 'true' but no 'Actual Bonus Amount' column found or mapped for row " + (r + dataStartRow));
+         bonusAmt = 0; // Set to 0 if 'true' but no backup column value
+       }
+     } else {
+       bonusAmt = parseFloat(bonusAmountRaw || 0);
+     }
+
+     // If a valid bonus amount was calculated, add to totals and data
+     if (!isNaN(bonusAmt) && bonusAmt > 0) {
+       totalSpiffAmount += bonusAmt;
+       customerData.push({
+         customerName: custName,
+         jobBusinessUnit: busUnit,
+         completionDate: dateVal,
+         commission: bonusAmt,
+         itemName: itemName
+       });
+
+       // Check if it's a Yard Spiff
+       if (crossSaleGroup && typeof crossSaleGroup === 'string' && crossSaleGroup.toUpperCase().includes("YARD")) {
+         console.log(`Found YARD in Cross Sale Group: "${crossSaleGroup}" for customer: ${custName}`);
+         
+         // Extract the numeric value from the YARD string (e.g., "YARD25" should give 25)
+         var yardMatch = crossSaleGroup.toUpperCase().match(/YARD(\d+)/);
+         console.log(`Regex match result for "${crossSaleGroup}": ${yardMatch ? JSON.stringify(yardMatch[0] + " -> " + yardMatch[1]) : "no match"}`);
+         
+         if (yardMatch && yardMatch[1]) {
+           // If we found a number after "YARD", use that as the yard amount
+           var yardAmount = parseFloat(yardMatch[1]);
+           console.log(`Extracted yard amount: ${yardAmount} from "${crossSaleGroup}"`);
+           
+           if (!isNaN(yardAmount)) {
+             totalYardSpiffAmount += yardAmount;
+             console.log(`Added ${yardAmount} to yard total, new total: ${totalYardSpiffAmount}`);
+           } else {
+             // Fallback to the full bonus amount if we couldn't parse a number
+             totalYardSpiffAmount += bonusAmt;
+             console.log(`Failed to parse yard amount, using full bonus amount: ${bonusAmt}`);
+           }
+         } else {
+           // If there's no number after "YARD", use the full bonus amount
+           totalYardSpiffAmount += bonusAmt;
+           console.log(`No number found after YARD, using full bonus amount: ${bonusAmt}`);
+         }
+       }
+     }
+   }
+
+   // 3) Get Technician sheet
+   var techSheet = ss.getSheetByName(technicianName);
+   if (!techSheet) {
+     ui.alert('No sheet found for technician: ' + technicianName);
+     resetActionDropdown(ratesSheet, actionRow, actionColumn);
+     return;
+   }
+
+   // 4) Update top summary spiffs in the tech sheet
+   updateTopSummarySpiffs(techSheet, totalSpiffAmount, totalYardSpiffAmount);
+
+   // 5) Find relevant sections in the tech sheet
+   var spiffSectionRow = findSpiffCustomerDataSection(techSheet);
+   if (spiffSectionRow <= 0) {
+     ui.alert("Error: Could not find Spiff data section header in " + technicianName + "'s sheet.");
+     resetActionDropdown(ratesSheet, actionRow, actionColumn);
+     return;
+   }
+   var spiffHeaderRow = spiffSectionRow + 1; // Row containing column titles like "Customer Name", "Amount" etc.
+   var spiffDataStartRow = spiffHeaderRow + 1; // First row where actual spiff data goes
+
+   // Find the start of the next major section (e.g., "Install") to determine available space
+   var nextSectionRow = findNextSectionStart(techSheet, spiffDataStartRow); // Helper to find the next non-empty row in Col A
+   if (nextSectionRow <= 0) {
+     ui.alert("Error: Could not determine the end of the Spiff section in " + technicianName + "'s sheet. Could not find next section header.");
+     resetActionDropdown(ratesSheet, actionRow, actionColumn);
+     return;
+   }
+   console.log(`Spiff Header at ${spiffHeaderRow}, Data starts ${spiffDataStartRow}, Next Section at ${nextSectionRow}`);
+
+
+   // 6) Clear existing Spiff data and formatting
+   clearSpiffDataSection(techSheet);
+   // After clearing, the nextSectionRow might have changed due to row deletion within clearSpiffDataSection.
+   // Recalculate the available rows based on the single 'Total' row left by the clear function.
+   // The 'Total' row is at spiffDataStartRow after clearing.
+   var currentDataRows = 1; // Starts with just the 'Total' row.
+
+   // 7) Manage rows in the spiff data section (adjust based on the cleared state)
+   // Rows needed: customer entries + 1 for the total row
+   var rowsNeeded = customerData.length + 1;
+   console.log(`After clear: Current rows available (just Total row): ${currentDataRows}, Rows needed (data + Total): ${rowsNeeded}`);
+
+   manageSheetRows(techSheet, spiffDataStartRow, currentDataRows, rowsNeeded);
+
+   // 8) Write Spiff Data to Tech Sheet (Starts at spiffDataStartRow)
+   writeSpiffDataToSheet(techSheet, spiffHeaderRow, customerData);
+
+   // 9) Add/Update Total Row (This will overwrite the placeholder total row if data exists)
+   addSpiffTotalRow(techSheet, spiffHeaderRow, customerData.length);
+
+   // 10) Mark as done in 'Hourly + Spiff Pay' sheet
+   if (ratesSheet && actionRow && actionColumn) {
+      ratesSheet.getRange(actionRow, actionColumn).setValue("Complete");
+   }
+
+   ui.alert(
+     'SPIFF bonus updated for ' + technicianName + '.\n' +
+     'Total SPIFF: $' + totalSpiffAmount.toFixed(2) + ' (' + customerData.length + ' entries)\n' +
+     'Yard Sign Spiff: $' + totalYardSpiffAmount.toFixed(2)
+   );
+
+ } catch(err) {
+   console.error("Error in updateSpiffBonusWithCustomersList for " + technicianName + ": " + err.message + "\nStack: " + err.stack);
+   ui.alert('Error processing Spiff/Bonus for ' + technicianName + ': ' + err.message);
+   // Attempt to reset dropdown on error
+   if (ratesSheet && actionRow && actionColumn) {
+     try {
+       resetActionDropdown(ratesSheet, actionRow, actionColumn);
+     } catch (resetErr) {
+       console.error("Failed to reset action dropdown: " + resetErr.message);
+     }
+   }
+ }
+}
+
+
+/**
+* Processes all technicians in "Hourly + Spiff Pay" that have "Ready" status for Spiff/Bonus.
+* This is called from the custom menu.
+*/
+function processAllSpiffBonusWithCustomers() {
+ var ui = SpreadsheetApp.getUi();
+ var ss = SpreadsheetApp.getActiveSpreadsheet();
+ var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+ if (!ratesSheet) {
+   ui.alert('Hourly + Spiff Pay sheet not found!');
+   return;
+ }
+
+ var ratesMapping = getRatesSheetMapping(); // Use utility function
+ var ratesData = ratesSheet.getDataRange().getValues();
+ var techsToProcess = [];
+
+ // Gather technicians that are "Ready"
+ for (var i = ratesMapping.dataStartRow - 1; i < ratesData.length; i++) { // Adjust index for 0-based array
+   var row = ratesData[i];
+   var techName = row[ratesMapping.nameColumn - 1];
+   var status = row[ratesMapping.actionColumn - 1] || "";
+
+   // Ensure techName is valid and status is exactly "Ready"
+   if (techName && typeof techName === 'string' && techName.trim() !== "" && status === "Ready") {
+     techsToProcess.push({
+       name: techName,
+       row: i + 1, // 1-based row index
+       col: ratesMapping.actionColumn
+     });
+   }
+ }
+
+ if (techsToProcess.length === 0) {
+   ui.alert('No technicians with "Ready" status found for Spiff/Bonus processing.');
+   return;
+ }
+
+ var response = ui.prompt(
+   'Process All SPIFF/Bonus',
+   'Found ' + techsToProcess.length + ' technicians with "Ready" status. Enter "PROCESS" to continue:',
+   ui.ButtonSet.OK_CANCEL
+ );
+
+ if (response.getSelectedButton() !== ui.Button.OK || response.getResponseText().toUpperCase() !== 'PROCESS') {
+    ui.alert('Processing cancelled.');
+    return;
+ }
+
+ // Process each technician
+ var errors = [];
+ for (var t = 0; t < techsToProcess.length; t++) {
+   var tech = techsToProcess[t];
+   try {
+     console.log("Processing Spiff/Bonus for: " + tech.name + " (Row: " + tech.row + ")");
+     ratesSheet.getRange(tech.row, tech.col).setValue("Processing...");
+     SpreadsheetApp.flush(); // Ensure UI updates
+     updateSpiffBonusWithCustomersList(tech.name, tech.row, tech.col);
+     // Status will be set to "Complete" by updateSpiffBonusWithCustomersList on success
+   } catch (error) {
+     console.error("Failed processing Spiff/Bonus for " + tech.name + ": " + error.message);
+     errors.push(tech.name + ": " + error.message);
+     // Attempt to set status back to Ready or Error on failure
+     try {
+        ratesSheet.getRange(tech.row, tech.col).setValue("Error");
+     } catch (statusError) {
+        console.error("Failed to set status to Error for " + tech.name + ": " + statusError.message);
+     }
+   }
+ }
+
+ // Final summary message
+ if (errors.length > 0) {
+   var errorSummary = "Processing finished with errors for:\n - " +
+                      errors.join("\n - ") +
+                      "\n\nCheck logs for details.";
+   ui.alert(errorSummary);
+ } else {
+   ui.alert("Successfully processed Spiff/Bonus for " + techsToProcess.length + " technicians.");
+ }
+} 

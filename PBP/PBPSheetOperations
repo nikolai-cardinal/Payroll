@@ -1,0 +1,278 @@
+/**
+* Payroll System - PBP Sheet Operations
+* Handles interactions with technician sheets: finding sections,
+* clearing data, writing PBP entries, managing rows, and updating summaries.
+*/
+
+
+/**
+* Writes the calculated PBP data to the technician's sheet.
+* @param {Sheet} techSheet - The specific technician's sheet object.
+* @param {Array<object>} allPbpEntries - Array of calculated PBP entry objects.
+* @param {number} totalTechnicianShare - The total calculated PBP share for the tech.
+*/
+function writePbpDataToSheet(techSheet, allPbpEntries, totalTechnicianShare) {
+ if (!techSheet || !allPbpEntries) {
+   console.error("writePbpDataToSheet: Invalid arguments.");
+   return;
+ }
+
+
+ // --- 1. Update Top Summary ---
+ updateTopSummaryInstallPay(techSheet, totalTechnicianShare, allPbpEntries.length); // Calls helper below
+
+
+ // --- 2. Find Install Section & Define Area ---
+ var installSectionRow = findInstallCustomerDataSection(techSheet); // Calls helper below
+ if (installSectionRow <= 0) {
+   throw new Error("Could not find Install section in " + techSheet.getName() + "'s sheet. Check for 'Install [Customer Data]' header.");
+ }
+ var installHeaderRow = installSectionRow + 1;
+ var installDataStartRow = installHeaderRow + 1;
+ var nextSectionRow = findNextSectionAfterInstall(techSheet, installSectionRow); // Calls helper below
+ if (nextSectionRow <= 0) {
+   nextSectionRow = installDataStartRow + Math.max(10, allPbpEntries.length + 3); // Estimate if no next section found
+   console.log("No next section found, using calculated end: " + nextSectionRow);
+ }
+
+
+ // --- 3. Adjust Rows ---
+ var rowsNeeded = allPbpEntries.length + 2; // Entries + Total Row + Blank Row
+ var existingRows = Math.max(0, nextSectionRow - installDataStartRow);
+
+
+ // Clear existing content first (before adding/deleting rows to avoid issues)
+ if (existingRows > 0) {
+   var rangeToClear = techSheet.getRange(installDataStartRow, 1, existingRows, 10); // Assume max 10 columns
+   rangeToClear.clearContent();
+   console.log("Cleared content from " + existingRows + " existing rows in Install section.");
+ }
+
+
+ // Adjust row count
+ if (rowsNeeded > existingRows) {
+   var rowsToAdd = rowsNeeded - existingRows;
+   techSheet.insertRowsAfter(installDataStartRow + existingRows -1, rowsToAdd); // Insert after the last current row
+   console.log("Added " + rowsToAdd + " rows.");
+ } else if (rowsNeeded < existingRows) {
+   var rowsToDelete = existingRows - rowsNeeded;
+   techSheet.deleteRows(installDataStartRow + rowsNeeded, rowsToDelete); // Delete rows after the needed ones
+   console.log("Deleted " + rowsToDelete + " rows.");
+ }
+  // Recalculate nextSectionRow AFTER row adjustments if needed (though not strictly necessary for writing logic below)
+  nextSectionRow = installDataStartRow + rowsNeeded; // The row after the last written row + total row + blank
+
+
+
+
+ // --- 4. Write Data ---
+ var headers = techSheet.getRange(installHeaderRow, 1, 1, 10).getValues()[0]; // Read headers
+ var customerNameCol = 1, businessUnitCol = 2, dateCol = 3, pbpCol = 4, itemNameCol = 5, notesCol = 6;
+ var amountCol = findAmountColumn(headers) || 7; // Calls helper below, default G
+ var tz = Session.getScriptTimeZone() || "America/New_York";
+
+
+ for (var idx = 0; idx < allPbpEntries.length; idx++) {
+   var outRow = installDataStartRow + idx;
+   var entry = allPbpEntries[idx];
+   var dateObj = tryParseDate(entry.completionDate); // Calls PBPUtilities function
+   var displayDate = dateObj ? Utilities.formatDate(dateObj, tz, "M/d/yyyy") : (entry.completionDate || "");
+   var roleWithPercent = (entry.roleForJob || "N/A") + " (" + entry.splitPercentage.toFixed(1) + "%)";
+
+
+   techSheet.getRange(outRow, customerNameCol).setValue(entry.customerName);
+   techSheet.getRange(outRow, businessUnitCol).setValue(entry.jobBusinessUnit);
+   techSheet.getRange(outRow, dateCol).setValue(displayDate);
+   techSheet.getRange(outRow, pbpCol).setValue("PBP - " + entry.itemName);
+   techSheet.getRange(outRow, itemNameCol).setValue(entry.itemName);
+   techSheet.getRange(outRow, notesCol).setValue(roleWithPercent);
+   techSheet.getRange(outRow, amountCol).setValue(entry.technicianShare).setNumberFormat("$#,##0.00");
+ }
+
+
+ // --- 5. Write Total Row ---
+ var totalRowIndex = installDataStartRow + allPbpEntries.length;
+ var amountColLetter = columnToLetter(amountCol); // Calls PBPUtilities function
+ var sumFormula = allPbpEntries.length > 0
+                  ? "=SUM(" + amountColLetter + installDataStartRow + ":" + amountColLetter + (totalRowIndex - 1) + ")"
+                  : "0"; // Handle case with 0 entries
+
+
+ techSheet.getRange(totalRowIndex, 1).setValue("Total").setFontWeight("bold");
+ techSheet.getRange(totalRowIndex, amountCol).setFormula(sumFormula).setNumberFormat("$#,##0.00").setFontWeight("bold");
+ techSheet.getRange(totalRowIndex, 1, 1, Math.max(notesCol, amountCol))
+          .setBorder(null, null, true, null, null, null, "black", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
+
+ // --- 6. (Optional but good practice) Clear the row AFTER the total row ---
+ var blankRowIndex = totalRowIndex + 1;
+ if (blankRowIndex < nextSectionRow) { // Ensure we don't clear into the next section
+     techSheet.getRange(blankRowIndex, 1, 1, 10).clearContent().setBorder(false,false,false,false,false,false);
+ }
+
+
+}
+
+
+
+
+/**
+* Updates the top summary section ('Total Install Pay') with amount and count.
+* @param {Sheet} sheet - The technician sheet to update.
+* @param {number} amount - The total PBP amount.
+* @param {number} count - The number of PBP entries.
+*/
+function updateTopSummaryInstallPay(sheet, amount, count) {
+if (!sheet) return;
+var installPayRow = -1;
+var data = sheet.getRange("A1:A20").getValues(); // Check first 20 rows
+for (var row = 0; row < data.length; row++) {
+  if (data[row][0] && data[row][0].toString().trim() === "Total Install Pay") {
+    installPayRow = row + 1; break;
+  }
+}
+if (installPayRow > 0) {
+  try {
+     sheet.getRange(installPayRow, 2).setValue(count); // Count in Col B
+     sheet.getRange(installPayRow, 3).setValue(amount).setNumberFormat("$#,##0.00"); // Amount in Col C
+  } catch (e) { console.error("Error updating top summary install pay for " + sheet.getName() + ": " + e); }
+} else { console.log("Could not find 'Total Install Pay' in top section of sheet: " + sheet.getName()); }
+}
+
+
+/**
+* Clears the data area within the Install section before writing new data or if no data exists.
+* @param {Sheet} sheet - The technician sheet to clear.
+*/
+function clearInstallDataSection(sheet) {
+ if (!sheet) return;
+ try {
+     var installSectionRow = findInstallCustomerDataSection(sheet); // Calls helper below
+     if (installSectionRow <= 0) {
+         console.log("Clear Install Data: Install section not found in " + sheet.getName());
+         return;
+     }
+     var installHeaderRow = installSectionRow + 1;
+     var installDataStartRow = installHeaderRow + 1;
+     var nextSectionRow = findNextSectionAfterInstall(sheet, installSectionRow); // Calls helper below
+     if (nextSectionRow <= 0) { nextSectionRow = sheet.getLastRow() + 1; } // Fallback
+
+
+     var rowsToClear = Math.max(0, nextSectionRow - installDataStartRow);
+     if (rowsToClear > 0) {
+         var rangeToClear = sheet.getRange(installDataStartRow, 1, rowsToClear, 10); // Clear 10 columns
+         rangeToClear.clearContent().setBorder(false,false,false,false,false,false).setFontWeight(null); // Clear formatting too
+         console.log("Cleared Install data content/format for " + sheet.getName() + " from row " + installDataStartRow + " for " + rowsToClear + " rows.");
+
+
+         // Write a clean 'Total' row when clearing
+         var headers = sheet.getRange(installHeaderRow, 1, 1, 10).getValues()[0];
+         var amountCol = findAmountColumn(headers) || 7; // Calls helper below
+         sheet.getRange(installDataStartRow, 1).setValue("Total").setFontWeight("bold");
+         sheet.getRange(installDataStartRow, amountCol).setValue(0).setNumberFormat("$#,##0.00").setFontWeight("bold");
+         sheet.getRange(installDataStartRow, 1, 1, Math.max(6, amountCol)) // Format total row border
+              .setBorder(null, null, true, null, null, null, "black", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
+
+          // Delete any extra rows between the new Total row and the next section
+          var firstRowToDelete = installDataStartRow + 1; // Row after the new Total row
+          if (nextSectionRow > firstRowToDelete) {
+              sheet.deleteRows(firstRowToDelete, nextSectionRow - firstRowToDelete);
+              console.log("Deleted extra rows after clearing install section.");
+          }
+
+
+
+
+     } else { console.log("Clear Install Data: No data rows found/needed to clear in " + sheet.getName()); }
+ } catch (e) { console.error("Error clearing install data section for " + sheet.getName() + ": " + e); }
+}
+
+
+
+
+/**
+* Finds the row where the Install Customer Data section starts.
+* @param {Sheet} sheet - The sheet to search in.
+* @return {number} The row number (1-based) or -1 if not found.
+*/
+function findInstallCustomerDataSection(sheet) {
+if (!sheet) return -1;
+var data = sheet.getRange("A1:A50").getValues(); // Search first 50 rows
+for (var i = 0; i < data.length; i++) {
+  var value = data[i][0];
+  if (value && typeof value === "string") {
+    var trimmedValue = value.trim();
+    if (trimmedValue === "Install [Customer Data]" || trimmedValue === "Install Customer Data") { return i + 1; }
+  }
+}
+// Fallback search (case-insensitive, partial, below row 15)
+for (var i = 15; i < data.length; i++) { // Start lower down
+   var value = data[i][0];
+   if (value && typeof value === "string") {
+     var lowerValue = value.toLowerCase().trim();
+     if (lowerValue.includes("install") && (lowerValue.includes("customer") || lowerValue.includes("data"))) {
+       return i + 1;
+     }
+   }
+}
+console.log("No Install section header found in sheet: " + sheet.getName());
+return -1;
+}
+
+
+/**
+* Finds the row where the next section after Install starts.
+* @param {Sheet} sheet - The sheet to search in.
+* @param {number} installSectionRow - The row where the Install section starts.
+* @return {number} The row number (1-based) or -1 if not found.
+*/
+function findNextSectionAfterInstall(sheet, installSectionRow) {
+if (!sheet || installSectionRow <= 0) return -1;
+var startSearchRow = installSectionRow + 3; // Start looking below header/first data
+var maxSearchRow = Math.min(sheet.getLastRow() + 1, installSectionRow + 60); // Search ample rows
+if (startSearchRow >= maxSearchRow) return -1;
+
+
+var searchValues = sheet.getRange(startSearchRow, 1, maxSearchRow - startSearchRow, 1).getValues();
+for (var i = 0; i < searchValues.length; i++) {
+  var rowValue = searchValues[i][0];
+  var actualRow = startSearchRow + i;
+  if (rowValue && typeof rowValue === "string") {
+    var trimmedValue = rowValue.trim();
+    var lowerValue = trimmedValue.toLowerCase();
+    // Look for non-empty cells that don't seem like data continuation or total rows
+    if (trimmedValue.length > 0 && !lowerValue.includes("install") && !lowerValue.includes("total")) {
+       // Simple check: If it contains common section words or ends with 'Data]'?
+      if (lowerValue.includes("data") || lowerValue.includes("sales") || lowerValue.includes("spiff") || lowerValue.includes("bonus") || lowerValue.includes("lead") || lowerValue.includes("customer") || trimmedValue.endsWith("Data]")) {
+         console.log("Found next section header '" + trimmedValue + "' at row " + actualRow);
+         return actualRow;
+      }
+    }
+  }
+}
+console.log("No next section found after Install section in sheet: " + sheet.getName());
+return -1;
+}
+
+
+
+
+/**
+* Finds the column index that likely contains the amount values based on headers.
+* (Used by sheet writing functions)
+* @param {Array} headers - The array of header values from the relevant row.
+* @return {number} The 1-based column index for the amount column, defaults to 7 (G).
+*/
+function findAmountColumn(headers) {
+if (!headers || headers.length === 0) return 7; // Default G
+for (var i = headers.length - 1; i >= 0; i--) { // Search from right
+  if (!headers[i]) continue;
+  var header = headers[i].toString().toLowerCase().trim();
+  if (header.includes("amount") || header === "$" || header.includes("pay") || header.includes("total") || header.includes("share") || header === "pbp" || header.includes("value")) { // Added value
+    return i + 1; // 1-based index
+  }
+}
+return Math.min(headers.length, 7); // Default G or last if < 7 cols
+}
+

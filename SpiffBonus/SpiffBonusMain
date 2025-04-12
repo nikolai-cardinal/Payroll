@@ -1,0 +1,522 @@
+/**
+* Cardinal Payroll System - Spiff/Bonus Sheet Operations
+* Contains functions for interacting with the structure and data of technician sheets
+* specifically related to the Spiff/Bonus sections.
+*/
+
+/**
+* Finds the row number containing the header for the Spiff Customer Data section.
+* Searches column A for variations of the header text.
+* @param {Sheet} sheet The technician sheet object to search within.
+* @return {number} The 1-based row index of the section header, or -1 if not found.
+*/
+function findSpiffCustomerDataSection(sheet) {
+ if (!sheet) return -1;
+ // Prioritize specific, potentially newer headers first
+ var variations = [
+   "Customer Name [Spiff]", // Most specific?
+   "Spiff [Customer Data]",
+   "Spiff [Cutomer Data]",  // Typo variation
+   "SPIFF [Customer Data]",
+   "Spiff Customer Data",
+   "SPIFF Customer Data",
+   "Spiff Data"             // Less specific
+ ];
+
+ for (var i = 0; i < variations.length; i++) {
+   // Use the generic findRowWithText utility
+   var foundRow = findRowWithText(sheet, variations[i], 1, 30); // Search Col A (index 1), first 30 rows
+   if (foundRow > 0) return foundRow;
+ }
+
+ // Fallback: partial match if no exact header found
+ for (var rx = 1; rx <= 30; rx++) {
+   var val = sheet.getRange(rx, 1).getValue();
+   if (val && typeof val === 'string') {
+     var lower = val.toLowerCase();
+     if (lower.includes("spiff") && (lower.includes("data") || lower.includes("customer"))) {
+       console.log("Found Spiff section using partial match ('" + val + "') at row: " + rx);
+       return rx;
+     }
+   }
+ }
+
+ console.error("Could not find Spiff Customer Data section header in sheet: " + sheet.getName());
+ return -1;
+}
+
+
+/**
+* Finds the row number of the *next* non-empty cell in Column A after a given start row.
+* This helps determine the end of the Spiff data section before the next section (e.g., Install) begins.
+* @param {Sheet} sheet The sheet object to search within.
+* @param {number} searchStartRow The 1-based row index to start searching *after*.
+* @param {number} [maxRowsToSearch=60] Maximum number of rows to look ahead.
+* @return {number} The 1-based row index of the next cell with content, or -1 if none found within range.
+*/
+function findNextSectionStart(sheet, searchStartRow, maxRowsToSearch) {
+   if (!sheet || searchStartRow <= 0) return -1;
+   var startLookup = searchStartRow;
+   var rowsToScan = maxRowsToSearch || 60; // Increase scan range slightly, align with PBP
+
+   // Ensure we don't search past the sheet's last row
+   var lastRow = sheet.getLastRow();
+   if (startLookup > lastRow) return -1; // Started search beyond the sheet
+   if (startLookup + rowsToScan -1 > lastRow) {
+       rowsToScan = lastRow - startLookup + 1; // Adjust if search exceeds sheet bounds
+   }
+   if (rowsToScan <= 0) return -1; // Nothing to scan
+
+   var searchRange = sheet.getRange(startLookup, 1, rowsToScan, 1); // Look ahead in Column A
+   var values = searchRange.getValues();
+
+   for (var i = 0; i < values.length; i++) {
+       var actualRow = startLookup + i;
+       var cellValue = values[i][0];
+       if (cellValue && typeof cellValue === 'string') {
+            var trimmedValue = cellValue.trim();
+            var lowerValue = trimmedValue.toLowerCase();
+
+            // Look for non-empty cells that seem like new section headers,
+            // explicitly ignoring the current section type ("spiff") and generic "total" rows.
+            if (trimmedValue.length > 0 && !lowerValue.includes("spiff") && lowerValue !== "total") {
+                // Check for common section keywords or structure (like PBP's findNext)
+                if (lowerValue.includes("data") || lowerValue.includes("sales") || lowerValue.includes("install") || lowerValue.includes("bonus") || lowerValue.includes("lead") || lowerValue.includes("customer") || lowerValue.includes("hourly") || trimmedValue.endsWith("Data]") || lowerValue.startsWith("total ")) { // Added "total " check for things like "Total Pay"
+                    console.log("findNextSectionStart: Found next section header '" + trimmedValue + "' at row " + actualRow);
+                    return actualRow; // Return 1-based row index of the next actual header
+                }
+                // Optional: Consider a non-blank, non-total, non-spiff row as a potential boundary if it's indented differently or has specific format?
+                // For now, rely on keywords. This might need tuning based on sheet layouts.
+            }
+       }
+   }
+
+   console.log("Warning: findNextSectionStart did not find a clear next section header in Col A after row " + (startLookup-1) + " within " + rowsToScan + " rows.");
+   // Fallback: Return last row + 1 if no header found, assuming section goes to end of content
+   // This might be safer than returning -1, which caused errors downstream before.
+   return sheet.getLastRow() + 1; 
+}
+
+
+/**
+* Manages the number of rows in a given section of a sheet.
+* Adds or deletes rows to match the required number, starting from a specific row.
+* Assumes the section to manage is contiguous.
+*
+* @param {Sheet} sheet The sheet to modify.
+* @param {number} dataStartRow The 1-based row index where the data section begins.
+* @param {number} currentRows The number of rows currently occupied by data (or available space).
+* @param {number} requiredRows The target number of rows needed for the data (including totals, etc.).
+*/
+function manageSheetRows(sheet, dataStartRow, currentRows, requiredRows) {
+  if (!sheet || dataStartRow <= 0 || currentRows < 0 || requiredRows < 0) {
+    console.error("manageSheetRows: Invalid parameters.");
+    return; // Or throw error
+  }
+
+  if (requiredRows > currentRows) {
+    // Need to add more rows
+    var rowsToAdd = requiredRows - currentRows;
+    // Insert rows *after* the last current row. If currentRows is 0, insert after the row *before* dataStartRow.
+    var insertAfterRow = (currentRows > 0) ? (dataStartRow + currentRows - 1) : (dataStartRow - 1);
+    if (insertAfterRow < 1) insertAfterRow = 1; // Cannot insert before row 1
+
+    // Ensure we don't try inserting after a row that doesn't exist if sheet is very short
+    var maxRows = sheet.getMaxRows();
+    if (insertAfterRow > maxRows) {
+       console.warn("manageSheetRows: Attempting to insert rows after a row beyond the sheet max rows. Appending instead.");
+       sheet.insertRows(maxRows + 1, rowsToAdd); // Append if needed
+    } else {
+       sheet.insertRowsAfter(insertAfterRow, rowsToAdd);
+    }
+    console.log(`Inserted ${rowsToAdd} rows after row ${insertAfterRow} in sheet ${sheet.getName()}`);
+
+  } else if (requiredRows < currentRows) {
+    // Need to remove excess rows
+    var rowsToDelete = currentRows - requiredRows;
+    var deleteStartRow = dataStartRow + requiredRows;
+    // Safety check: ensure deleteStartRow is valid
+    if (deleteStartRow > sheet.getLastRow()) {
+        console.warn(`manageSheetRows: Calculated delete start row (${deleteStartRow}) is beyond the last row (${sheet.getLastRow()}). Skipping deletion.`);
+        return;
+    }
+     // Safety check: ensure rowsToDelete doesn't exceed available rows below deleteStartRow
+    var availableRowsToDelete = sheet.getLastRow() - deleteStartRow + 1;
+    if (rowsToDelete > availableRowsToDelete) {
+        console.warn(`manageSheetRows: Attempting to delete ${rowsToDelete} rows, but only ${availableRowsToDelete} are available starting from row ${deleteStartRow}. Adjusting count.`);
+        rowsToDelete = availableRowsToDelete;
+    }
+
+    if (rowsToDelete > 0) {
+        techSheet.deleteRows(deleteStartRow, rowsToDelete);
+        console.log(`Deleted ${rowsToDelete} rows starting from row ${deleteStartRow} in sheet ${sheet.getName()}`);
+    }
+  }
+  // If requiredRows === currentRows, do nothing.
+}
+
+
+/**
+* Writes the collected Spiff data into the designated rows on the technician sheet.
+* Assumes rows have been managed (cleared and sized correctly) beforehand.
+*
+* @param {Sheet} techSheet The technician's sheet object.
+* @param {number} spiffHeaderRow The 1-based row index of the Spiff section's header row (titles).
+* @param {Array<Object>} customerData An array of objects, each representing a spiff entry.
+*                                     Expected properties: customerName, jobBusinessUnit, completionDate, commission, itemName.
+*/
+function writeSpiffDataToSheet(techSheet, spiffHeaderRow, customerData) {
+  if (!techSheet || spiffHeaderRow <= 0 || !customerData) {
+    console.error("writeSpiffDataToSheet: Invalid parameters.");
+    return;
+  }
+
+  var dataWriteStartRow = spiffHeaderRow + 1;
+  var numCols = 5; // Number of columns to write (A-E)
+
+  // Check if there is data to write before proceeding
+  if (!customerData || customerData.length === 0) {
+      console.log("No spiff data provided to writeSpiffDataToSheet for " + techSheet.getName() + ".");
+      // The total row should already be set by clearSpiffDataSection
+      return; 
+  }
+
+  var tz = Session.getScriptTimeZone() || 'America/New_York'; // Get timezone for date formatting
+
+  // Prepare data array for efficient writing
+  var dataToWrite = customerData.map(function(c) {
+    var dateObj = tryParseDate(c.completionDate); // Use utility function
+    var displayDate = dateObj
+      ? Utilities.formatDate(dateObj, tz, 'M/d/yyyy')
+      : (c.completionDate || ""); // Use original string if parsing fails
+
+    return [
+      c.customerName || "",       // Column A: Customer Name
+      c.jobBusinessUnit || "",   // Column B: Business Unit
+      displayDate,              // Column C: Completion Date (formatted)
+      c.commission,             // Column D: Commission Amount (leave as number for formatting)
+      c.itemName || ""          // Column E: Item Name
+    ];
+  });
+
+  // Write data in bulk
+  var targetRange = techSheet.getRange(dataWriteStartRow, 1, dataToWrite.length, numCols);
+  targetRange.setValues(dataToWrite);
+
+  // Apply number formatting to the Commission column (Column D)
+  techSheet.getRange(dataWriteStartRow, 4, dataToWrite.length, 1).setNumberFormat('$' + '#,##0.00');
+  // Apply date formatting to the Completion Date column (Column C)
+  techSheet.getRange(dataWriteStartRow, 3, dataToWrite.length, 1).setNumberFormat('M/d/yyyy');
+
+  console.log(`Wrote ${dataToWrite.length} spiff entries to sheet ${techSheet.getName()} starting at row ${dataWriteStartRow}.`);
+}
+
+
+/**
+* Adds the "Total" row below the written spiff data.
+* Calculates the sum of the commission amounts.
+*
+* @param {Sheet} techSheet The technician's sheet object.
+* @param {number} spiffHeaderRow The 1-based row index of the Spiff section's header row.
+* @param {number} dataRowCount The number of actual spiff data rows written.
+*/
+function addSpiffTotalRow(techSheet, spiffHeaderRow, dataRowCount) {
+  if (!techSheet || spiffHeaderRow <= 0 || dataRowCount < 0) {
+    console.error("addSpiffTotalRow: Invalid parameters.");
+    return;
+  }
+
+  var dataStartRow = spiffHeaderRow + 1;
+  var totalRowIndex = dataStartRow + dataRowCount; // Row where the total should go
+
+  // Clear the total row first (across relevant columns, e.g., A to E)
+  techSheet.getRange(totalRowIndex, 1, 1, 5).clearContent().setFontWeight(null); // Clear content and reset font weight
+
+  // Set "Total" label in Column A
+  techSheet.getRange(totalRowIndex, 1).setValue("Total").setFontWeight("bold");
+
+  // Set the SUM formula in Column D if there are rows to sum
+  if (dataRowCount > 0) {
+    var sumStartRow = dataStartRow;
+    var sumEndRow = totalRowIndex - 1;
+    var formula = '=SUM(D' + sumStartRow + ':D' + sumEndRow + ')';
+    techSheet.getRange(totalRowIndex, 4).setFormula(formula).setNumberFormat('$' + '#,##0.00').setFontWeight("bold");
+    console.log(`Added Total row at ${totalRowIndex} with formula ${formula} in sheet ${techSheet.getName()}.`);
+  } else {
+    // If no data rows, just put $0.00
+    techSheet.getRange(totalRowIndex, 4).setValue(0).setNumberFormat('$' + '#,##0.00').setFontWeight("bold");
+    console.log(`Added Total row at ${totalRowIndex} with value $0.00 (no data) in sheet ${techSheet.getName()}.`);
+  }
+}
+
+
+/**
+* Updates the top summary section of the technician's sheet with the calculated total Spiff amount.
+* Also recalculates "Total Sales Pay" and "Total Pay" based on related fields.
+*
+* @param {Sheet} techSheet - The technician sheet object.
+* @param {number} totalSpiff - The total SPIFF amount calculated from the 'Spiff/Bonus' sheet.
+* @param {number} totalYardSpiff - The total Yard Sign SPIFF amount calculated separately.
+*/
+function updateTopSummarySpiffs(techSheet, totalSpiff, totalYardSpiff) {
+  if (!techSheet) {
+      console.error("updateTopSummarySpiffs: techSheet parameter is missing.");
+      return;
+  }
+  console.log(`Updating top summary for ${techSheet.getName()} with Total Spiff: ${totalSpiff}, Yard Spiff: ${totalYardSpiff}`);
+
+  // --- Constants for Columns (1-based) ---
+  const LABEL_COLUMN = 1; // Column A in 1-based indexing
+  const VALUE_COLUMN = 4; // Column D for monetary values
+
+  // --- Get Data from a Fixed Range --- 
+  // getDataRange() is unreliable if there are blank rows/columns separating sections.
+  // Read the first 60 rows and first 5 columns (A-E) to ensure summary is captured.
+  const searchRange = techSheet.getRange(1, 1, 60, 5); // Rows 1-60, Columns A-E
+  const sheetData = searchRange.getValues();
+  
+  // Initialize row indices
+  var totalSpiffRow = -1;
+  var totalSalesPayRow = -1;
+  var totalPayRow = -1;
+  var yardSignRow = -1;
+  var installPayRow = -1;
+  var leadSetRow = -1;
+  var totalHourlyPayRow = -1;
+  
+  // --- Find Rows Using Exact Matching Only ---
+  // Scan through all sheet data once to find exact matches for all required labels
+  for (var i = 0; i < sheetData.length; i++) {
+    var rowIndex = i + 1; // 1-based row index
+    var labelValue = sheetData[i][1]; // Access the label from the correct index in sheetData
+
+    if (labelValue && typeof labelValue === 'string') {
+      var labelText = labelValue.trim();
+      // Normalize whitespace: replace multiple spaces/whitespace chars with a single space
+      var normalizedLabel = labelText.replace(/\s+/g, ' '); 
+      var labelLower = normalizedLabel.toLowerCase(); // Use normalized, lowercase for comparison
+
+      console.log(`Row ${rowIndex}: Checking normalized label: "${labelLower}"`);
+
+      // Use switch for cleaner exact matching
+      switch (labelLower) {
+        case "total spiff":
+          if (totalSpiffRow < 0) { // Only take the first match
+            totalSpiffRow = rowIndex;
+            console.log(`Found exact match for 'Total Spiff' at row ${rowIndex}`);
+          }
+          break;
+        case "yard sam spiff": // Corrected label based on screenshot
+          if (yardSignRow < 0) {
+            yardSignRow = rowIndex;
+            console.log(`Found exact match for 'Yard Sam Spiff' at row ${rowIndex}`);
+          }
+          break;
+        case "total sales pay":
+          if (totalSalesPayRow < 0) {
+            totalSalesPayRow = rowIndex;
+            console.log(`Found exact match for 'Total Sales Pay' at row ${rowIndex}`);
+          }
+          break;
+        case "total pay":
+          if (totalPayRow < 0) {
+            totalPayRow = rowIndex;
+            console.log(`Found exact match for 'Total Pay' at row ${rowIndex}`);
+          }
+          break;
+        case "total install pay":
+          if (installPayRow < 0) {
+            installPayRow = rowIndex;
+            console.log(`Found exact match for 'Total Install Pay' at row ${rowIndex}`);
+          }
+          break;
+        case "lead set sale":
+          if (leadSetRow < 0) {
+            leadSetRow = rowIndex;
+            console.log(`Found exact match for 'Lead Set Sale' at row ${rowIndex}`);
+          }
+          break;
+        case "total hourly pay":
+          if (totalHourlyPayRow < 0) {
+            totalHourlyPayRow = rowIndex;
+            console.log(`Found exact match for 'Total Hourly Pay' at row ${rowIndex}`);
+          }
+          break;
+        // Add cases for other essential rows if needed
+      }
+    }
+  }
+
+  // --- REMOVED PARTIAL MATCHING LOOPS ---
+  // The fallback loops using .includes() were causing incorrect row identification.
+  // We now rely solely on the exact matches found above.
+
+  // Log final row mappings based on exact matches
+  console.log(`Final row mappings (Exact Match Only): TotalSpiff=${totalSpiffRow}, YardSign=${yardSignRow}, TotalSales=${totalSalesPayRow}, TotalPay=${totalPayRow}, Install=${installPayRow}, Lead=${leadSetRow}, TotalHourly=${totalHourlyPayRow}`);
+
+  // --- Update "Total Spiff" Line --- (Value in Column D)
+  if (totalSpiffRow > 0) {
+    try {
+      // Update calculated Col D
+      techSheet.getRange(totalSpiffRow, VALUE_COLUMN).setValue(totalSpiff).setNumberFormat('$'+'#,##0.00');
+      console.log(`Updated 'Total Spiff' on row ${totalSpiffRow}, Col ${VALUE_COLUMN} to ${totalSpiff}`);
+    } catch (e) {
+      console.error(`Error updating 'Total Spiff' row (${totalSpiffRow}): ${e.message}`);
+    }
+  } else {
+    console.warn("Could not find exact match for 'Total Spiff' row in top summary.");
+  }
+
+  // --- Update "Yard Sam Spiff" Line --- (Value in Column D)
+  if (yardSignRow > 0) {
+    try {
+      var numericTotalYardSpiff = Number(totalYardSpiff || 0);
+      techSheet.getRange(yardSignRow, VALUE_COLUMN).setValue(numericTotalYardSpiff).setNumberFormat('$'+'#,##0.00');
+      console.log(`Updated 'Yard Sam Spiff' on row ${yardSignRow}, Col ${VALUE_COLUMN} to ${numericTotalYardSpiff}`);
+    } catch (e) {
+      console.error(`Error updating 'Yard Sam Spiff' row (${yardSignRow}): ${e.message}`);
+    }
+  } else {
+    console.warn("Could not find exact match for 'Yard Sam Spiff' row in top summary.");
+  }
+
+  // --- Recalculate "Total Sales Pay" --- (Value in Column D)
+  if (totalSalesPayRow > 0) {
+    try {
+      // Get values from other relevant rows (use Col D = VALUE_COLUMN, default to 0 if row not found or value is invalid)
+      var yardVal = (yardSignRow > 0) ? Number(techSheet.getRange(yardSignRow, VALUE_COLUMN).getValue() || 0) : 0;
+      var installVal = (installPayRow > 0) ? Number(techSheet.getRange(installPayRow, VALUE_COLUMN).getValue() || 0) : 0;
+      var leadVal = (leadSetRow > 0) ? Number(techSheet.getRange(leadSetRow, VALUE_COLUMN).getValue() || 0) : 0;
+
+      // Ensure totalSpiff is a number (this comes from Spiff/Bonus sheet, not the tech sheet summary)
+      var numericTotalSpiff = Number(totalSpiff || 0);
+
+      // Total Sales = Total Spiff + Install + Lead Set (Yard is already included in Total Spiff)
+      var totalSales = numericTotalSpiff + installVal + leadVal;
+
+      techSheet.getRange(totalSalesPayRow, VALUE_COLUMN).setValue(totalSales).setNumberFormat('$'+'#,##0.00');
+      console.log(`Updated 'Total Sales Pay' on row ${totalSalesPayRow}, Col ${VALUE_COLUMN} to ${totalSales}`);
+    } catch (e) {
+      console.error(`Error updating 'Total Sales Pay' row (${totalSalesPayRow}): ${e.message}`);
+    }
+  } else {
+    console.warn("Could not find exact match for 'Total Sales Pay' row in top summary.");
+  }
+
+  // --- Recalculate "Total Pay" --- (Value in Column D)
+  if (totalPayRow > 0 && totalHourlyPayRow > 0 && totalSalesPayRow > 0) {
+    try {
+      var hourlyPay = Number(techSheet.getRange(totalHourlyPayRow, VALUE_COLUMN).getValue() || 0);
+      var salesPay = Number(techSheet.getRange(totalSalesPayRow, VALUE_COLUMN).getValue() || 0); // Use the newly calculated sales pay from Col D
+
+      var totalPay = hourlyPay + salesPay;
+      techSheet.getRange(totalPayRow, VALUE_COLUMN).setValue(totalPay).setNumberFormat('$'+'#,##0.00');
+      console.log(`Updated 'Total Pay' on row ${totalPayRow}, Col ${VALUE_COLUMN} to ${totalPay}`);
+    } catch (e) {
+      console.error(`Error updating 'Total Pay' row (${totalPayRow}): ${e.message}`);
+    }
+  } else {
+    console.warn(`Could not find one or more required rows (exact match) for 'Total Pay' calculation: Total Pay (${totalPayRow}), Total Hourly (${totalHourlyPayRow}), Total Sales (${totalSalesPayRow})`);
+  }
+}
+
+
+/**
+* Resets the "Action" dropdown to "Ready" in the 'Hourly + Spiff Pay' sheet,
+* typically used after an error occurs during processing.
+*
+* @param {Sheet} ratesSheet - The 'Hourly + Spiff Pay' sheet object.
+* @param {number} row - The 1-based row index containing the dropdown.
+* @param {number} col - The 1-based column index containing the dropdown.
+*/
+function resetActionDropdown(ratesSheet, row, col) {
+ if (!ratesSheet || !row || !col) {
+   console.warn("resetActionDropdown called with invalid parameters.");
+   return;
+ }
+ try {
+   ratesSheet.getRange(row, col).setValue("Ready");
+   console.log(`Reset action dropdown to 'Ready' for row ${row}, col ${col}.`);
+ } catch(e) {
+   console.error(`Failed to reset action dropdown for row ${row}, col ${col}: ${e.message}`);
+   // Optionally alert the user if this is critical
+   // SpreadsheetApp.getUi().alert("Failed to reset status dropdown for row " + row);
+ }
+}
+
+/**
+* Clears the data area within the Spiff section before writing new data or if no data exists.
+* Also removes formatting and borders, writes a clean Total row, and deletes excess rows.
+* @param {Sheet} sheet - The technician sheet to clear.
+*/
+function clearSpiffDataSection(sheet) {
+  if (!sheet) return;
+  try {
+    var spiffSectionRow = findSpiffCustomerDataSection(sheet); // Use Spiff finder
+    if (spiffSectionRow <= 0) {
+      console.log("Clear Spiff Data: Spiff section not found in " + sheet.getName());
+      return;
+    }
+    var spiffHeaderRow = spiffSectionRow + 1;
+    var spiffDataStartRow = spiffHeaderRow + 1;
+    // Use Spiff next section finder, look past the header
+    var nextSectionRow = findNextSectionStart(sheet, spiffHeaderRow + 1); 
+    if (nextSectionRow <= 0) {
+       // If no next section found, calculate a safe boundary.
+       // Use getLastRow() + 1 as a fallback, ensuring we don't delete infinitely.
+       nextSectionRow = sheet.getLastRow() + 1;
+       console.log("Clear Spiff Data: No next section found, using last row + 1 (" + nextSectionRow + ") as boundary for " + sheet.getName());
+    }
+
+    // Ensure data start row is not past the next section (can happen if section is empty or malformed)
+    if (spiffDataStartRow >= nextSectionRow) {
+        console.log("Clear Spiff Data: Data start row (" + spiffDataStartRow + ") is at or after the next section row (" + nextSectionRow + "). Assuming empty section in " + sheet.getName());
+        // No rows to clear in this case, but we might still want to write the Total row.
+        rowsToClear = 0;
+    } else {
+       var rowsToClear = Math.max(0, nextSectionRow - spiffDataStartRow);
+    }
+
+    var numColsToClear = 10; // Clear a reasonable number of columns (e.g., A-J)
+
+    if (rowsToClear > 0) {
+      var rangeToClear = sheet.getRange(spiffDataStartRow, 1, rowsToClear, numColsToClear);
+      // Clear content, format, borders, notes, validations etc.
+      rangeToClear.clear({contentsOnly: false, formatOnly: false, commentsOnly: false, validationsOnly: false});
+      // Explicitly remove borders which clear() sometimes misses
+      rangeToClear.setBorder(false,false,false,false,false,false);
+      console.log("Cleared Spiff data content/format for " + sheet.getName() + " from row " + spiffDataStartRow + " for " + rowsToClear + " rows.");
+    } else {
+      console.log("Clear Spiff Data: No existing data rows found/needed to clear in " + sheet.getName());
+      // Ensure the row intended for 'Total' is clear if no other rows were cleared
+      sheet.getRange(spiffDataStartRow, 1, 1, numColsToClear)
+           .clear({contentsOnly: false, formatOnly: false, commentsOnly: false, validationsOnly: false})
+           .setBorder(false,false,false,false,false,false);
+    }
+
+    // Write a clean 'Total' row
+    var amountCol = 4; // Column D for Spiffs
+    var totalLabelCol = 1; // Column A for Label
+    sheet.getRange(spiffDataStartRow, totalLabelCol).setValue("Total").setFontWeight("bold");
+    sheet.getRange(spiffDataStartRow, amountCol).setValue(0).setNumberFormat("$#,##0.00").setFontWeight("bold");
+    // Set bottom border for the total row across relevant columns (e.g., A-E or A-AmountCol)
+    sheet.getRange(spiffDataStartRow, 1, 1, Math.max(5, amountCol)) // Ensure border covers at least A-E
+         .setBorder(null, null, true, null, null, null, "black", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
+    // Delete any extra rows *between* the new Total row and the previously determined next section start
+    var firstRowToDelete = spiffDataStartRow + 1; // Row immediately after the new Total row
+    // Check if there's a gap between the new total row and the next section
+    if (nextSectionRow > firstRowToDelete) {
+        var numRowsToDelete = nextSectionRow - firstRowToDelete;
+        sheet.deleteRows(firstRowToDelete, numRowsToDelete);
+        console.log("Deleted " + numRowsToDelete + " extra rows after clearing spiff section, starting from row " + firstRowToDelete + " in " + sheet.getName());
+    } else {
+        console.log("No extra rows detected to delete after clearing spiff section in " + sheet.getName());
+    }
+
+  } catch (e) {
+    console.error("Error clearing spiff data section for " + sheet.getName() + ": " + e);
+    // Optionally re-throw or alert
+    // SpreadsheetApp.getUi().alert("Error clearing spiff section for " + sheet.getName() + ": " + e.message);
+  }
+} 

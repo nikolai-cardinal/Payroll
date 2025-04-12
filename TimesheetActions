@@ -1,0 +1,392 @@
+/**
+ * Cardinal Payroll System - Timesheet Actions
+ * This script handles updating technician hours from the Time Sheet.
+ */
+
+/**
+ * Helper function to find a column by its header text in a specific row
+ * @param {Sheet} sheet - The sheet to search in
+ * @param {string} headerText - The text to search for
+ * @param {number} searchRow - The row index to search in (0-based)
+ * @return {number} The column index (1-based) or -1 if not found
+ */
+function findColumnByHeaderForTimesheet(sheet, headerText, searchRow = 0) {
+  try {
+    // Make sure sheet is defined
+    if (!sheet) {
+      console.error("Sheet is undefined in findColumnByHeaderForTimesheet");
+      return -1;
+    }
+    
+    // Get the data range for the header row
+    var headerRange = sheet.getRange(searchRow + 1, 1, 1, sheet.getLastColumn());
+    var headerValues = headerRange.getValues()[0];
+    
+    // Search for the header text
+    for (var j = 0; j < headerValues.length; j++) {
+      if (headerValues[j] === headerText) {
+        return j + 1; // +1 because sheets are 1-indexed
+      }
+    }
+    
+    return -1; // Not found
+  } catch (error) {
+    console.error("Error in findColumnByHeaderForTimesheet: " + error.message);
+    return -1;
+  }
+}
+
+/**
+ * Helper function to find a row by its label in a specific column
+ * @param {Sheet} sheet - The sheet to search in
+ * @param {string} labelText - The text to search for
+ * @param {number} searchColumn - The column index to search in (0-based)
+ * @return {number} The row index (1-based) or -1 if not found
+ */
+function findRowByLabelForTimesheet(sheet, labelText, searchColumn = 0) {
+  try {
+    // Make sure sheet is defined
+    if (!sheet) {
+      console.error("Sheet is undefined in findRowByLabelForTimesheet");
+      return -1;
+    }
+    
+    // Get all data from the sheet
+    var data = sheet.getDataRange().getValues();
+    
+    // Search for the label text
+    for (var i = 0; i < data.length; i++) {
+      if (data[i][searchColumn] === labelText) {
+        return i + 1; // +1 because sheets are 1-indexed
+      }
+    }
+    
+    return -1; // Not found
+  } catch (error) {
+    console.error("Error in findRowByLabelForTimesheet: " + error.message);
+    return -1;
+  }
+}
+
+/**
+ * Gets the field mappings for the time sheet
+ * @return {Object} An object containing column indexes for important fields
+ */
+function getTimeSheetMapping() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var timeSheet = ss.getSheetByName('Time Sheet');
+    
+    if (!timeSheet) {
+      console.error("Time Sheet not found!");
+      return {
+        nameColumn: 1,
+        dateColumn: 2,
+        regHoursColumn: 3,
+        otHoursColumn: 4,
+        dtHoursColumn: 5,
+        dataStartRow: 2
+      };
+    }
+    
+    var headerRow = 1; // Assuming headers are in row 1
+    var mapping = {
+      nameColumn: findColumnByHeaderForTimesheet(timeSheet, 'Employee Name', headerRow - 1),
+      dateColumn: findColumnByHeaderForTimesheet(timeSheet, 'Date', headerRow - 1),
+      regHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'Reg Hours', headerRow - 1),
+      otHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'OT Hours', headerRow - 1),
+      dtHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'DT Hours', headerRow - 1)
+    };
+    
+    // If any columns are not found, fall back to the known structure
+    if (mapping.nameColumn === -1) mapping.nameColumn = 1;  // A column
+    if (mapping.dateColumn === -1) mapping.dateColumn = 2;  // B column
+    if (mapping.regHoursColumn === -1) mapping.regHoursColumn = 3;  // C column
+    if (mapping.otHoursColumn === -1) mapping.otHoursColumn = 4;  // D column
+    if (mapping.dtHoursColumn === -1) mapping.dtHoursColumn = 5;  // E column
+    
+    mapping.dataStartRow = 2; // First row with actual data (after headers)
+    
+    return mapping;
+  } catch (error) {
+    console.error("Error in getTimeSheetMapping: " + error.message);
+    // Return default mapping
+    return {
+      nameColumn: 1,
+      dateColumn: 2,
+      regHoursColumn: 3,
+      otHoursColumn: 4,
+      dtHoursColumn: 5,
+      dataStartRow: 2
+    };
+  }
+}
+
+/**
+ * Gets the field mappings for a technician sheet
+ * @param {Sheet} sheet - The technician sheet to map
+ * @return {Object} An object containing row and column indexes for important fields
+ */
+function getTechnicianSheetMappingForTimesheet(sheet) {
+  try {
+    // Make sure sheet is defined
+    if (!sheet) {
+      console.error("Sheet is undefined in getTechnicianSheetMappingForTimesheet");
+      return {
+        hourlyRateRow: 5,
+        regHoursRow: 6,
+        otHoursRow: 7,
+        ptoHoursRow: 8,
+        totalHourlyPayRow: 9,
+        totalSalesPayRow: 15,
+        totalPayRow: 17,
+        positionRow: 2,
+        payPeriodRow: 3,
+        valueColumn: 2,
+        calculatedValueColumn: 3,
+        ptoRateColumn: 14
+      };
+    }
+    
+    // Find rows by label text
+    var mapping = {
+      // Common fields in technician sheets
+      hourlyRateRow: findRowByLabelForTimesheet(sheet, 'Hourly Rate'),
+      regHoursRow: findRowByLabelForTimesheet(sheet, 'Regular Hours'),
+      otHoursRow: findRowByLabelForTimesheet(sheet, 'Overtime Hours'),
+      ptoHoursRow: findRowByLabelForTimesheet(sheet, 'PTO'),
+      totalHourlyPayRow: findRowByLabelForTimesheet(sheet, 'Total Hourly Pay'),
+      totalSalesPayRow: findRowByLabelForTimesheet(sheet, 'Total Sales Pay'),
+      totalPayRow: findRowByLabelForTimesheet(sheet, 'Total Pay'),
+      positionRow: findRowByLabelForTimesheet(sheet, 'Position'),
+      payPeriodRow: 3 // Based on the screenshot, Pay Period is typically in row 3
+    };
+
+    // If any key fields are not found, fall back to the known structure
+    if (mapping.hourlyRateRow === -1) mapping.hourlyRateRow = 5;
+    if (mapping.regHoursRow === -1) mapping.regHoursRow = 6;
+    if (mapping.otHoursRow === -1) mapping.otHoursRow = 7;
+    if (mapping.ptoHoursRow === -1) mapping.ptoHoursRow = 8;
+    if (mapping.totalHourlyPayRow === -1) mapping.totalHourlyPayRow = 9;
+    if (mapping.totalSalesPayRow === -1) mapping.totalSalesPayRow = 15;
+    if (mapping.totalPayRow === -1) mapping.totalPayRow = 17;
+    if (mapping.positionRow === -1) mapping.positionRow = 2;
+    
+    // Set the standard columns (typically B for values, C for calculated amounts)
+    mapping.valueColumn = 2;  // B column
+    mapping.calculatedValueColumn = 3;  // C column
+    
+    // Find PTO Rate column
+    mapping.ptoRateColumn = 14;  // Default to N column
+    
+    return mapping;
+  } catch (error) {
+    console.error("Error in getTechnicianSheetMappingForTimesheet: " + error.message);
+    // Return default mapping
+    return {
+      hourlyRateRow: 5,
+      regHoursRow: 6,
+      otHoursRow: 7,
+      ptoHoursRow: 8,
+      totalHourlyPayRow: 9,
+      totalSalesPayRow: 15,
+      totalPayRow: 17,
+      positionRow: 2,
+      payPeriodRow: 3,
+      valueColumn: 2,
+      calculatedValueColumn: 3,
+      ptoRateColumn: 14
+    };
+  }
+}
+
+/**
+ * Gets the current pay period from Hourly + Spiff Pay sheet
+ * @return {string} The current pay period string
+ */
+function getCurrentPayPeriodForTimesheet() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    
+    if (!ratesSheet) {
+      console.error("Hourly + Spiff Pay sheet not found!");
+      return "Current Pay Period";
+    }
+    
+    // Get pay period from cell F1
+    var payPeriod = ratesSheet.getRange(1, 6).getValue();
+    
+    // If it's a date object, format it appropriately
+    if (payPeriod instanceof Date) {
+      payPeriod = Utilities.formatDate(payPeriod, Session.getScriptTimeZone(), "M/dd - M/dd yyyy");
+    }
+    
+    return payPeriod.toString() || "Current Pay Period";
+  } catch (error) {
+    console.error("Error in getCurrentPayPeriodForTimesheet: " + error.message);
+    return "Current Pay Period";
+  }
+}
+
+/**
+ * Updates hours for a specific technician based on the Time Sheet
+ * @param {string} technicianName - The name of the technician to update
+ * @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
+ * @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
+ */
+function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
+  console.log("Starting updateHoursForTechnician for: " + technicianName);
+  
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var timeSheetTab = ss.getSheetByName('Time Sheet');
+    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    
+    if (!timeSheetTab) {
+      SpreadsheetApp.getUi().alert('Time Sheet tab not found!');
+      
+      // Reset the action dropdown
+      if (ratesSheet && actionRow && actionColumn) {
+        ratesSheet.getRange(actionRow, actionColumn).setValue("Ready");
+      }
+      return;
+    }
+    
+    // Get mapping for time sheet
+    var timeMapping = getTimeSheetMapping();
+    
+    // Get all data from Time Sheet
+    var timeSheetData = timeSheetTab.getDataRange().getValues();
+    
+    // Check that the time sheet has data
+    if (timeSheetData.length < timeMapping.dataStartRow) {
+      SpreadsheetApp.getUi().alert('Time Sheet data is not in the expected format!');
+      
+      // Reset the action dropdown
+      if (ratesSheet && actionRow && actionColumn) {
+        ratesSheet.getRange(actionRow, actionColumn).setValue("Ready");
+      }
+      return;
+    }
+    
+    // Get the current pay period
+    var currentPayPeriod = getCurrentPayPeriodForTimesheet();
+    
+    // Calculate hours for the specific technician
+    var regHours = 0;
+    var otHours = 0;
+    var dtHours = 0;
+    
+    // Skip the header rows
+    for (var i = timeMapping.dataStartRow - 1; i < timeSheetData.length; i++) {
+      var row = timeSheetData[i];
+      var name = row[timeMapping.nameColumn - 1];
+      
+      // Only process rows for this specific technician
+      if (name === technicianName) {
+        var regHoursValue = parseFloat(row[timeMapping.regHoursColumn - 1] || 0);
+        var otHoursValue = parseFloat(row[timeMapping.otHoursColumn - 1] || 0);
+        var dtHoursValue = parseFloat(row[timeMapping.dtHoursColumn - 1] || 0);
+        
+        console.log("Found hours for " + name + ": Reg=" + regHoursValue + ", OT=" + otHoursValue);
+        
+        regHours += regHoursValue;
+        otHours += otHoursValue;
+        dtHours += dtHoursValue;
+      }
+    }
+    
+    console.log("Total hours for " + technicianName + ": Reg=" + regHours + ", OT=" + otHours);
+    
+    // Try to find the technician's sheet
+    var techSheet;
+    try {
+      techSheet = ss.getSheetByName(technicianName);
+    } catch (e) {
+      console.error("Error finding technician sheet: " + e.message);
+    }
+    
+    if (!techSheet) {
+      SpreadsheetApp.getUi().alert('Could not find a sheet for technician: ' + technicianName);
+      
+      // Reset the action dropdown
+      if (ratesSheet && actionRow && actionColumn) {
+        ratesSheet.getRange(actionRow, actionColumn).setValue("Ready");
+      }
+      return;
+    }
+    
+    // Get the mapping for this technician sheet
+    var mapping = getTechnicianSheetMappingForTimesheet(techSheet);
+    
+    // Update the Pay Period
+    techSheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
+    
+    // Update the Regular Hours
+    techSheet.getRange(mapping.regHoursRow, mapping.valueColumn).setValue(regHours);
+    
+    // Update the Overtime Hours
+    techSheet.getRange(mapping.otHoursRow, mapping.valueColumn).setValue(otHours);
+    
+    // Recalculate pay values
+    var hourlyRate = techSheet.getRange(mapping.hourlyRateRow, mapping.valueColumn).getValue();
+    
+    // Regular pay
+    var regPay = regHours * hourlyRate;
+    techSheet.getRange(mapping.regHoursRow, mapping.calculatedValueColumn).setValue(regPay);
+    
+    // Overtime pay (hourly rate * 1.5)
+    var otPay = otHours * hourlyRate * 1.5;
+    techSheet.getRange(mapping.otHoursRow, mapping.calculatedValueColumn).setValue(otPay);
+    
+    // Get PTO hours and calculate PTO pay
+    var ptoHours = techSheet.getRange(mapping.ptoHoursRow, mapping.valueColumn).getValue();
+    var ptoPay = ptoHours * hourlyRate;
+    
+    // Update Total Hourly Pay
+    var totalHourlyPay = regPay + otPay + ptoPay;
+    techSheet.getRange(mapping.totalHourlyPayRow, mapping.calculatedValueColumn).setValue(totalHourlyPay);
+    
+    // Update the Total Pay cell
+    // First check if we found the Total Pay row in our mapping
+    if (mapping.totalPayRow > 0) {
+      // Get the total sales pay
+      var totalSalesPayValue = techSheet.getRange(mapping.totalSalesPayRow, mapping.calculatedValueColumn).getValue() || 0;
+      
+      // Calculate and update the Total Pay
+      var totalPay = totalHourlyPay + totalSalesPayValue;
+      techSheet.getRange(mapping.totalPayRow, mapping.calculatedValueColumn).setValue(totalPay);
+    }
+    
+    // Change the action dropdown to "Complete"
+    if (ratesSheet && actionRow && actionColumn) {
+      ratesSheet.getRange(actionRow, actionColumn).setValue("Complete");
+    }
+    
+    SpreadsheetApp.getUi().alert(
+      `Hours and Pay Period updated for ${technicianName}.\n` +
+      `Regular Hours: ${regHours}\n` +
+      `Overtime Hours: ${otHours}`
+    );
+    
+    console.log("Successfully updated hours for " + technicianName);
+    
+  } catch (error) {
+    console.error("Error in updateHoursForTechnician: " + error.message);
+    
+    // If there was an error, reset the action dropdown
+    try {
+      if (actionRow && actionColumn) {
+        var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Hourly + Spiff Pay');
+        if (ratesSheet) {
+          ratesSheet.getRange(actionRow, actionColumn).setValue("Ready");
+        }
+      }
+    } catch (e) {
+      console.error("Error resetting dropdown: " + e.message);
+    }
+    
+    SpreadsheetApp.getUi().alert("Error updating timesheet: " + error.message);
+  }
+}

@@ -1,0 +1,115 @@
+/**
+ * Cardinal Payroll System - Technician Rates
+ * This script handles updating technician hourly rates.
+ */
+
+/**
+ * Updates hourly rates for all technician sheets based on the Hourly + Spiff Pay sheet
+ * Only processes technicians with "Ready" status in the Action column
+ */
+function updateAllTechnicianRates() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+  
+  if (!ratesSheet) {
+    SpreadsheetApp.getUi().alert('Hourly + Spiff Pay sheet not found!');
+    return;
+  }
+  
+  // Get mapping for rates sheet
+  var ratesMapping = getRatesSheetMapping();
+  
+  // Get all data from the rates sheet
+  var ratesData = ratesSheet.getDataRange().getValues();
+  
+  // Create lookup objects for quick access
+  var techRates = {};
+  var techPositions = {};
+  var techStatuses = {};
+  
+  // Start from data start row (skipping headers)
+  for (var i = ratesMapping.dataStartRow - 1; i < ratesData.length; i++) {
+    var row = ratesData[i];
+    var techName = row[ratesMapping.nameColumn - 1];
+    var techPosition = row[ratesMapping.positionColumn - 1];
+    var techRate = row[ratesMapping.rateColumn - 1];
+    var techStatus = row[ratesMapping.actionColumn - 1] || "";
+    
+    // Skip empty rows
+    if (!techName) continue;
+    
+    techRates[techName] = techRate;
+    techPositions[techName] = techPosition;
+    techStatuses[techName] = techStatus;
+  }
+  
+  // Get the current pay period
+  var currentPayPeriod = getCurrentPayPeriod();
+  
+  // Get all sheets in the spreadsheet
+  var sheets = ss.getSheets();
+  
+  // List of sheets to exclude (not technician sheets)
+  var excludedSheets = [
+    'Hourly + Spiff Pay', 'PLB Install PBP', 'Spiff', 'Sample', 
+    'Summary', 'Time Sheet', 'Spiff/Bonus', 'Service', 'Yard Sign', 
+    'Sheet2', 'Template for Service'
+  ];
+  
+  var updatedCount = 0;
+  var skippedCount = 0;
+  
+  // Go through each sheet
+  for (var i = 0; i < sheets.length; i++) {
+    var sheet = sheets[i];
+    var sheetName = sheet.getName();
+    
+    // Skip sheets that aren't technician sheets
+    if (excludedSheets.includes(sheetName)) {
+      continue;
+    }
+    
+    // Check if this sheet name matches a technician
+    if (techRates[sheetName]) {
+      // Only process if status is "Ready"
+      if (techStatuses[sheetName] === "Ready") {
+        try {
+          console.log('Processing ' + sheetName + ' with rate: ' + techRates[sheetName]);
+          
+          // Get mapping for this technician sheet
+          var mapping = getTechnicianSheetMapping(sheet);
+          
+          // Update the position
+          sheet.getRange(mapping.positionRow, 1).setValue(techPositions[sheetName]);
+          
+          // Update hourly rate in B5
+          sheet.getRange(mapping.hourlyRateRow, mapping.valueColumn).setValue(techRates[sheetName]);
+          
+          // Update PTO rate (if the mapping has this field)
+          if (mapping.ptoRateColumn) {
+            sheet.getRange(mapping.hourlyRateRow, mapping.ptoRateColumn).setValue(techRates[sheetName]);
+          }
+          
+          // Update pay period
+          sheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
+          
+          // Mark as complete in the rates sheet
+          var techRowInRatesSheet = findTechnicianRow(ratesSheet, sheetName, ratesMapping.dataStartRow);
+          if (techRowInRatesSheet > 0) {
+            ratesSheet.getRange(techRowInRatesSheet, ratesMapping.actionColumn).setValue("Complete");
+          }
+          
+          updatedCount++;
+          console.log('Updated rates for ' + sheetName);
+        } catch (error) {
+          console.error("Error updating rates for " + sheetName + ": " + error.message);
+        }
+      } else {
+        skippedCount++;
+        console.log('Skipped ' + sheetName + ' - Status is not Ready: ' + techStatuses[sheetName]);
+      }
+    }
+  }
+  
+  SpreadsheetApp.getUi().alert('Updated rates for ' + updatedCount + ' technicians.\nSkipped ' + skippedCount + ' technicians without "Ready" status.');
+}
