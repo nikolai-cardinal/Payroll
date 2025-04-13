@@ -1,0 +1,94 @@
+/**
+ * Cardinal Payroll System - Spiff/Bonus Section Finders
+ * Contains functions for locating specific sections within technician sheets.
+ */
+
+/**
+ * Finds the row number containing the header for the Spiff Customer Data section.
+ * Searches column A for variations of the header text.
+ * Relies on findRowWithText utility (expected to be in SpiffBonusDataUtils.gs).
+ * @param {Sheet} sheet The technician sheet object to search within.
+ * @return {number} The 1-based row index of the section header, or -1 if not found.
+ */
+ function findSpiffCustomerDataSection(sheet) {
+  if (!sheet) return -1;
+  // Prioritize specific, potentially newer headers first
+  var variations = [
+    "Customer Name [Spiff]", // Most specific?
+    "Spiff [Customer Data]",
+    "Spiff [Cutomer Data]",  // Typo variation
+    "SPIFF [Customer Data]",
+    "Spiff Customer Data",
+    "SPIFF Customer Data",
+    "Spiff Data"             // Less specific
+  ];
+ 
+  for (var i = 0; i < variations.length; i++) {
+    // Use the generic findRowWithText utility
+    var foundRow = findRowWithText(sheet, variations[i], 1, 1, 30, false); // Search Col A (index 1), first 30 rows, exact match
+    if (foundRow > 0) return foundRow;
+  }
+ 
+  // Fallback: partial match if no exact header found
+  var foundPartialRow = findRowWithText(sheet, "spiff", 1, 1, 30, true); // Search Col A, first 30 rows, partial match
+  if (foundPartialRow > 0) {
+     // Verify the partial match also contains 'data' or 'customer'
+     var val = sheet.getRange(foundPartialRow, 1).getValue();
+     if (val && typeof val === 'string') {
+        var lower = val.toLowerCase();
+        if (lower.includes("data") || lower.includes("customer")) {
+            console.log("Found Spiff section using partial match ('" + val + "') at row: " + foundPartialRow);
+            return foundPartialRow;
+        }
+     }
+  }
+ 
+  console.error("Could not find Spiff Customer Data section header in sheet: " + sheet.getName());
+  return -1;
+ }
+ 
+ /**
+ * Finds the row number of the *next* non-empty cell in Column A after a given start row.
+ * This helps determine the end of the Spiff data section before the next section (e.g., Install) begins.
+ * @param {Sheet} sheet The sheet object to search within.
+ * @param {number} searchStartRow The 1-based row index to start searching *after*.
+ * @param {number} [maxRowsToSearch=60] Maximum number of rows to look ahead.
+ * @return {number} The 1-based row index of the next cell with content, or -1 if none found within range.
+ */
+ function findNextSectionStart(sheet, searchStartRow, maxRowsToSearch) {
+    if (!sheet || searchStartRow <= 0) return -1;
+    var startLookup = searchStartRow;
+    var rowsToScan = maxRowsToSearch || 60; // Default scan range
+ 
+    var lastRow = sheet.getLastRow();
+    if (startLookup > lastRow) return -1; 
+    if (startLookup + rowsToScan - 1 > lastRow) {
+        rowsToScan = lastRow - startLookup + 1;
+    }
+    if (rowsToScan <= 0) return -1;
+ 
+    var searchRange = sheet.getRange(startLookup, 1, rowsToScan, 1); // Look ahead in Column A
+    var values = searchRange.getValues();
+ 
+    for (var i = 0; i < values.length; i++) {
+        var actualRow = startLookup + i;
+        var cellValue = values[i][0];
+        if (cellValue && typeof cellValue === 'string') {
+             var trimmedValue = cellValue.trim();
+             var lowerValue = trimmedValue.toLowerCase();
+ 
+             // Identify potential new section headers
+             if (trimmedValue.length > 0 && !lowerValue.includes("spiff") && lowerValue !== "total") {
+                 // Check common section keywords or structure
+                 if (lowerValue.includes("data") || lowerValue.includes("sales") || lowerValue.includes("install") || lowerValue.includes("bonus") || lowerValue.includes("lead") || lowerValue.includes("customer") || lowerValue.includes("hourly") || trimmedValue.endsWith("Data]") || lowerValue.startsWith("total ")) { 
+                     console.log("findNextSectionStart: Found next section header '" + trimmedValue + "' at row " + actualRow);
+                     return actualRow; 
+                 }
+             }
+        }
+    }
+ 
+    console.log("Warning: findNextSectionStart did not find a clear next section header in Col A after row " + (startLookup-1) + " within " + rowsToScan + " rows in sheet " + sheet.getName() + ". Returning last data row + 1.");
+    // Fallback: Return last row + 1 as a safe boundary
+    return sheet.getLastRow() + 1;
+ } 

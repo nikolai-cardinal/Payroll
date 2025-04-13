@@ -1,0 +1,7 @@
+Bonus Calculation Logic (Original Requirements)
+When the "spiff and bonus" action is triggered, the system retrieves the technician's name and the Spiff/Bonus sheet data
+For each row in the Spiff/Bonus sheet:
+The system checks if the technician's name appears in both column F (sold by) and column G (assigned technician)
+If there's a match, a bonus from the column I is added to the total
+The system also checks if column F is empty but the technician name is in column G, and adds a bonus that is in the column I in this case as well
+The total calculated bonus is then updated in the technician's sheet

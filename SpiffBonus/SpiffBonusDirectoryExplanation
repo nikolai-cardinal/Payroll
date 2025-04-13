@@ -1,0 +1,57 @@
+**Directory:** `SpiffBonus/`
+
+*   **`SpiffBonusCalculator`**
+    *   **Purpose:** Calculates the total Spiff/Bonus amount based on specific rules defined within the function. *Note: In the last reviewed version, this specific calculation logic wasn't directly used by the main processor, which instead summed amounts from filtered data, but the function is preserved here.*
+    *   **Functions:**
+        *   `calculateSpiffAndBonus(spiffBonusSheet, technicianName, headerMap, spiffBonusData)`
+
+*   **`SpiffBonusDataUtils`**
+    *   **Purpose:** Provides general utility functions for data manipulation, searching, and formatting used across the Spiff/Bonus modules.
+    *   **Functions:**
+        *   `findRowWithText(sheet, textToFind, column_one_indexed, startRow, endRow, allowPartialMatch)`
+        *   `tryParseDate(input)`
+        *   `formatDate(dateValue, format, timezone)`
+        *   `columnToLetter(columnNumber)`
+
+*   **`SpiffBonusDataWriter`**
+    *   **Purpose:** Handles writing the processed Spiff/Bonus customer data entries and the calculated total row onto the relevant technician's sheet.
+    *   **Functions:**
+        *   `writeSpiffDataToSheet(techSheet, spiffHeaderRow, customerData)`
+        *   `addSpiffTotalRow(techSheet, spiffHeaderRow, dataRowCount, filteredTotalSpiff)`
+
+*   **`SpiffBonusHeaderMap`**
+    *   **Purpose:** Responsible for reading the header row of the "Spiff/Bonus" sheet and creating a mapping between expected column names (like 'customerName', 'soldBy') and their actual column index numbers. Handles variations in header naming.
+    *   **Functions:**
+        *   `getSpiffBonusHeaderMap(sheet)`
+
+*   **`SpiffBonusMainProcessor`**
+    *   **Purpose:** Contains the main orchestrating function (`processSpiffAndBonus`) that is called when the "Spiff/Bonus" action is triggered for a technician. It coordinates calls to other modules to get data, calculate totals, update the technician sheet, and display a summary.
+    *   **Functions:**
+        *   `processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, triggerRow, triggerCol)`
+
+*   **`SpiffBonusSectionClearer`**
+    *   **Purpose:** Contains the logic to clear out the existing data, formatting, and borders within the Spiff data section on a technician's sheet before new data is written.
+    *   **Functions:**
+        *   `clearSpiffDataSection(sheet)`
+
+*   **`SpiffBonusSectionFinders`**
+    *   **Purpose:** Provides functions specifically for locating the start and end rows of the Spiff data section within a technician's sheet, using header text variations.
+    *   **Functions:**
+        *   `findSpiffCustomerDataSection(sheet)`
+        *   `findNextSectionStart(sheet, searchStartRow, maxRowsToSearch)`
+
+*   **`SpiffBonusSheetManager`**
+    *   **Purpose:** Manages the number of rows within a specific section of a sheet. It adds or deletes rows as needed to ensure there's exactly enough space for the incoming data plus any required total rows.
+    *   **Functions:**
+        *   `manageSheetRows(sheet, dataStartRow, currentRows, requiredRows)`
+
+*   **`SpiffBonusSummaryUpdater`**
+    *   **Purpose:** Updates the summary section typically found at the top of a technician's sheet. It inserts the calculated total Spiff amount and recalculates dependent totals like "Total Sales Pay" and "Total Pay".
+    *   **Functions:**
+        *   `updateTopSummarySpiffs(techSheet, totalSpiff, spiffCount)`
+
+*   **`SpiffBonusUtilities`**
+    *   **Purpose:** Contains remaining general utility functions related to the Spiff/Bonus process that didn't fit into the more specific categories above. Currently includes getting the rates sheet mapping and resetting the action dropdown status.
+    *   **Functions:**
+        *   `getRatesSheetMapping()`
+        *   `resetActionDropdown(ratesSheet, row, col)` 

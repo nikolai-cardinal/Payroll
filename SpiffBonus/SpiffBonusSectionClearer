@@ -1,0 +1,85 @@
+/**
+ * Cardinal Payroll System - Spiff/Bonus Section Clearer
+ * Contains functions for clearing the Spiff data section in technician sheets.
+ */
+
+/**
+* Clears the data area within the Spiff section before writing new data or if no data exists.
+* Also removes formatting and borders, writes a clean Total row, and deletes excess rows.
+* @param {Sheet} sheet - The technician sheet to clear.
+*/
+function clearSpiffDataSection(sheet) {
+  if (!sheet) return;
+  try {
+    var spiffSectionRow = findSpiffCustomerDataSection(sheet); // Expects findSpiffCustomerDataSection in SpiffBonusSectionFinders.gs
+    if (spiffSectionRow <= 0) {
+      console.log("Clear Spiff Data: Spiff section not found in " + sheet.getName());
+      return;
+    }
+    var spiffHeaderRow = spiffSectionRow + 1; // Assuming header is directly below section title
+    var spiffDataStartRow = spiffHeaderRow + 1;
+    var nextSectionRow = findNextSectionStart(sheet, spiffHeaderRow + 1); // Expects findNextSectionStart in SpiffBonusSectionFinders.gs
+    
+    if (nextSectionRow <= 0) {
+       nextSectionRow = sheet.getLastRow() + 1;
+       console.log("Clear Spiff Data: No next section found, using last row + 1 (" + nextSectionRow + ") as boundary for " + sheet.getName());
+    }
+
+    var rowsToClear = 0;
+    if (spiffDataStartRow < nextSectionRow) {
+        rowsToClear = nextSectionRow - spiffDataStartRow;
+    } else {
+        console.log("Clear Spiff Data: Data start row is not before next section row. Assuming empty section in " + sheet.getName());
+    }
+
+    var numColsToClear = 10; // Clear columns A-J
+
+    if (rowsToClear > 0) {
+      var rangeToClear = sheet.getRange(spiffDataStartRow, 1, rowsToClear, numColsToClear);
+      rangeToClear.clear({contentsOnly: false, formatOnly: false, commentsOnly: false, validationsOnly: false});
+      rangeToClear.setBorder(false,false,false,false,false,false);
+      console.log("Cleared Spiff data content/format for " + sheet.getName() + " from row " + spiffDataStartRow + " for " + rowsToClear + " rows.");
+    } else {
+      // Even if no data rows, clear the potential total row area
+      sheet.getRange(spiffDataStartRow, 1, 1, numColsToClear)
+           .clear({contentsOnly: false, formatOnly: false, commentsOnly: false, validationsOnly: false})
+           .setBorder(false,false,false,false,false,false);
+      console.log("Clear Spiff Data: No existing data rows found/needed to clear in " + sheet.getName() + ". Ensured total row area is clear.");
+    }
+
+    // Write a clean 'Total' row
+    var amountCol = 4; // Column D for Spiffs
+    var totalLabelCol = 1; // Column A for Label
+    sheet.getRange(spiffDataStartRow, totalLabelCol).setValue("Total").setFontWeight("bold");
+    sheet.getRange(spiffDataStartRow, amountCol).setValue(0).setNumberFormat("$#,##0.00").setFontWeight("bold");
+    sheet.getRange(spiffDataStartRow, 1, 1, Math.max(5, amountCol))
+         .setBorder(null, null, true, null, null, null, "black", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+
+    // Delete any extra rows *between* the new Total row and the previously determined next section start
+    var firstRowToDelete = spiffDataStartRow + 1;
+    if (nextSectionRow > firstRowToDelete) {
+        var numRowsToDelete = nextSectionRow - firstRowToDelete;
+        // Boundary check: don't delete past the last row of the sheet
+        var lastRow = sheet.getLastRow();
+        if (firstRowToDelete > lastRow) {
+            console.log("No extra rows to delete after clearing spiff section (start row beyond last row).");
+        } else {
+           if ((firstRowToDelete + numRowsToDelete - 1) > lastRow) {
+               numRowsToDelete = lastRow - firstRowToDelete + 1; // Adjust count if it exceeds sheet bounds
+           }
+           if (numRowsToDelete > 0) {
+              sheet.deleteRows(firstRowToDelete, numRowsToDelete);
+              console.log("Deleted " + numRowsToDelete + " extra rows after clearing spiff section, starting from row " + firstRowToDelete + " in " + sheet.getName());
+           } else {
+              console.log("No valid extra rows detected to delete after adjustment.");
+           }
+        }
+    } else {
+        console.log("No extra rows detected to delete after clearing spiff section in " + sheet.getName());
+    }
+
+  } catch (e) {
+    console.error("Error clearing spiff data section for " + sheet.getName() + ": " + e);
+    // SpreadsheetApp.getUi().alert("Error clearing spiff section for " + sheet.getName() + ": " + e.message);
+  }
+} 

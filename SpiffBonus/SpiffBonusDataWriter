@@ -1,0 +1,105 @@
+/**
+ * Cardinal Payroll System - Spiff/Bonus Data Writer
+ * Contains functions for writing Spiff/Bonus data and totals to technician sheets.
+ */
+
+/**
+* Writes the collected Spiff data into the designated rows on the technician sheet.
+* Assumes rows have been managed (cleared and sized correctly) beforehand.
+* Calculates and returns the total spiff amount based ONLY on items where Sold By Technician is empty.
+*
+* @param {Sheet} techSheet The technician's sheet object.
+* @param {number} spiffHeaderRow The 1-based row index of the Spiff section's header row (titles).
+* @param {Array<Object>} customerData An array of objects, each representing a spiff entry.
+*                                     Expected properties: customerName, jobBusinessUnit, completionDate, commission, itemName, 
+*                                     ***AND soldByTechnician*** (this property must be added during data collection).
+* @return {number} The calculated total spiff amount considering all entries.
+*/
+function writeSpiffDataToSheet(techSheet, spiffHeaderRow, customerData) {
+  if (!techSheet || spiffHeaderRow <= 0 || !customerData) {
+    console.error("writeSpiffDataToSheet: Invalid parameters.");
+    return 0; // Return 0 if invalid parameters
+  }
+
+  var dataWriteStartRow = spiffHeaderRow + 1;
+  var numCols = 5; // Number of columns to write (A-E)
+  var filteredTotalSpiff = 0; // Initialize the total
+
+  // Check if there is data to write before proceeding
+  if (!customerData || customerData.length === 0) {
+      console.log("No spiff data provided to writeSpiffDataToSheet for " + techSheet.getName() + ".");
+      // The total row should still be added by addSpiffTotalRow, passing the filtered total (0)
+      return filteredTotalSpiff; // Return 0 if no data
+  }
+
+  var tz = Session.getScriptTimeZone() || 'America/New_York'; // Get timezone for date formatting
+
+  // Prepare data array for efficient writing AND calculate total
+  var dataToWrite = customerData.map(function(c) {
+    // Calculate total: Include commission for all entries
+    // Ensure commission is treated as a number
+    var commissionAmount = Number(c.commission || 0);
+    filteredTotalSpiff += commissionAmount; // Include all commissions
+
+    var dateObj = tryParseDate(c.completionDate); // Expects tryParseDate in SpiffBonusDataUtils.gs
+    var displayDate = dateObj
+      ? Utilities.formatDate(dateObj, tz, 'MM/dd/yyyy') // Expects Utilities library
+      : (c.completionDate || ""); // Use original string if parsing fails
+
+    return [
+      c.customerName || "",       // Column A: Customer Name
+      c.jobBusinessUnit || "",   // Column B: Business Unit
+      displayDate,              // Column C: Completion Date (formatted)
+      commissionAmount,         // Column D: Commission Amount (use the numeric value)
+      c.itemName || ""          // Column E: Item Name
+    ];
+  });
+
+  // Write data in bulk
+  var targetRange = techSheet.getRange(dataWriteStartRow, 1, dataToWrite.length, numCols);
+  targetRange.setValues(dataToWrite);
+
+  // Apply number formatting to the Commission column (Column D)
+  techSheet.getRange(dataWriteStartRow, 4, dataToWrite.length, 1).setNumberFormat('$' + '#,##0.00');
+  // Apply date formatting to the Completion Date column (Column C)
+  techSheet.getRange(dataWriteStartRow, 3, dataToWrite.length, 1).setNumberFormat('MM/dd/yyyy');
+
+  console.log(`Wrote ${dataToWrite.length} spiff entries to sheet ${techSheet.getName()} starting at row ${dataWriteStartRow}.`);
+  console.log(`Calculated Filtered Total Spiff: ${filteredTotalSpiff}`);
+
+  // Return the calculated total
+  return filteredTotalSpiff; 
+}
+
+
+/**
+* Adds the "Total" row below the written spiff data.
+* Sets the total value based on the pre-calculated filtered amount.
+*
+* @param {Sheet} techSheet The technician's sheet object.
+* @param {number} spiffHeaderRow The 1-based row index of the Spiff section's header row.
+* @param {number} dataRowCount The number of actual spiff data rows written (used to position the total row).
+* @param {number} filteredTotalSpiff The pre-calculated total spiff amount to display.
+*/
+function addSpiffTotalRow(techSheet, spiffHeaderRow, dataRowCount, filteredTotalSpiff) {
+  if (!techSheet || spiffHeaderRow <= 0 || dataRowCount < 0 || filteredTotalSpiff === undefined || filteredTotalSpiff === null) {
+    console.error("addSpiffTotalRow: Invalid parameters.");
+    return;
+  }
+
+  var dataStartRow = spiffHeaderRow + 1;
+  var totalRowIndex = dataStartRow + dataRowCount; // Row where the total should go
+
+  // Ensure filteredTotal is a number
+  var totalValue = Number(filteredTotalSpiff || 0);
+
+  // Clear the total row first (across relevant columns, e.g., A to E)
+  techSheet.getRange(totalRowIndex, 1, 1, 5).clearContent().setFontWeight(null); // Clear content and reset font weight
+
+  // Set "Total" label in Column A
+  techSheet.getRange(totalRowIndex, 1).setValue("Total").setFontWeight("bold");
+
+  // Set the calculated VALUE in Column D
+  techSheet.getRange(totalRowIndex, 4).setValue(totalValue).setNumberFormat('$' + '#,##0.00').setFontWeight("bold");
+  console.log(`Added Total row at ${totalRowIndex} with calculated value ${totalValue} in sheet ${techSheet.getName()}.`);
+} 

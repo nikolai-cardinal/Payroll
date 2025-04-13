@@ -1,0 +1,75 @@
+/**
+ * Cardinal Payroll System - Spiff/Bonus Calculator
+ * Contains functions for calculating Spiff/Bonus amounts.
+ */
+
+/**
+ * Calculates the total Spiff/Bonus amount for a given technician based on matching criteria
+ * in the Spiff/Bonus sheet data.
+ * Handles potential merged cells by relying on the array populated by getValues().
+ * Bonus Rule: +$25 for each row where:
+ *   1) Tech Name == Sold By (F) AND Tech Name == Assigned Tech (G)
+ *   OR
+ *   2) Sold By (F) is EMPTY AND Tech Name == Assigned Tech (G)
+ *
+ * @param {Sheet} spiffBonusSheet The actual 'Spiff/Bonus' sheet object (used only for potential logging/context, not direct cell reads here).
+ * @param {string} technicianName The name of the technician to calculate for.
+ * @param {Object} headerMap An object mapping standardized header names to column indices (1-based),
+ *                           obtained from getSpiffBonusHeaderMap(). Requires 'soldBy' and 'assignedTechnician'.
+ * @param {Array<Array>} spiffBonusData 2D array of data from the 'Spiff/Bonus' sheet (including headers).
+ * @return {number} The total calculated bonus amount for the technician.
+ */
+function calculateSpiffAndBonus(spiffBonusSheet, technicianName, headerMap, spiffBonusData) {
+  var totalBonus = 0;
+  const bonusAmount = 25;
+
+  // Validate required header map keys
+  if (!headerMap || headerMap.soldBy === null || headerMap.assignedTechnician === null) {
+    console.error("calculateSpiffAndBonus: Invalid headerMap. Missing 'soldBy' or 'assignedTechnician' column index.");
+    SpreadsheetApp.getUi().alert("Error: Could not find required 'Sold By' or 'Technician' columns in the Spiff/Bonus sheet. Please check headers.");
+    return 0; // Return 0 if headers are missing
+  }
+  console.log(`Calculating bonus for ${technicianName}. SoldBy Col: ${headerMap.soldBy}, AssignedTech Col: ${headerMap.assignedTechnician}`);
+
+  // Get 0-based indices for accessing array data
+  const soldByIndex = headerMap.soldBy - 1;
+  const assignedIndex = headerMap.assignedTechnician - 1;
+
+  // Start from row 1 to skip header row in the data array
+  for (var i = 1; i < spiffBonusData.length; i++) {
+    var rowData = spiffBonusData[i];
+    var sheetRowIndex = i + 1; // Corresponding 1-based row index in the sheet (for logging)
+
+    // Ensure rowData has enough columns based on indices
+    if (rowData.length <= Math.max(soldByIndex, assignedIndex)) {
+      // console.warn(`Skipping sheet row ${sheetRowIndex} due to insufficient columns in data array.`); // Reduced verbosity
+      continue;
+    }
+
+    // --- Get values directly from the data array ---
+    // Relying on getValues() to correctly populate values for merged cells across the merged range.
+    var soldByValue = rowData[soldByIndex];
+    var assignedValue = rowData[assignedIndex];
+
+    // Normalize names (use toString() to handle potential non-string values)
+    var soldByTrimmed = (soldByValue || "").toString().trim();
+    var assignedTrimmed = (assignedValue || "").toString().trim();
+    var techNameTrimmed = technicianName.trim();
+
+    // Condition 1: Tech name matches both Sold By and Assigned
+    if (soldByTrimmed === techNameTrimmed && assignedTrimmed === techNameTrimmed) {
+      totalBonus += bonusAmount;
+      // console.log(`Row ${sheetRowIndex}: Match Condition 1 for ${techNameTrimmed}. Bonus: ${totalBonus}`);
+      continue; // Don't double count if both conditions could be met
+    }
+
+    // Condition 2: Sold By is empty AND Tech name matches Assigned
+    if (!soldByTrimmed && assignedTrimmed === techNameTrimmed) {
+      totalBonus += bonusAmount;
+      // console.log(`Row ${sheetRowIndex}: Match Condition 2 for ${techNameTrimmed}. Bonus: ${totalBonus}`);
+    }
+  }
+
+  console.log(`Total calculated Spiff/Bonus for ${technicianName}: ${totalBonus}`);
+  return totalBonus;
+} 

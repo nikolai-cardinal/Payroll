@@ -366,6 +366,3 @@ return {
 * @return {Object} An object containing row and column indexes for important fields
 */
 // ... existing code ...
-
-
-

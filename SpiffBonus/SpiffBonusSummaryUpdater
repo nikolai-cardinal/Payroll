@@ -1,0 +1,131 @@
+/**
+ * Cardinal Payroll System - Spiff/Bonus Summary Updater
+ * Contains functions for updating the top summary section of technician sheets.
+ */
+
+/**
+* Updates the top summary section of the technician's sheet with the calculated total Spiff amount.
+* Also recalculates "Total Sales Pay" and "Total Pay" based on related fields.
+*
+* @param {Sheet} techSheet - The technician sheet object.
+* @param {number} totalSpiff - The total SPIFF amount calculated from the 'Spiff/Bonus' sheet.
+* @param {number} spiffCount - The number of SPIFF entries (optional)
+*/
+function updateTopSummarySpiffs(techSheet, totalSpiff, spiffCount) {
+  if (!techSheet) {
+      console.error("updateTopSummarySpiffs: techSheet parameter is missing.");
+      return;
+  }
+  console.log(`Updating top summary for ${techSheet.getName()} with Total Spiff: ${totalSpiff}`);
+
+  // Default spiff count to 1 if not provided
+  var numSpiffs = (spiffCount !== undefined) ? spiffCount : 1;
+
+  // --- Constants for Columns (1-based) ---
+  const LABEL_COLUMN = 1; // Column A in 1-based indexing
+  const TOTAL_COLUMN = 2; // Column B for count/number values
+  const PAY_COLUMN = 3;   // Column C for monetary values (previously was VALUE_COLUMN = 4)
+
+  // --- Get Data from a Fixed Range ---
+  // Read the first 60 rows and first 5 columns (A-E) to ensure summary is captured.
+  const searchRange = techSheet.getRange(1, 1, 60, 5); // Rows 1-60, Columns A-E
+  const sheetData = searchRange.getValues();
+
+  // Initialize row indices
+  var totalSpiffRow = -1;
+  var totalSalesPayRow = -1;
+  var totalPayRow = -1;
+  var installPayRow = -1;
+  var leadSetRow = -1;
+  var totalHourlyPayRow = -1;
+
+  // --- Find Rows Using Exact Matching Only ---
+  for (var i = 0; i < sheetData.length; i++) {
+    var rowIndex = i + 1; // 1-based row index
+    // Adjusted index for sheetData array (which is 0-based). Column B is index 1.
+    var labelValue = sheetData[i][0]; // CORRECTED: Check Column A (index 0) for labels
+
+    if (labelValue && typeof labelValue === 'string') {
+      var labelText = labelValue.trim();
+      var normalizedLabel = labelText.replace(/\s+/g, ' ');
+      var labelLower = normalizedLabel.toLowerCase();
+
+      // Removed verbose logging for brevity in production, can be re-enabled for debug
+      // console.log(`Row ${rowIndex}: Checking normalized label: "${labelLower}"`); 
+
+      switch (labelLower) {
+        case "total spiff":
+          if (totalSpiffRow < 0) totalSpiffRow = rowIndex;
+          break;
+        case "total sales pay":
+          if (totalSalesPayRow < 0) totalSalesPayRow = rowIndex;
+          break;
+        case "total pay":
+          if (totalPayRow < 0) totalPayRow = rowIndex;
+          break;
+        case "total install pay":
+          if (installPayRow < 0) installPayRow = rowIndex;
+          break;
+        case "lead set sale":
+          if (leadSetRow < 0) leadSetRow = rowIndex;
+          break;
+        case "total hourly pay":
+          if (totalHourlyPayRow < 0) totalHourlyPayRow = rowIndex;
+          break;
+      }
+    }
+  }
+
+  console.log(`Final row mappings (Exact Match Only): TotalSpiff=${totalSpiffRow}, TotalSales=${totalSalesPayRow}, TotalPay=${totalPayRow}, Install=${installPayRow}, Lead=${leadSetRow}, TotalHourly=${totalHourlyPayRow}`);
+
+  // --- Update "Total Spiff" Line --- (Value in Column B for count, Column C for amount)
+  if (totalSpiffRow > 0) {
+    try {
+      // Update Column B with the number of spiffs
+      techSheet.getRange(totalSpiffRow, TOTAL_COLUMN).setValue(numSpiffs);
+      // Update Column C with the total spiff amount
+      techSheet.getRange(totalSpiffRow, PAY_COLUMN).setValue(totalSpiff).setNumberFormat('$'+'#,##0.00');
+      console.log(`Updated 'Total Spiff' on row ${totalSpiffRow}, Col B to ${numSpiffs}, Col C to ${totalSpiff}`);
+    } catch (e) {
+      console.error(`Error updating 'Total Spiff' row (${totalSpiffRow}): ${e.message}`);
+    }
+  } else {
+    console.error("CRITICAL: Could not find exact match for 'Total Spiff' row in top summary for " + techSheet.getName() + ". Summary update aborted."); // Log as error
+    return; // Stop further processing in this function if Total Spiff row is missing
+  }
+
+  // --- Recalculate "Total Sales Pay" --- (Value in Column C)
+  if (totalSalesPayRow > 0) {
+    try {
+      var installVal = (installPayRow > 0) ? Number(techSheet.getRange(installPayRow, PAY_COLUMN).getValue() || 0) : 0;
+      var leadVal = (leadSetRow > 0) ? Number(techSheet.getRange(leadSetRow, PAY_COLUMN).getValue() || 0) : 0;
+      var numericTotalSpiff = Number(totalSpiff || 0);
+      
+      // Correction: Total Sales Pay = Total Spiff + Install + Lead Set
+      var totalSales = numericTotalSpiff + installVal + leadVal;
+
+      techSheet.getRange(totalSalesPayRow, PAY_COLUMN).setValue(totalSales).setNumberFormat('$'+'#,##0.00');
+      console.log(`Updated 'Total Sales Pay' on row ${totalSalesPayRow}, Col C to ${totalSales}`);
+    } catch (e) {
+      console.error(`Error updating 'Total Sales Pay' row (${totalSalesPayRow}): ${e.message}`);
+    }
+  } else {
+    console.warn("Could not find exact match for 'Total Sales Pay' row in top summary for " + techSheet.getName());
+  }
+
+  // --- Recalculate "Total Pay" --- (Value in Column C)
+  if (totalPayRow > 0 && totalHourlyPayRow > 0 && totalSalesPayRow > 0) {
+    try {
+      var hourlyPay = Number(techSheet.getRange(totalHourlyPayRow, PAY_COLUMN).getValue() || 0);
+      var salesPay = Number(techSheet.getRange(totalSalesPayRow, PAY_COLUMN).getValue() || 0);
+
+      var totalPay = hourlyPay + salesPay;
+      techSheet.getRange(totalPayRow, PAY_COLUMN).setValue(totalPay).setNumberFormat('$'+'#,##0.00');
+      console.log(`Updated 'Total Pay' on row ${totalPayRow}, Col C to ${totalPay}`);
+    } catch (e) {
+      console.error(`Error updating 'Total Pay' row (${totalPayRow}): ${e.message}`);
+    }
+  } else {
+    console.warn(`Could not find one or more required rows (exact match) for 'Total Pay' calculation in ${techSheet.getName()}: Total Pay (${totalPayRow}), Total Hourly (${totalHourlyPayRow}), Total Sales (${totalSalesPayRow})`);
+  }
+} 
