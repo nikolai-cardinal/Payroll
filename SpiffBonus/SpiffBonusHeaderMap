@@ -61,7 +61,44 @@ function getSpiffBonusHeaderMap(sheet) {
  
   // --- Refinements and Fallbacks ---
  
-  // If the primary bonus amount wasn't found with specific terms, try broader terms again
+  // Improved assignedTechnician detection for plural forms
+  if (!map.assignedTechnician) {
+    for (var c = 0; c < headers.length; c++) {
+      var h = (headers[c] || "").toString().trim().toLowerCase();
+      var columnIndex = c + 1;
+      if ((h.includes("assigned") && (h.includes("tech") || h.includes("technician"))) || 
+          h === "technicians" || h === "assigned techs") {
+        map.assignedTechnician = columnIndex;
+        console.log(`Found assignedTechnician with plural form: '${headers[c]}' in column ${columnIndex}`);
+        break;
+      }
+    }
+  }
+ 
+  // --- Specific Check for '$ Bonus' ---
+  // Try to find '$ Bonus' specifically before broad fallbacks, as it often holds the actual value.
+  if (!map.actualBonusAmount || !map.bonusAmount) { // Check if either is still needed
+      for (var c_dollar = 0; c_dollar < headers.length; c_dollar++) {
+          var h_dollar = (headers[c_dollar] || "").toString().trim().toLowerCase();
+          var colIdx_dollar = c_dollar + 1;
+          if (h_dollar === "$ bonus" || h_dollar === "bonus $" || h_dollar === "actual bonus" || h_dollar === "actual spiff") { // More specific check
+              if (!map.actualBonusAmount) { // Prioritize filling actualBonusAmount
+                  map.actualBonusAmount = colIdx_dollar;
+                  console.log(`Found potential actualBonusAmount via specific check: '${headers[c_dollar]}' in column ${colIdx_dollar}`);
+              }
+              if (!map.bonusAmount) { // Also fill bonusAmount if it's empty
+                  map.bonusAmount = colIdx_dollar;
+                  console.log(`Assigning bonusAmount based on specific check: '${headers[c_dollar]}' in column ${colIdx_dollar}`);
+              }
+              // If we found it for both needed slots, we can stop searching this specific pattern
+              if (map.actualBonusAmount && map.bonusAmount) {
+                  break;
+              }
+          }
+      }
+  }
+ 
+  // If the primary bonus amount wasn't found with specific terms OR the specific '$ Bonus' check, try broader terms again
   if (!map.bonusAmount) {
      for (var c2 = 0; c2 < headers.length; c2++) {
          var h2 = (headers[c2] || "").toString().trim().toLowerCase();
@@ -75,14 +112,29 @@ function getSpiffBonusHeaderMap(sheet) {
   }
  
   // Look for 'Actual Bonus Amount' or similar, often in the column *after* the main bonus column
-  if (map.bonusAmount) {
-    var nextIndex = map.bonusAmount; // This is 1-based index + 1 = next column
+  // This might be redundant now but leave as a secondary check
+  if (map.bonusAmount && !map.actualBonusAmount) { // Only run if actual still missing
+    var nextIndex = map.bonusAmount; // This is 1-based index + 1 = next column index
     if (nextIndex < headers.length) { // Check if next column exists
       var nextHeader = (headers[nextIndex] || "").toString().trim().toLowerCase();
       // Check if the *next* column seems like an amount column (useful if main one is boolean)
       if (nextHeader.includes("actual") || nextHeader.includes("$") || nextHeader.includes("amount") || nextHeader.includes("value")) {
         map.actualBonusAmount = nextIndex + 1; // map.bonusAmount is 1-based, headers is 0-based, so +1 gets 1-based next col index
         console.log(`Found actualBonusAmount: '${headers[nextIndex]}' in column ${map.actualBonusAmount}`);
+      }
+    }
+  }
+ 
+  // Second attempt to find actualBonusAmount anywhere in the headers (if specific check and next col failed)
+  if (!map.actualBonusAmount) {
+    for (var c = 0; c < headers.length; c++) {
+      var h = (headers[c] || "").toString().trim().toLowerCase();
+      var columnIndex = c + 1;
+      if ((h.includes("actual") && (h.includes("bonus") || h.includes("amount"))) || 
+          h === "$ bonus" || h === "bonus $" || h === "$ amount") {
+        map.actualBonusAmount = columnIndex;
+        console.log(`Found actualBonusAmount in separate search: '${headers[c]}' in column ${columnIndex}`);
+        break;
       }
     }
   }
@@ -125,6 +177,21 @@ function getSpiffBonusHeaderMap(sheet) {
   if (!map.soldBy) {
     console.warn("Could not find 'Sold By' column header. Defaulting to Column F (index 6). This may be incorrect.");
     map.soldBy = 6;
+  }
+ 
+  // --- Final Check ---
+  // If actualBonusAmount is still null, but bonusAmount refers to a column
+  // that clearly holds a numeric value (like '$ Bonus'), use it for actualBonusAmount.
+  if (map.bonusAmount !== null && map.actualBonusAmount === null) {
+    var bonusHeaderIndex = map.bonusAmount - 1; // 0-based index
+    if (bonusHeaderIndex >= 0 && bonusHeaderIndex < headers.length) {
+      var bonusHeader = (headers[bonusHeaderIndex] || "").toString().trim().toLowerCase();
+      // Check if this header strongly implies a numeric value was found
+      if (bonusHeader.includes("$") || bonusHeader.includes("actual") || bonusHeader === "$ bonus" || bonusHeader === "bonus $" || bonusHeader.includes("value")) {
+         map.actualBonusAmount = map.bonusAmount;
+         console.log(`Assigning actualBonusAmount based on the identified bonusAmount column ('${headers[bonusHeaderIndex]}' in column ${map.bonusAmount}) as a final fallback.`);
+      }
+    }
   }
  
   // Log any headers that were not successfully mapped

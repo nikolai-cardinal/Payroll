@@ -79,9 +79,23 @@ function createNewTechnicianSheet() {
   if (techFound) {
     newSheet.getRange(mapping.positionRow, 1).setValue(techPosition);
     newSheet.getRange(mapping.hourlyRateRow, mapping.valueColumn).setValue(techRate);
-    newSheet.getRange(mapping.hourlyRateRow, mapping.ptoRateColumn).setValue(techRate);
     ui.alert('Technician sheet created with data from Hourly + Spiff Pay.');
   } else {
     ui.alert('Technician sheet created, but the technician was not found in Hourly + Spiff Pay. Please add them to that sheet and run Update All Technician Rates.');
   }
+}
+
+/**
+* Gets the field mappings for a technician sheet
+* @param {Sheet} sheet - The technician sheet to map
+* @return {Object} An object containing row and column indexes for important fields
+*/
+function getTechnicianSheetMapping(sheet) {
+  return {
+    payPeriodRow: 2,      // Row containing the pay period text
+    positionRow: 3,       // Row containing the position
+    hourlyRateRow: 5,     // Row containing hourly rate information
+    valueColumn: 2,       // Column B - Main value column
+    ptoRateColumn: 7      // Column G - PTO rate column
+  };
 }

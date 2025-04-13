@@ -5,6 +5,11 @@
     *   **Functions:**
         *   `calculateSpiffAndBonus(spiffBonusSheet, technicianName, headerMap, spiffBonusData)`
 
+*   **`SpiffBonusDataHandler`**
+    *   **Purpose:** Provides functions for writing spiff data to technician sheets while intelligently preserving existing customer data when needed. Handles merging new data with existing entries to prevent data loss.
+    *   **Functions:**
+        *   `writeSpiffDataWithPreservation(sheet, newSpiffData, customerNameColIndex, preserveUnreplacedData)`
+
 *   **`SpiffBonusDataUtils`**
     *   **Purpose:** Provides general utility functions for data manipulation, searching, and formatting used across the Spiff/Bonus modules.
     *   **Functions:**
@@ -30,12 +35,13 @@
         *   `processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, triggerRow, triggerCol)`
 
 *   **`SpiffBonusSectionClearer`**
-    *   **Purpose:** Contains the logic to clear out the existing data, formatting, and borders within the Spiff data section on a technician's sheet before new data is written.
+    *   **Purpose:** Contains the logic to clear out the existing data, formatting, and borders within the Spiff data section on a technician's sheet before new data is written. Can optionally preserve existing data for intelligent data merging.
     *   **Functions:**
-        *   `clearSpiffDataSection(sheet)`
+        *   `clearSpiffDataSection(sheet, preserveData, newData)`
+        *   `getExistingSpiffData(sheet)`
 
 *   **`SpiffBonusSectionFinders`**
-    *   **Purpose:** Provides functions specifically for locating the start and end rows of the Spiff data section within a technician's sheet, using header text variations.
+    *   **Purpose:** Provides functions specifically for locating the start and end rows of the Spiff data section within a technician's sheet, using header text variations and intelligent detection methods.
     *   **Functions:**
         *   `findSpiffCustomerDataSection(sheet)`
         *   `findNextSectionStart(sheet, searchStartRow, maxRowsToSearch)`
@@ -52,6 +58,13 @@
 
 *   **`SpiffBonusUtilities`**
     *   **Purpose:** Contains remaining general utility functions related to the Spiff/Bonus process that didn't fit into the more specific categories above. Currently includes getting the rates sheet mapping and resetting the action dropdown status.
+    *            Also includes functions for finding rows by text, parsing/formatting dates, converting column numbers to letters, getting technician sheet mappings,
+    *            and getting technician sheet mappings.
     *   **Functions:**
+        *   `findRowWithText(sheet, textToFind, column_one_indexed, startRow, endRow, allowPartialMatch)`
+        *   `tryParseDate(input)`
+        *   `formatDate(dateValue, format, timezone)`
+        *   `columnToLetter(columnNumber)`
+        *   `getTechnicianSheetMapping(sheet)`
         *   `getRatesSheetMapping()`
         *   `resetActionDropdown(ratesSheet, row, col)` 

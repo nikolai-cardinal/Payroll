@@ -26,7 +26,9 @@ function updateSpiffBonusWithCustomersList(technicianName, actionRow, actionColu
 
    // 1) Identify needed columns from Spiff/Bonus
    var bonusHeaderMap = getSpiffBonusHeaderMap(spiffBonusTab);
-   bonusHeaderMap.actualBonusAmount = 9; // Hardcode: Column I is index 9 - This might need review or removal depending on current sheet structure
+   
+   // Log header mapping for debugging
+   console.log("Using header mapping:", JSON.stringify(bonusHeaderMap));
 
    // Check if required headers exist (adjust required headers as needed)
    var requiredHeaders = ['customerName','jobBusinessUnit','completionDate','soldBy','bonusAmount','itemName'];

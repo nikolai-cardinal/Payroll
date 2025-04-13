@@ -4,159 +4,18 @@
 */
 
 /**
-* Creates an object mapping expected "Spiff/Bonus" sheet column headers to their 1-based column index.
-* Uses flexible matching to accommodate variations in header names.
+* Finds the first row within a specified range that exactly matches the given text in a specific column.
+* Search is case-insensitive and trims whitespace.
 *
-* @param {Sheet} sheet - The Spiff/Bonus sheet object.
-* @return {Object} An object where keys are standardized header names (e.g., 'customerName')
-*                  and values are the corresponding 1-based column indices.
-*                  Returns null for keys if the header is not found.
+* @param {Sheet} sheet - The sheet object to search in.
+* @param {string} textToFind - The text to search for.
+* @param {number} column_one_indexed - The 1-based column index to search within.
+* @param {number} [startRow=1] - Optional 1-based start row for the search.
+* @param {number} [endRow] - Optional 1-based end row for the search (defaults to sheet's last row).
+* @param {boolean} [allowPartialMatch=false] - Whether to allow partial matches.
+* @return {number} The 1-based row number where the text was found, or -1 if not found.
 */
-function getSpiffBonusHeaderMap(sheet) {
-  if (!sheet) {
-    console.error("getSpiffBonusHeaderMap: Sheet object is required.");
-    return {}; // Return empty map if no sheet provided
-  }
-  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var map = {
-    customerName: null,
-    jobBusinessUnit: null,
-    completionDate: null,
-    soldBy: null,
-    assignedTechnician: null,
-    bonusAmount: null,
-    actualBonusAmount: null, // For cases where bonus amount is boolean/true
-    itemName: null,
-    crossSaleGroup: null
-  };
- 
-  for (var c = 0; c < headers.length; c++) {
-    var h = (headers[c] || "").toString().trim().toLowerCase();
-    var columnIndex = c + 1;
- 
-    // Match based on common variations
-    if (!map.customerName && h.includes("customer") && (h.includes("name") || h.includes("client"))) {
-      map.customerName = columnIndex;
-    }
-    else if (!map.jobBusinessUnit && (h.includes("business") && h.includes("unit") || h.includes("bu") || h === "dept")) {
-      map.jobBusinessUnit = columnIndex;
-    }
-    else if (!map.completionDate && ((h.includes("completion") || h.includes("complete")) && h.includes("date"))) {
-      map.completionDate = columnIndex;
-    }
-    else if (!map.completionDate && (h === "date" || h === "job date")) { // Allow fallback generic date
-      map.completionDate = columnIndex;
-    }
-    else if (!map.soldBy && (h.includes("sold") && h.includes("by"))) {
-      map.soldBy = columnIndex;
-    }
-    else if (!map.assignedTechnician && (h === "tech" || h === "technician" || h === "assigned tech")) {
-      map.assignedTechnician = columnIndex;
-    }
-    else if (!map.bonusAmount && (h.includes("bonus") || h.includes("spiff") || h.includes("commission") || h.includes("amt") || h.includes("amount") || h.includes("$"))) {
-      // Prioritize finding the *main* bonus amount column first
-      if (h === "bonus" || h === "bonus amount" || h === "spiff" || h === "spiff amount") { // More specific names take precedence
-          map.bonusAmount = columnIndex;
-      }
-    }
-    else if (!map.itemName && ((h.includes("item") && h.includes("name")) || h === "task" || h === "service" || h === "description")) {
-      map.itemName = columnIndex;
-    }
-  }
- 
-  // --- Refinements and Fallbacks ---
- 
-  // If the primary bonus amount wasn't found with specific terms, try broader terms again
-  if (!map.bonusAmount) {
-     for (var c2 = 0; c2 < headers.length; c2++) {
-         var h2 = (headers[c2] || "").toString().trim().toLowerCase();
-         var colIdx2 = c2 + 1;
-         if (h2.includes("bonus") || h2.includes("spiff") || h2.includes("commission") || h2.includes("amt") || h2.includes("amount") || h2.includes("$")) {
-             map.bonusAmount = colIdx2;
-             console.log(`Fallback found bonusAmount: '${headers[c2]}' in column ${colIdx2}`);
-             break; // Take the first match found this way
-         }
-     }
-  }
- 
-  // Look for 'Actual Bonus Amount' or similar, often in the column *after* the main bonus column
-  if (map.bonusAmount) {
-    var nextIndex = map.bonusAmount; // This is 1-based index + 1 = next column
-    if (nextIndex < headers.length) { // Check if next column exists
-      var nextHeader = (headers[nextIndex] || "").toString().trim().toLowerCase();
-      // Check if the *next* column seems like an amount column (useful if main one is boolean)
-      if (nextHeader.includes("actual") || nextHeader.includes("$") || nextHeader.includes("amount") || nextHeader.includes("value")) {
-        map.actualBonusAmount = nextIndex + 1; // map.bonusAmount is 1-based, headers is 0-based, so +1 gets 1-based next col index
-        console.log(`Found actualBonusAmount: '${headers[nextIndex]}' in column ${map.actualBonusAmount}`);
-      }
-    }
-  }
- 
-  // If 'Sold By' wasn't found, specifically check for "Sold By Technician"
-  if (!map.soldBy) {
-    for (var c3 = 0; c3 < headers.length; c3++) {
-      var hh = (headers[c3] || "").toString().trim(); // Case-sensitive check might be needed?
-      if (hh === "Sold By Technician") {
-        map.soldBy = c3 + 1;
-        console.log(`Found Sold By column: '${hh}' in column ${map.soldBy}`);
-        break;
-      }
-    }
-  }
- 
-  // Add logic to find 'Cross Sale Group'
-  if (!map.crossSaleGroup) {
-    for (var c4 = 0; c4 < headers.length; c4++) {
-      var h4 = (headers[c4] || "").toString().trim().toLowerCase();
-      var colIdx4 = c4 + 1;
-      if (h4.includes("cross") && h4.includes("sale") && h4.includes("group")) {
-        map.crossSaleGroup = colIdx4;
-        console.log(`Found crossSaleGroup: '${headers[c4]}' in column ${colIdx4}`);
-        break;
-      }
-    }
-  }
-  // If still not found, try a simpler match (e.g., check column J explicitly if headers are consistent)
-  if (!map.crossSaleGroup && headers.length >= 10) { // Check if Column J exists
-     var headerJ = (headers[9] || "").toString().trim().toLowerCase(); // Index 9 is Column J
-     if (headerJ.includes("cross") && headerJ.includes("sale")) {
-         map.crossSaleGroup = 10; // Default to Column J (index 10)
-         console.log(`Assumed crossSaleGroup: '${headers[9]}' in column 10 (J)`);
-     }
-  }
- 
-  // Last resort: If specific key headers are *still* missing, assign defaults or log warnings
-  // Example: Default 'Sold By' to column F (index 6) if absolutely necessary
-  if (!map.soldBy) {
-    console.warn("Could not find 'Sold By' column header. Defaulting to Column F (index 6). This may be incorrect.");
-    map.soldBy = 6;
-  }
- 
-  // Log any headers that were not successfully mapped
-  for (var key in map) {
-     if (map[key] === null) {
-         console.warn(`Header key '${key}' could not be mapped to a column in the Spiff/Bonus sheet.`);
-     }
-  }
- 
-  console.log("Spiff/Bonus Header Map: ", map);
-  return map;
- }
- 
- 
- /**
- * Finds the first row within a specified range that exactly matches the given text in a specific column.
- * Search is case-insensitive and trims whitespace.
- *
- * @param {Sheet} sheet - The sheet object to search in.
- * @param {string} textToFind - The text to search for.
- * @param {number} column_one_indexed - The 1-based column index to search within.
- * @param {number} [startRow=1] - Optional 1-based start row for the search.
- * @param {number} [endRow] - Optional 1-based end row for the search (defaults to sheet's last row).
- * @param {boolean} [allowPartialMatch=false] - Whether to allow partial matches.
- * @return {number} The 1-based row number where the text was found, or -1 if not found.
- */
- function findRowWithText(sheet, textToFind, column_one_indexed, startRow, endRow, allowPartialMatch) {
+function findRowWithText(sheet, textToFind, column_one_indexed, startRow, endRow, allowPartialMatch) {
   if (!sheet || !textToFind || !column_one_indexed || column_one_indexed < 1) {
     console.error("findRowWithText: Invalid parameters. Requires sheet, textToFind, and valid column_one_indexed.");
     return -1;
@@ -212,17 +71,17 @@ function getSpiffBonusHeaderMap(sheet) {
   }
  
   return -1; // Not found
- }
+}
  
  
- /**
- * Attempts to parse a value (string, number, or Date object) into a valid JavaScript Date object.
- * Handles common date formats like MM/DD/YYYY and ISO strings.
- *
- * @param {*} input - The value to parse (can be a string, number representing milliseconds, or a Date object).
- * @return {Date|null} A valid Date object if parsing is successful, otherwise null.
- */
- function tryParseDate(input) {
+/**
+* Attempts to parse a value (string, number, or Date object) into a valid JavaScript Date object.
+* Handles common date formats like MM/DD/YYYY and ISO strings.
+*
+* @param {*} input - The value to parse (can be a string, number representing milliseconds, or a Date object).
+* @return {Date|null} A valid Date object if parsing is successful, otherwise null.
+*/
+function tryParseDate(input) {
   if (!input) return null;
  
   // If it's already a valid Date object
@@ -265,16 +124,16 @@ function getSpiffBonusHeaderMap(sheet) {
  
   console.log(`tryParseDate: Could not parse '${input}' into a valid Date object.`);
   return null;
- }
+}
  
- /**
- * Formats a date value for display, handling various input types.
- * @param {*} dateValue - The date to format (Date object, string, etc.)
- * @param {string} [format='MM/dd/yyyy'] - The format to use (Utilities.formatDate pattern)
- * @param {string} [timezone] - The timezone to use (defaults to script timezone)
- * @return {string} The formatted date string or empty string if invalid
- */
- function formatDate(dateValue, format, timezone) {
+/**
+* Formats a date value for display, handling various input types.
+* @param {*} dateValue - The date to format (Date object, string, etc.)
+* @param {string} [format='MM/dd/yyyy'] - The format to use (Utilities.formatDate pattern)
+* @param {string} [timezone] - The timezone to use (defaults to script timezone)
+* @return {string} The formatted date string or empty string if invalid
+*/
+function formatDate(dateValue, format, timezone) {
    if (!dateValue) return "";
    
    var dateObj = tryParseDate(dateValue);
@@ -289,14 +148,14 @@ function getSpiffBonusHeaderMap(sheet) {
      console.error("Error formatting date: " + e.message);
      return dateValue.toString(); // Fallback to string representation
    }
- }
+}
  
- /**
- * Converts a column number to letter reference (e.g., 1 -> A, 27 -> AA)
- * @param {number} columnNumber - The 1-based column number to convert
- * @return {string} The corresponding column letter(s)
- */
- function columnToLetter(columnNumber) {
+/**
+* Converts a column number to letter reference (e.g., 1 -> A, 27 -> AA)
+* @param {number} columnNumber - The 1-based column number to convert
+* @return {string} The corresponding column letter(s)
+*/
+function columnToLetter(columnNumber) {
    if (!columnNumber || columnNumber < 1) return "A";
    
    var temp = columnNumber;
@@ -309,16 +168,16 @@ function getSpiffBonusHeaderMap(sheet) {
    }
    
    return letter;
- }
+}
  
- /**
- * Returns a standard mapping object for columns in the "Hourly + Spiff Pay" sheet.
- * This helps centralize the column definitions used across different functions.
- *
- * @return {Object} An object with keys for common fields (nameColumn, actionColumn, etc.)
- *                  and values representing their 1-based column index and the data start row.
- */
- function getRatesSheetMapping() {
+/**
+* Returns a standard mapping object for columns in the "Hourly + Spiff Pay" sheet.
+* This helps centralize the column definitions used across different functions.
+*
+* @return {Object} An object with keys for common fields (nameColumn, actionColumn, etc.)
+*                  and values representing their 1-based column index and the data start row.
+*/
+function getRatesSheetMapping() {
   // These indices correspond to the columns in the 'Hourly + Spiff Pay' sheet
   return {
     nameColumn: 1,       // Column A: Technician Name
@@ -327,108 +186,17 @@ function getSpiffBonusHeaderMap(sheet) {
     actionColumn: 7,     // Column G: Action Dropdown
     dataStartRow: 3      // Row number where the actual technician data begins (below headers)
   };
- }
+}
  
- /**
- * Finds the row number containing the header for the Spiff Customer Data section.
- * Searches column A for variations of the header text.
- * Relies on findRowWithText utility.
- * @param {Sheet} sheet The technician sheet object to search within.
- * @return {number} The 1-based row index of the section header, or -1 if not found.
- */
- function findSpiffCustomerDataSection(sheet) {
-  if (!sheet) return -1;
-  // Prioritize specific, potentially newer headers first
-  var variations = [
-    "Customer Name [Spiff]", // Most specific?
-    "Spiff [Customer Data]",
-    "Spiff [Cutomer Data]",  // Typo variation
-    "SPIFF [Customer Data]",
-    "Spiff Customer Data",
-    "SPIFF Customer Data",
-    "Spiff Data"             // Less specific
-  ];
- 
-  for (var i = 0; i < variations.length; i++) {
-    // Use the generic findRowWithText utility
-    var foundRow = findRowWithText(sheet, variations[i], 1, 1, 30, false); // Search Col A (index 1), first 30 rows, exact match
-    if (foundRow > 0) return foundRow;
-  }
- 
-  // Fallback: partial match if no exact header found
-  var foundPartialRow = findRowWithText(sheet, "spiff", 1, 1, 30, true); // Search Col A, first 30 rows, partial match
-  if (foundPartialRow > 0) {
-     // Verify the partial match also contains 'data' or 'customer'
-     var val = sheet.getRange(foundPartialRow, 1).getValue();
-     if (val && typeof val === 'string') {
-        var lower = val.toLowerCase();
-        if (lower.includes("data") || lower.includes("customer")) {
-            console.log("Found Spiff section using partial match ('" + val + "') at row: " + foundPartialRow);
-            return foundPartialRow;
-        }
-     }
-  }
- 
-  console.error("Could not find Spiff Customer Data section header in sheet: " + sheet.getName());
-  return -1;
- }
- 
- 
- /**
- * Finds the row number of the *next* non-empty cell in Column A after a given start row.
- * This helps determine the end of the Spiff data section before the next section (e.g., Install) begins.
- * @param {Sheet} sheet The sheet object to search within.
- * @param {number} searchStartRow The 1-based row index to start searching *after*.
- * @param {number} [maxRowsToSearch=60] Maximum number of rows to look ahead.
- * @return {number} The 1-based row index of the next cell with content, or -1 if none found within range.
- */
- function findNextSectionStart(sheet, searchStartRow, maxRowsToSearch) {
-    if (!sheet || searchStartRow <= 0) return -1;
-    var startLookup = searchStartRow;
-    var rowsToScan = maxRowsToSearch || 60; // Default scan range
- 
-    var lastRow = sheet.getLastRow();
-    if (startLookup > lastRow) return -1; 
-    if (startLookup + rowsToScan - 1 > lastRow) {
-        rowsToScan = lastRow - startLookup + 1;
-    }
-    if (rowsToScan <= 0) return -1;
- 
-    var searchRange = sheet.getRange(startLookup, 1, rowsToScan, 1); // Look ahead in Column A
-    var values = searchRange.getValues();
- 
-    for (var i = 0; i < values.length; i++) {
-        var actualRow = startLookup + i;
-        var cellValue = values[i][0];
-        if (cellValue && typeof cellValue === 'string') {
-             var trimmedValue = cellValue.trim();
-             var lowerValue = trimmedValue.toLowerCase();
- 
-             // Identify potential new section headers
-             if (trimmedValue.length > 0 && !lowerValue.includes("spiff") && lowerValue !== "total") {
-                 // Check common section keywords or structure
-                 if (lowerValue.includes("data") || lowerValue.includes("sales") || lowerValue.includes("install") || lowerValue.includes("bonus") || lowerValue.includes("lead") || lowerValue.includes("customer") || lowerValue.includes("hourly") || trimmedValue.endsWith("Data]") || lowerValue.startsWith("total ")) { 
-                     console.log("findNextSectionStart: Found next section header '" + trimmedValue + "' at row " + actualRow);
-                     return actualRow; 
-                 }
-             }
-        }
-    }
- 
-    console.log("Warning: findNextSectionStart did not find a clear next section header in Col A after row " + (startLookup-1) + " within " + rowsToScan + " rows in sheet " + sheet.getName() + ". Returning last data row + 1.");
-    // Fallback: Return last row + 1 as a safe boundary
-    return sheet.getLastRow() + 1;
- }
- 
- /**
- * Resets the "Action" dropdown to "Ready" in the 'Hourly + Spiff Pay' sheet,
- * typically used after an error occurs during processing.
- *
- * @param {Sheet} ratesSheet - The 'Hourly + Spiff Pay' sheet object.
- * @param {number} row - The 1-based row index containing the dropdown.
- * @param {number} col - The 1-based column index containing the dropdown.
- */
- function resetActionDropdown(ratesSheet, row, col) {
+/**
+* Resets the "Action" dropdown to "Ready" in the 'Hourly + Spiff Pay' sheet,
+* typically used after an error occurs during processing.
+*
+* @param {Sheet} ratesSheet - The 'Hourly + Spiff Pay' sheet object.
+* @param {number} row - The 1-based row index containing the dropdown.
+* @param {number} col - The 1-based column index containing the dropdown.
+*/
+function resetActionDropdown(ratesSheet, row, col) {
   if (!ratesSheet || !row || !col) {
     console.warn("resetActionDropdown called with invalid parameters.");
     return;
@@ -440,4 +208,4 @@ function getSpiffBonusHeaderMap(sheet) {
     console.error(`Failed to reset action dropdown for row ${row}, col ${col}: ${e.message}`);
     // SpreadsheetApp.getUi().alert("Failed to reset status dropdown for row " + row);
   }
- } 
+} 

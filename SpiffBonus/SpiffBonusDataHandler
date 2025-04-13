@@ -1,0 +1,131 @@
+/**
+ * Cardinal Payroll System - Spiff/Bonus Data Handler
+ * Contains functions for writing spiff data to technician sheets while preserving existing data when needed.
+ */
+
+/**
+ * Writes spiff/bonus data to a technician sheet, preserving any existing customer data if there isn't 
+ * a replacement for that specific customer in the new data.
+ * @param {Sheet} sheet - The technician sheet to write spiff data to.
+ * @param {Array} newSpiffData - The new spiff data to write to the sheet.
+ * @param {number} customerNameColIndex - The column index (0-based) in newSpiffData that contains customer names.
+ * @param {boolean} preserveUnreplacedData - Whether to keep existing customers not present in new data (default: false).
+ */
+function writeSpiffDataWithPreservation(sheet, newSpiffData, customerNameColIndex, preserveUnreplacedData) {
+  if (!sheet || !newSpiffData) return;
+  if (preserveUnreplacedData === undefined) preserveUnreplacedData = false; // Default to false
+  
+  try {
+    console.log("Starting writeSpiffDataWithPreservation for " + sheet.getName() + " with " + newSpiffData.length + " new spiff entries.");
+    
+    // First, get existing data before clearing anything
+    var existingData = getExistingSpiffData(sheet);
+    console.log("Found " + existingData.length + " existing spiff entries in " + sheet.getName());
+    
+    // Prepare the data we'll be writing - start with the new data
+    var dataToWrite = newSpiffData.slice(); // Clone the array
+    
+    // If we're preserving unmatched data, merge with existing
+    if (preserveUnreplacedData && existingData.length > 0) {
+      // Extract customer names from new data for comparison
+      var newCustomerNames = {};
+      for (var i = 0; i < newSpiffData.length; i++) {
+        var customerName = newSpiffData[i][customerNameColIndex];
+        if (customerName && typeof customerName === 'string') {
+          newCustomerNames[customerName.toLowerCase().trim()] = true;
+        }
+      }
+      
+      // Add existing customers that aren't in the new data
+      for (var j = 0; j < existingData.length; j++) {
+        var existingCustomer = existingData[j][0]; // Assuming customer name is in col A
+        if (existingCustomer && typeof existingCustomer === 'string') {
+          var existingKey = existingCustomer.toLowerCase().trim();
+          if (!newCustomerNames[existingKey] && existingKey !== "total") {
+            console.log("Preserving existing customer: " + existingCustomer + " not found in new data");
+            dataToWrite.push(existingData[j]);
+          }
+        }
+      }
+      
+      console.log("Combined data has " + dataToWrite.length + " entries after preserving existing customers.");
+    } else {
+      console.log("Complete data replacement mode: Only using new data, not preserving existing entries.");
+    }
+    
+    // Now clear the section to prepare for writing
+    clearSpiffDataSection(sheet, false, dataToWrite);
+    
+    if (dataToWrite.length === 0) {
+      console.log("No spiff data to write for " + sheet.getName());
+      return;
+    }
+    
+    // Find section boundaries to determine where to write
+    var spiffSectionRow = findSpiffCustomerDataSection(sheet);
+    if (spiffSectionRow <= 0) {
+      console.error("Cannot find Spiff section to write data in " + sheet.getName());
+      return;
+    }
+    
+    var spiffHeaderRow = spiffSectionRow + 1;
+    var spiffDataStartRow = spiffHeaderRow + 1;
+    
+    // We need to insert rows for each data entry + 1 for the total row
+    var rowsNeeded = dataToWrite.length;
+    if (rowsNeeded > 0) {
+      // Insert required number of rows after the header row
+      sheet.insertRowsAfter(spiffHeaderRow + 1, rowsNeeded);
+      console.log("Inserted " + rowsNeeded + " rows after row " + (spiffHeaderRow + 1) + " in sheet " + sheet.getName());
+      
+      // Write the data
+      var dataRange = sheet.getRange(spiffDataStartRow, 1, rowsNeeded, dataToWrite[0].length);
+      dataRange.setValues(dataToWrite);
+      console.log("Wrote " + rowsNeeded + " spiff entries to sheet " + sheet.getName() + " starting at row " + spiffDataStartRow + ".");
+      
+      // Format the data area
+      try {
+        dataRange.setBorder(true, true, true, true, true, false);
+        
+        // Format any numeric cells that might contain money values (usually column D for amounts)
+        var amountCol = 4; // Typical column for amounts (D)
+        if (amountCol <= dataToWrite[0].length) {
+          sheet.getRange(spiffDataStartRow, amountCol, rowsNeeded, 1).setNumberFormat("$#,##0.00");
+        }
+      } catch (formatErr) {
+        console.warn("Minor error applying formatting: " + formatErr);
+      }
+      
+      // Add a "Total" row at the end
+      var totalRow = spiffDataStartRow + rowsNeeded;
+      sheet.getRange(totalRow, 1).setValue("Total").setFontWeight("bold");
+      
+      // Calculate the total (assuming amounts are in column D)
+      var amountCol = 4; // Column D for Spiffs
+      var total = 0;
+      for (var k = 0; k < dataToWrite.length; k++) {
+        if (dataToWrite[k].length > amountCol - 1) {
+          var val = dataToWrite[k][amountCol - 1];
+          if (typeof val === 'number') {
+            total += val;
+          } else if (typeof val === 'string') {
+            // Try to parse a number from the string (e.g. "$100" -> 100)
+            var numStr = val.replace(/[^0-9.-]+/g, "");
+            if (numStr) {
+              total += parseFloat(numStr) || 0;
+            }
+          }
+        }
+      }
+      
+      sheet.getRange(totalRow, amountCol).setValue(total).setNumberFormat("$#,##0.00").setFontWeight("bold");
+      sheet.getRange(totalRow, 1, 1, Math.max(5, amountCol))
+           .setBorder(null, null, true, null, null, null, "black", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+           
+      console.log("Added Total row at " + totalRow + " with calculated value " + total + " in sheet " + sheet.getName() + ".");
+    }
+    
+  } catch (e) {
+    console.error("Error writing spiff data with preservation for " + sheet.getName() + ": " + e);
+  }
+} 
