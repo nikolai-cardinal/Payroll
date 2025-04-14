@@ -1,0 +1,275 @@
+/**
+* Payroll System - Yard Sign Sheet Operations
+* Handles interactions with technician sheets: finding sections,
+* clearing data, writing Yard Sign entries, managing rows, and updating summaries.
+*/
+
+
+/**
+* Writes the calculated Yard Sign data to the technician's sheet.
+* @param {Sheet} techSheet - The specific technician's sheet object.
+* @param {Array<object>} allYardSignEntries - Array of calculated Yard Sign entry objects.
+* @param {number} totalYardSignAmount - The total calculated Yard Sign amount for the tech.
+*/
+function writeYardSignDataToSheet(techSheet, allYardSignEntries, totalYardSignAmount) {
+  if (!techSheet || !allYardSignEntries) {
+    console.error("writeYardSignDataToSheet: Invalid arguments.");
+    return;
+  }
+
+  // --- 1. Update Top Summary ---
+  updateTopSummaryYardSignPay(techSheet, totalYardSignAmount, allYardSignEntries.length);
+
+  // --- 2. Find existing Yard Sign rows in column J ---
+  var lastRow = techSheet.getLastRow();
+  var existingYardSignRows = findExistingYardSignRows(techSheet);
+  
+  // --- 3. Prepare data for writing ---
+  var tz = Session.getScriptTimeZone() || 'America/New_York';
+  var dataToWrite = [];
+  
+  for (var idx = 0; idx < allYardSignEntries.length; idx++) {
+    var entry = allYardSignEntries[idx];
+    var dateObj = tryParseDate(entry.installDate);
+    var displayDate = dateObj ? Utilities.formatDate(dateObj, tz, "MM/dd/yyyy") : (entry.installDate || "");
+    
+    dataToWrite.push([
+      entry.customerName || "",      // Column E: Customer Name
+      entry.location || "",          // Column F: Location
+      displayDate,                   // Column G: Install Date
+      entry.amount,                  // Column H: Amount
+      "Yard Sign [Tag]",             // Column I: Notes
+      "Yard Sign"                    // Column J: Type
+    ]);
+  }
+  
+  // --- 4. Write data to the sheet ---
+  if (dataToWrite.length === 0) {
+    console.log("No Yard Sign data to write");
+    return;
+  }
+  
+  // If we have existing Yard Sign rows, update them
+  if (existingYardSignRows.length > 0) {
+    console.log("Found " + existingYardSignRows.length + " existing Yard Sign rows to update");
+    
+    // The number of rows we need to update
+    var rowsToUpdate = Math.min(existingYardSignRows.length, dataToWrite.length);
+    
+    // Update existing rows first
+    for (var i = 0; i < rowsToUpdate; i++) {
+      var targetRow = existingYardSignRows[i];
+      var targetRange = techSheet.getRange(targetRow, 5, 1, 6); // Columns E-J (5-10)
+      targetRange.setValues([dataToWrite[i]]);
+    }
+    
+    // If we have more entries than existing Yard Sign rows, look for empty rows
+    if (dataToWrite.length > existingYardSignRows.length) {
+      var remainingEntries = dataToWrite.slice(existingYardSignRows.length);
+      writeRemainingYardSignEntries(techSheet, remainingEntries);
+    }
+    
+    // If we have fewer entries than existing Yard Sign rows, clear the excess rows
+    if (existingYardSignRows.length > dataToWrite.length) {
+      console.log("Clearing " + (existingYardSignRows.length - dataToWrite.length) + " excess Yard Sign rows");
+      for (var j = dataToWrite.length; j < existingYardSignRows.length; j++) {
+        var excessRow = existingYardSignRows[j];
+        // Only delete data in columns E-J (5-10) where column J contains "Yard Sign"
+        techSheet.getRange(excessRow, 5, 1, 6).clearContent();
+      }
+    }
+  } else {
+    // No existing Yard Sign rows, write all entries to empty rows
+    writeRemainingYardSignEntries(techSheet, dataToWrite);
+  }
+  
+  console.log("Sheet update finished for: " + techSheet.getName());
+}
+
+/**
+ * Finds all rows that have "Yard Sign" in column J
+ * @param {Sheet} sheet - The technician sheet to search
+ * @return {Array} Array of row numbers that have "Yard Sign" in column J
+ */
+function findExistingYardSignRows(sheet) {
+  var lastRow = sheet.getLastRow();
+  var typeColumn = 10; // Column J
+  var rows = [];
+  
+  // Skip if sheet doesn't have enough columns
+  if (sheet.getLastColumn() < typeColumn) {
+    return rows;
+  }
+  
+  // Get all values in column J
+  var typeValues = sheet.getRange(1, typeColumn, lastRow, 1).getValues();
+  
+  // Find rows with "Yard Sign" in column J - ONLY these rows will ever be cleared
+  for (var i = 0; i < typeValues.length; i++) {
+    var cellValue = typeValues[i][0];
+    if (cellValue && typeof cellValue === 'string' && 
+        cellValue.toString().trim().toLowerCase() === "yard sign") {
+      rows.push(i + 1); // Convert to 1-based row index
+    }
+  }
+  
+  console.log("Found " + rows.length + " rows with Yard Sign in type column");
+  return rows;
+}
+
+/**
+ * Writes Yard Sign entries to empty rows in columns E-J
+ * @param {Sheet} sheet - The technician sheet
+ * @param {Array} entries - The Yard Sign entries to write
+ */
+function writeRemainingYardSignEntries(sheet, entries) {
+  if (!entries || entries.length === 0) return;
+  
+  // Find the header row with "Customer Name" in column E
+  var headerRow = findCustomerNameHeaderRow(sheet);
+  if (headerRow <= 0) {
+    console.log("Could not find 'Customer Name' header in column E in " + sheet.getName());
+    return;
+  }
+  
+  // Start looking at the row after the header
+  var firstDataRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  
+  // Find first empty row in columns E-J
+  var startRow = -1;
+  var rowsToSearch = Math.min(50, lastRow - firstDataRow + 1); // Cap at 50 rows
+  
+  if (rowsToSearch > 0) {
+    var rowData = sheet.getRange(firstDataRow, 5, rowsToSearch, 6).getValues(); // Columns E-J (5-10)
+    
+    for (var i = 0; i < rowData.length; i++) {
+      var isEmpty = true;
+      for (var j = 0; j < rowData[i].length; j++) {
+        if (rowData[i][j] !== "") {
+          isEmpty = false;
+          break;
+        }
+      }
+      
+      if (isEmpty) {
+        startRow = firstDataRow + i;
+        break;
+      }
+    }
+  }
+  
+  // If we couldn't find an empty row, use the first data row
+  if (startRow === -1) {
+    startRow = firstDataRow;
+    console.log("No empty rows found, using first row after header: " + startRow);
+  }
+  
+  console.log("Writing " + entries.length + " entries starting at row " + startRow);
+  
+  // Write each entry
+  for (var k = 0; k < entries.length; k++) {
+    var currentRow = startRow + k;
+    var targetRange = sheet.getRange(currentRow, 5, 1, 6); // Columns E-J (5-10)
+    targetRange.setValues([entries[k]]);
+    
+    // Apply formatting
+    sheet.getRange(currentRow, 7, 1, 1).setNumberFormat('MM/dd/yyyy'); // Date column format
+    sheet.getRange(currentRow, 8, 1, 1).setNumberFormat('$#,##0.00'); // Amount column format
+  }
+}
+
+/**
+* Updates the top summary section ('Total Yard Sign Pay') with amount and count.
+* @param {Sheet} sheet - The technician sheet to update.
+* @param {number} amount - The total Yard Sign amount.
+* @param {number} count - The number of Yard Sign entries.
+*/
+function updateTopSummaryYardSignPay(sheet, amount, count) {
+  if (!sheet) return;
+  // Target row 12 specifically for Total Yard Sign Pay
+  var yardSignPayRow = 12;
+  try {
+     sheet.getRange(yardSignPayRow, 2).setValue(count); // Count in Col B (B12)
+     sheet.getRange(yardSignPayRow, 3).setValue(amount).setNumberFormat("$#,##0.00"); // Amount in Col C (C12)
+     console.log("Updated Total Yard Sign Pay in B12/C12 with count: " + count + ", amount: $" + amount.toFixed(2));
+  } catch (e) { 
+     console.error("Error updating top summary yard sign pay for " + sheet.getName() + ": " + e); 
+     
+     // Fallback to searching for "Total Yard Sign Pay" if row 12 doesn't work
+     var data = sheet.getRange("A1:A20").getValues(); // Check first 20 rows
+     for (var row = 0; row < data.length; row++) {
+       if (data[row][0] && data[row][0].toString().trim() === "Total Yard Sign Pay") {
+         yardSignPayRow = row + 1;
+         try {
+           sheet.getRange(yardSignPayRow, 2).setValue(count); // Count in Col B
+           sheet.getRange(yardSignPayRow, 3).setValue(amount).setNumberFormat("$#,##0.00"); // Amount in Col C
+           console.log("Fallback: Updated Total Yard Sign Pay in row " + yardSignPayRow);
+         } catch (err) { 
+           console.error("Fallback also failed to update top summary: " + err); 
+         }
+         break;
+       }
+     }
+  }
+}
+
+/**
+* Helper function to try parsing a date value in various formats
+* @param {any} dateValue - The value to try to parse as a date
+* @return {Date|null} The parsed Date object or null if parsing failed
+*/
+function tryParseDate(dateValue) {
+  if (!dateValue) return null;
+  
+  // If it's already a Date object, return it
+  if (dateValue instanceof Date) return dateValue;
+  
+  // Try to parse various date formats
+  try {
+    // If it's a string with timestamp format
+    if (typeof dateValue === 'string') {
+      // Try normal Date parsing first
+      var parsedDate = new Date(dateValue);
+      if (!isNaN(parsedDate.getTime())) {
+        return parsedDate;
+      }
+      
+      // Try MM/dd/yyyy format
+      var parts = dateValue.split('/');
+      if (parts.length === 3) {
+        return new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]));
+      }
+    }
+    
+    // If it's a number (serial date)
+    if (typeof dateValue === 'number') {
+      // Excel/Sheets epoch starts at 1/1/1900, and JS at 1/1/1970
+      // There's a 25569 days difference (approximately)
+      var excelEpoch = new Date(1900, 0, 1);
+      var jsDate = new Date(excelEpoch);
+      jsDate.setDate(excelEpoch.getDate() + dateValue - 2); // -2 for Excel date system quirk
+      return jsDate;
+    }
+  } catch (e) {
+    console.error("Error parsing date: " + e.message);
+  }
+  
+  return null;
+}
+
+// Reuse shared function from PBPSheetOperations
+function findCustomerNameHeaderRow(sheet) {
+  var lastRow = Math.min(50, sheet.getLastRow()); // Check first 50 rows
+  var columnE = sheet.getRange(1, 5, lastRow, 1).getValues();
+  
+  for (var i = 0; i < columnE.length; i++) {
+    var cellValue = columnE[i][0];
+    if (cellValue && typeof cellValue === 'string' &&
+        cellValue.toString().trim().toLowerCase() === "customer name") {
+      return i + 1; // Convert to 1-based row index
+    }
+  }
+  
+  return -1; // Not found
+} 

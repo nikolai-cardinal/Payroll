@@ -23,6 +23,7 @@ ui.createMenu('Technician Tools')
   .addItem('Create New Sheet', 'createNewTechnicianSheet')
   .addItem('All Spiff/Bonus', 'processAllSpiffBonusWithCustomers')
   .addItem('All PBP', 'processAllPBP')
+  .addItem('All Yard Signs', 'menuProcessAllYardSigns')
   .addToUi();
 }
 
@@ -98,6 +99,35 @@ if (isProcessing) {
       } else if (value === "PBP") { 
          // Call updatePBPForTechnician from PBP/PBPMain.js
          updatePBPForTechnician(techName, row, column);
+      } else if (value === "Yard Sign") {
+         // Make sure the Yard Sign module is initialized before calling
+         try {
+           // Check if the initYardSign function exists
+           if (typeof initYardSign !== 'function') {
+             console.error("Yard Sign module not found or not properly loaded");
+             setActionStatus(sheet, row, column, '⚠️ Error');
+             return;
+           }
+           
+           // Initialize the yard sign module
+           initYardSign();
+           
+           // Wait a moment to ensure initialization is complete
+           Utilities.sleep(100);
+           
+           // Check if update function exists
+           if (typeof updateYardSignForTechnician !== 'function') {
+             console.error("updateYardSignForTechnician function not found");
+             setActionStatus(sheet, row, column, '⚠️ Error');
+             return;
+           }
+           
+           // Call the main function
+           updateYardSignForTechnician(techName, row, column);
+         } catch (yardSignError) {
+           console.error("Error in Yard Sign processing: " + yardSignError.message);
+           setActionStatus(sheet, row, column, '⚠️ Error');
+         }
       } else {
          // If value is something else (like Ready or Complete), reset status
          setActionStatus(sheet, row, column, 'Ready'); 
@@ -191,6 +221,7 @@ for (var i = 0; i < data.length; i++) {
 function createNewTechnicianSheet() { SpreadsheetApp.getUi().alert('createNewTechnicianSheet function needs to be defined.'); }
 // processAllSpiffBonusWithCustomers is now defined in Spiff/Bonus/SpiffBonusMain.gs
 // processAllPBP is defined in PBP/PBPMain.gs
+// processAllYardSigns is defined in YardSign/YardSignMain.gs
 
 // --- Placeholder functions potentially called by onEdit actions ---
 // You would need to define these or ensure they exist elsewhere in your project.
@@ -202,6 +233,7 @@ function updateHoursForTechnician(techName, row, column) {
 
 // updateSpiffBonusWithCustomersList is now defined in Spiff/Bonus/SpiffBonusMain.gs
 // updatePBPForTechnician is defined in PBP/PBPMain.gs
+// updateYardSignForTechnician is defined in YardSign/YardSignMain.gs
 
 /**
  * Sets the status in the Action column of the rates sheet.
@@ -290,3 +322,42 @@ return {
 * @return {Object} An object containing row and column indexes for important fields
 */
 // ... existing code ...
+
+/**
+* Menu handler for processing all yard signs
+* Ensures proper initialization before calling the main function
+*/
+function menuProcessAllYardSigns() {
+  try {
+    // Check if the YardSign module is available
+    if (typeof initYardSign !== 'function') {
+      console.error("YardSign module not found");
+      SpreadsheetApp.getUi().alert("Error: YardSign module not properly loaded. Please reload the script editor and try again.");
+      return;
+    }
+    
+    // Initialize the Yard Sign module
+    initYardSign();
+    
+    // Wait a moment to ensure initialization is complete
+    Utilities.sleep(500);
+    
+    // Check if the processAllYardSigns function exists
+    if (typeof processAllYardSigns !== 'function') {
+      console.error("processAllYardSigns function not found");
+      SpreadsheetApp.getUi().alert("Error: processAllYardSigns function not properly loaded. Please reload the script editor and try again.");
+      return;
+    }
+    
+    // Call the main processing function with error handling
+    try {
+      processAllYardSigns();
+    } catch (e) {
+      console.error("Error in processAllYardSigns: " + e.message);
+      SpreadsheetApp.getUi().alert("Error processing yard signs: " + e.message);
+    }
+  } catch (e) {
+    console.error("Error initializing Yard Sign processing: " + e.message);
+    SpreadsheetApp.getUi().alert("Error: Could not initialize Yard Sign processing. See logs for details.");
+  }
+}

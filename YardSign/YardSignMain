@@ -1,0 +1,190 @@
+/**
+* Payroll System - Yard Sign Main
+* Main entry points for yard sign processing.
+*/
+
+/**
+* Initializes the Yard Sign module.
+* This should be called before any other functions in this module.
+*/
+function initYardSign() {
+  // This function ensures that the module is properly initialized
+  console.log("Yard Sign module initialized");
+  return true;
+}
+
+/**
+* Sets the status in the Action column of the rates sheet.
+* Local version to avoid cross-file reference issues.
+* @param {Sheet} ratesSheet The 'Hourly + Spiff Pay' sheet object.
+* @param {number} row The 1-based row index.
+* @param {number} col The 1-based column index (should be the Action column).
+* @param {string} status The status to set (e.g., 'Complete', 'Error', 'Processing...').
+*/
+function yardSignSetActionStatus(ratesSheet, row, col, status) {
+  if (!ratesSheet || !row || !col || !status) {
+    console.error("yardSignSetActionStatus: Invalid parameters provided.");
+    return;
+  }
+  
+  try {
+    // Make sure status is one of the allowed values for the data validation
+    var allowedValues = ["Timesheet", "Spiff/Bonus", "Yard Sign", "PBP", "Complete", "Ready", "⚠️ Error"];
+    
+    // Default to "Ready" if status isn't in the allowed list
+    if (allowedValues.indexOf(status) === -1) {
+      if (status.startsWith("Error")) {
+        status = "⚠️ Error";
+      } else if (status.startsWith("Complete")) {
+        status = "Complete";
+      } else {
+        status = "Ready";
+      }
+    }
+    
+    // Get the range first, then set the value to avoid validation issues
+    var range = ratesSheet.getRange(row, col);
+    SpreadsheetApp.flush(); // Force any pending changes to complete
+    range.setValue(status);
+  } catch (e) {
+    console.error(`Failed to set status to '${status}' at row ${row}, col ${col}: ${e.message}`);
+    // No need for alternative approach since we've already handled validation
+  }
+}
+
+/**
+* Updates yard sign data for a specific technician.
+* This is called from the main onEdit function when "Yard Sign" is selected.
+* @param {string} techName - The technician's name.
+* @param {number} row - The row in the rates sheet where the action was triggered.
+* @param {number} column - The column in the rates sheet where the action was triggered.
+*/
+function updateYardSignForTechnician(techName, row, column) {
+  // Initialize the module
+  initYardSign();
+  
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+  
+  try {
+    // First, set status to "Processing..." using our local function
+    yardSignSetActionStatus(ratesSheet, row, column, 'Processing...');
+    
+    // Get or create yard sign sheet with proper structure
+    var yardSignSheet;
+    try {
+      yardSignSheet = ensureYardSignSheetExists();
+    } catch (sheetError) {
+      console.error("Error ensuring Yard Sign sheet exists: " + sheetError.message);
+      yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+      return;
+    }
+    
+    // Log the name and existence of the sheet
+    console.log("Found Yard Sign sheet: " + yardSignSheet.getName() + 
+               " with " + yardSignSheet.getLastRow() + " rows and " + 
+               yardSignSheet.getLastColumn() + " columns");
+    
+    // Get technician's sheet
+    var techSheet = ss.getSheetByName(techName);
+    if (!techSheet) {
+      console.error("Technician sheet not found for: " + techName);
+      yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+      return;
+    }
+    
+    // Calculate yard sign entries for this technician
+    // Wrap in try/catch to prevent errors
+    var result;
+    try {
+      // Skip validation here - calculateYardSignEntries will handle missing columns
+      result = calculateYardSignEntries(techName, yardSignSheet);
+    } catch (calcError) {
+      console.error("Error calculating yard sign entries: " + calcError.message);
+      yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+      return;
+    }
+    
+    // If no entries found, show message
+    if (!result || !result.entries || result.entries.length === 0) {
+      console.log("No yard sign entries found for: " + techName);
+      yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
+      return;
+    }
+    
+    // Write data to technician sheet
+    // Wrap in try/catch to prevent errors
+    try {
+      writeYardSignDataToSheet(techSheet, result.entries, result.totalAmount);
+    } catch (writeError) {
+      console.error("Error writing yard sign data: " + writeError.message);
+      yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+      return;
+    }
+    
+    // Update status
+    yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
+    
+    console.log("Yard Sign update complete for: " + techName + 
+               " - " + result.entries.length + " entries, $" + result.totalAmount.toFixed(2));
+  } catch (e) {
+    console.error("Error in updateYardSignForTechnician: " + e.message);
+    if (ratesSheet && row && column) {
+      yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+    }
+  }
+}
+
+/**
+* Processes yard signs for all technicians.
+* Called from the custom menu.
+*/
+function processAllYardSigns() {
+  // Initialize the module
+  initYardSign();
+  
+  try {
+    var ui = SpreadsheetApp.getUi();
+    var result = ui.alert(
+      'Process Yard Signs',
+      'This will process yard sign data for all technicians. Continue?',
+      ui.ButtonSet.YES_NO
+    );
+    
+    if (result !== ui.Button.YES) {
+      return;
+    }
+    
+    // Make sure the Yard Sign sheet exists and has the proper structure
+    try {
+      var yardSignSheet = ensureYardSignSheetExists();
+      console.log("Confirmed Yard Sign sheet exists with proper structure");
+    } catch (sheetError) {
+      console.error("Error with Yard Sign sheet: " + sheetError.message);
+      ui.alert('Error', "Could not ensure Yard Sign sheet exists with proper structure. Error: " + sheetError.message, ui.ButtonSet.OK);
+      return;
+    }
+    
+    // Show processing message
+    var statusMessage = ui.alert(
+      'Processing',
+      'Processing yard signs for all technicians. This may take a while.\n\nClick OK to continue in the background.',
+      ui.ButtonSet.OK
+    );
+    
+    // Call the utility function directly instead of through YardSignUtilities namespace
+    var processResult = processAllYardSignsUtility(function(status) {
+      console.log(status); // Log status updates
+    });
+    
+    // Show result
+    if (processResult.success) {
+      ui.alert('Success', processResult.message, ui.ButtonSet.OK);
+    } else {
+      ui.alert('Error', processResult.message, ui.ButtonSet.OK);
+    }
+  } catch (e) {
+    console.error("Error in processAllYardSigns: " + e.message);
+    SpreadsheetApp.getUi().alert("Error: " + e.message);
+  }
+} 

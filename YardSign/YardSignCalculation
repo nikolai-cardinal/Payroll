@@ -1,0 +1,203 @@
+/**
+* Payroll System - Yard Sign Calculation
+* Handles calculation of yard sign pay amounts.
+*/
+
+/**
+* Safe wrapper for accessing sheet data to prevent validation errors
+* @param {function} operation - Function that performs the cell operation
+* @return {any} Result of the operation or null if it failed
+*/
+function safeCalculationOperation(operation) {
+  try {
+    return operation();
+  } catch (e) {
+    console.error("Safe calculation operation failed: " + e.message);
+    return null;
+  }
+}
+
+/**
+* Calculates yard sign entries for a technician.
+* @param {string} technicianName - The name of the technician.
+* @param {Sheet} yardSignSheet - The Yard Sign sheet.
+* @return {Object} Object containing calculated entries and total amount.
+*/
+function calculateYardSignEntries(technicianName, yardSignSheet) {
+  if (!technicianName || !yardSignSheet) {
+    console.error("calculateYardSignEntries: Invalid arguments");
+    return { entries: [], totalAmount: 0 };
+  }
+
+  try {
+    // Get all data from the Yard Sign sheet
+    var lastRow = yardSignSheet.getLastRow();
+    var lastCol = yardSignSheet.getLastColumn();
+    
+    // Ensure we have data to process
+    if (lastRow <= 1) {
+      console.log("Yard Sign sheet has no data");
+      return { entries: [], totalAmount: 0 };
+    }
+    
+    // Get all data as a 2D array - use getDisplayValues to avoid triggering validation rules
+    var data;
+    try {
+      // Use safe operation wrapper
+      data = safeCalculationOperation(function() {
+        return yardSignSheet.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+      });
+      
+      if (!data) {
+        console.error("Failed to safely get Yard Sign data");
+        return { entries: [], totalAmount: 0 };
+      }
+    } catch (dataError) {
+      console.error("Error reading Yard Sign data: " + dataError.message);
+      return { entries: [], totalAmount: 0 };
+    }
+    
+    // Find column indices (1-based)
+    var headerRow = data[0];
+    console.log("Yard Sign sheet headers: " + headerRow.filter(Boolean).join(", "));
+    
+    var colIndices = {
+      customerName: findColumnIndex(headerRow, "Customer Name"),
+      location: findColumnIndex(headerRow, "Location"),
+      installDate: findColumnIndex(headerRow, "Install Date"),
+      amount: findColumnIndex(headerRow, "Amount"),
+      techName: findColumnIndex(headerRow, "Technician")
+    };
+    
+    // Log found column indices for debugging
+    console.log("Found column indices: " + JSON.stringify(colIndices));
+    
+    // Validate column indices - we need at minimum the technician and amount columns
+    if (colIndices.techName === -1) {
+      console.error("Could not find Technician column in Yard Sign sheet - this is required");
+      return { entries: [], totalAmount: 0 };
+    }
+    
+    if (colIndices.amount === -1) {
+      console.error("Could not find Amount column in Yard Sign sheet - this is required");
+      return { entries: [], totalAmount: 0 };
+    }
+    
+    // Other columns can have default values if missing
+    if (colIndices.customerName === -1) {
+      console.warn("Customer Name column not found - using default values");
+    }
+    
+    if (colIndices.location === -1) {
+      console.warn("Location column not found - using default values");
+    }
+    
+    if (colIndices.installDate === -1) {
+      console.warn("Install Date column not found - using default values");
+    }
+    
+    // Find entries for this technician
+    var entries = [];
+    var totalAmount = 0;
+    
+    for (var i = 1; i < data.length; i++) { // Skip header row
+      var row = data[i];
+      
+      // Skip if row is too short or missing technician data
+      if (row.length <= colIndices.techName - 1 || !row[colIndices.techName - 1]) continue;
+      
+      var rowTechName = row[colIndices.techName - 1]; // Convert to 0-based
+      
+      // Check if this row is for our technician (case insensitive)
+      if (rowTechName.toString().trim().toLowerCase() === technicianName.toLowerCase()) {
+        // Skip if row is too short or missing amount data
+        if (row.length <= colIndices.amount - 1) continue;
+        
+        var amount = 0;
+        try {
+          // Safely parse amount - it could be a string in display format
+          var amountStr = row[colIndices.amount - 1] || "0";
+          // Remove any currency symbols and commas
+          amountStr = amountStr.toString().replace(/[$,]/g, '');
+          amount = parseFloat(amountStr) || 0;
+        } catch (parseError) {
+          console.warn("Error parsing amount for row " + (i+1) + ": " + parseError.message);
+          amount = 0;
+        }
+        
+        // Only process entries with valid amounts
+        if (amount <= 0) continue;
+        
+        var entry = {
+          customerName: colIndices.customerName > 0 && row.length > colIndices.customerName - 1 ? 
+                       (row[colIndices.customerName - 1] || "Yard Sign Customer") : "Yard Sign Customer",
+          location: colIndices.location > 0 && row.length > colIndices.location - 1 ? 
+                  (row[colIndices.location - 1] || "Location not specified") : "Location not specified",
+          installDate: colIndices.installDate > 0 && row.length > colIndices.installDate - 1 ? 
+                     row[colIndices.installDate - 1] : new Date().toLocaleDateString(),
+          amount: amount
+        };
+        
+        entries.push(entry);
+        totalAmount += amount;
+      }
+    }
+    
+    console.log("Found " + entries.length + " yard sign entries for " + technicianName + 
+                " totaling $" + totalAmount.toFixed(2));
+    
+    return {
+      entries: entries,
+      totalAmount: totalAmount
+    };
+  } catch (e) {
+    console.error("Error calculating yard sign entries: " + e.message);
+    return { entries: [], totalAmount: 0 };
+  }
+}
+
+/**
+* Helper function to find column index by header name.
+* @param {Array} headerRow - The header row array.
+* @param {string} columnName - The name of the column to find.
+* @return {number} The 1-based column index or -1 if not found.
+*/
+function findColumnIndex(headerRow, columnName) {
+  // Define possible variants for common column names based on actual spreadsheet
+  var columnVariants = {
+    "Customer Name": ["customer", "client", "name", "customer name", "customerName"],
+    "Location": ["location", "address", "site", "place", "loc", "property", "job #", "job#", "job number", "business unit"],
+    "Install Date": ["install date", "date", "installation date", "installed", "installed date", "installdate", "completion date", "completion"],
+    "Amount": ["amount", "fee", "price", "payment", "cost", "charge", "pay", "$", "jobs total", "total", "job total"],
+    "Technician": ["technician", "tech", "installer", "employee", "worker", "person", "staff", "assigned technicians", "assigned tech", "technicians"]
+  };
+  
+  // Get possible variants for the requested column
+  var variants = columnVariants[columnName] || [columnName.toLowerCase()];
+  
+  // First try exact match
+  for (var i = 0; i < headerRow.length; i++) {
+    var header = headerRow[i];
+    if (header && header.toString().trim().toLowerCase() === columnName.toLowerCase()) {
+      console.log(`Found exact match for column "${columnName}" at position ${i+1}: "${header}"`);
+      return i + 1; // Convert to 1-based index
+    }
+  }
+  
+  // Then try partial matches with variants
+  for (var i = 0; i < headerRow.length; i++) {
+    var header = headerRow[i];
+    if (!header) continue;
+    
+    var headerText = header.toString().trim().toLowerCase();
+    
+    // Check if this header includes any of the variants
+    if (variants.some(variant => headerText.includes(variant))) {
+      console.log(`Found variant match for column "${columnName}" at position ${i+1}: "${header}"`);
+      return i + 1; // Convert to 1-based index
+    }
+  }
+  
+  console.log(`Column not found: "${columnName}". Available headers: ${headerRow.filter(Boolean).join(', ')}`);
+  return -1;
+} 
