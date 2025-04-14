@@ -12,6 +12,7 @@
 function clearSpiffDataSection(sheet, newData) {
   if (!sheet) return 0;
   try {
+    // First, find only the rows where Type column (J) contains 'Spiff'
     var customerHeaderRow = findSpiffCustomerDataSection(sheet);
     if (customerHeaderRow <= 0) {
       console.log("Clear Spiff Data: Customer section not found in " + sheet.getName());
@@ -32,12 +33,19 @@ function clearSpiffDataSection(sheet, newData) {
       return 0;
     }
     
-    // Clear ALL rows in the data section, columns E-J (5-10)
-    var clearRange = sheet.getRange(dataStartRow, 5, rowsAvailable, 6); // Columns E-J (5-10)
-    clearRange.clearContent();
+    // Find the rows that have "Spiff" in column J
+    var spiffRows = findSpiffTypeRows(sheet, dataStartRow, rowsAvailable);
     
-    console.log("Cleared entire data section (" + rowsAvailable + " rows) in " + sheet.getName());
-    return rowsAvailable;
+    // ONLY clear the rows where Type column (J) contains 'Spiff'
+    var rowsCleared = 0;
+    for (var i = 0; i < spiffRows.length; i++) {
+      var rowToClear = spiffRows[i];
+      sheet.getRange(rowToClear, 5, 1, 6).clearContent(); // Clear columns E-J (5-10)
+      rowsCleared++;
+    }
+    
+    console.log("Cleared " + rowsCleared + " rows with Type='Spiff' in " + sheet.getName());
+    return rowsCleared;
   } catch (e) {
     console.error("Error clearing spiff data section: " + e);
     return 0;

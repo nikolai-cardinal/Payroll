@@ -76,18 +76,18 @@ function updateAllTechnicianRates() {
         try {
           console.log('Processing ' + sheetName + ' with rate: ' + techRates[sheetName]);
           
-          // Get mapping for this technician sheet
+          // Get mapping for this technician sheet (for position and pay period rows)
           var mapping = getTechnicianSheetMapping(sheet);
           
           // Update the position
           sheet.getRange(mapping.positionRow, 1).setValue(techPositions[sheetName]);
           
-          // Update hourly rate in B5
-          sheet.getRange(mapping.hourlyRateRow, mapping.valueColumn).setValue(techRates[sheetName]);
+          // Update hourly rate directly in B5
+          sheet.getRange(5, 2).setValue(techRates[sheetName]);
           
-          // Update PTO rate (if the mapping has this field)
+          // Update PTO rate (if applicable) - directly reference the cell if needed
           if (mapping.ptoRateColumn) {
-            sheet.getRange(mapping.hourlyRateRow, mapping.ptoRateColumn).setValue(techRates[sheetName]);
+            sheet.getRange(5, mapping.ptoRateColumn).setValue(techRates[sheetName]);
           }
           
           // Update pay period

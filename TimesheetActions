@@ -230,6 +230,27 @@ function getCurrentPayPeriodForTimesheet() {
 }
 
 /**
+ * Formats decimal hours to H:m format
+ * @param {number} decimalHours - The hours in decimal format
+ * @return {string} The formatted time in H:m format
+ */
+function formatHoursToHM(decimalHours) {
+  // Extract whole hours
+  const hours = Math.floor(decimalHours);
+  
+  // Calculate minutes from decimal part
+  const minutes = Math.round((decimalHours - hours) * 60);
+  
+  // Handle case where minutes rounds to 60
+  if (minutes === 60) {
+    return (hours + 1) + ":0";
+  }
+  
+  // Format as H:m
+  return hours + ":" + (minutes < 10 ? "0" + minutes : minutes);
+}
+
+/**
  * Updates hours for a specific technician based on the Time Sheet
  * @param {string} technicianName - The name of the technician to update
  * @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
@@ -289,7 +310,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
         var otHoursValue = parseFloat(row[timeMapping.otHoursColumn - 1] || 0);
         var dtHoursValue = parseFloat(row[timeMapping.dtHoursColumn - 1] || 0);
         
-        console.log("Found hours for " + name + ": Reg=" + regHoursValue + ", OT=" + otHoursValue);
+        console.log("Found hours for " + name + ": Reg=" + regHoursValue + ", OT=" + otHoursValue + ", DT=" + dtHoursValue);
         
         regHours += regHoursValue;
         otHours += otHoursValue;
@@ -297,7 +318,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
       }
     }
     
-    console.log("Total hours for " + technicianName + ": Reg=" + regHours + ", OT=" + otHours);
+    console.log("Total hours for " + technicianName + ": Reg=" + regHours + ", OT=" + otHours + ", DT=" + dtHours);
     
     // Try to find the technician's sheet
     var techSheet;
@@ -329,35 +350,10 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
     // Update the Overtime Hours
     techSheet.getRange(mapping.otHoursRow, mapping.valueColumn).setValue(otHours);
     
-    // Recalculate pay values
-    var hourlyRate = techSheet.getRange(mapping.hourlyRateRow, mapping.valueColumn).getValue();
+    // Update the Double Time Hours in B8
+    techSheet.getRange(mapping.ptoHoursRow, mapping.valueColumn).setValue(dtHours);
     
-    // Regular pay
-    var regPay = regHours * hourlyRate;
-    techSheet.getRange(mapping.regHoursRow, mapping.calculatedValueColumn).setValue(regPay);
-    
-    // Overtime pay (hourly rate * 1.5)
-    var otPay = otHours * hourlyRate * 1.5;
-    techSheet.getRange(mapping.otHoursRow, mapping.calculatedValueColumn).setValue(otPay);
-    
-    // Get PTO hours and calculate PTO pay
-    var ptoHours = techSheet.getRange(mapping.ptoHoursRow, mapping.valueColumn).getValue();
-    var ptoPay = ptoHours * hourlyRate;
-    
-    // Update Total Hourly Pay
-    var totalHourlyPay = regPay + otPay + ptoPay;
-    techSheet.getRange(mapping.totalHourlyPayRow, mapping.calculatedValueColumn).setValue(totalHourlyPay);
-    
-    // Update the Total Pay cell
-    // First check if we found the Total Pay row in our mapping
-    if (mapping.totalPayRow > 0) {
-      // Get the total sales pay
-      var totalSalesPayValue = techSheet.getRange(mapping.totalSalesPayRow, mapping.calculatedValueColumn).getValue() || 0;
-      
-      // Calculate and update the Total Pay
-      var totalPay = totalHourlyPay + totalSalesPayValue;
-      techSheet.getRange(mapping.totalPayRow, mapping.calculatedValueColumn).setValue(totalPay);
-    }
+    // No formulas in column C as requested
     
     // Change the action dropdown to "Complete"
     if (ratesSheet && actionRow && actionColumn) {
@@ -366,8 +362,9 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
     
     SpreadsheetApp.getUi().alert(
       `Hours and Pay Period updated for ${technicianName}.\n` +
-      `Regular Hours: ${regHours}\n` +
-      `Overtime Hours: ${otHours}`
+      `Regular Hours: ${formatHoursToHM(regHours)}\n` +
+      `Overtime Hours: ${formatHoursToHM(otHours)}\n` +
+      `Double Time Hours: ${formatHoursToHM(dtHours)}`
     );
     
     console.log("Successfully updated hours for " + technicianName);

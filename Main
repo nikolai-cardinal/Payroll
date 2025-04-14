@@ -187,7 +187,7 @@ for (var i = 0; i < data.length; i++) {
 
 // --- Placeholder functions potentially called by onOpen menu items ---
 // You would need to define these or ensure they exist elsewhere in your project.
-function updateAllTechnicianRates() { SpreadsheetApp.getUi().alert('updateAllTechnicianRates function needs to be defined.'); }
+// updateAllTechnicianRates is defined in TechnicianRates.gs
 function createNewTechnicianSheet() { SpreadsheetApp.getUi().alert('createNewTechnicianSheet function needs to be defined.'); }
 // processAllSpiffBonusWithCustomers is now defined in Spiff/Bonus/SpiffBonusMain.gs
 // processAllPBP is defined in PBP/PBPMain.gs
