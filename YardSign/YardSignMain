@@ -65,6 +65,8 @@ function updateYardSignForTechnician(techName, row, column) {
   
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+  var ui = SpreadsheetApp.getUi();
+  var summaryInfo = []; // Array to collect detailed information for the popup
   
   try {
     // First, set status to "Processing..." using our local function
@@ -77,6 +79,7 @@ function updateYardSignForTechnician(techName, row, column) {
     } catch (sheetError) {
       console.error("Error ensuring Yard Sign sheet exists: " + sheetError.message);
       yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+      ui.alert("Error: Could not ensure Yard Sign sheet exists. " + sheetError.message);
       return;
     }
     
@@ -90,6 +93,7 @@ function updateYardSignForTechnician(techName, row, column) {
     if (!techSheet) {
       console.error("Technician sheet not found for: " + techName);
       yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+      ui.alert("Error: Technician sheet not found for " + techName);
       return;
     }
     
@@ -102,6 +106,7 @@ function updateYardSignForTechnician(techName, row, column) {
     } catch (calcError) {
       console.error("Error calculating yard sign entries: " + calcError.message);
       yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+      ui.alert("Error calculating yard sign entries: " + calcError.message);
       return;
     }
     
@@ -109,6 +114,7 @@ function updateYardSignForTechnician(techName, row, column) {
     if (!result || !result.entries || result.entries.length === 0) {
       console.log("No yard sign entries found for: " + techName);
       yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
+      ui.alert("No yard sign entries found for " + techName + " in the Yard Sign sheet for this period.");
       return;
     }
     
@@ -119,6 +125,7 @@ function updateYardSignForTechnician(techName, row, column) {
     } catch (writeError) {
       console.error("Error writing yard sign data: " + writeError.message);
       yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+      ui.alert("Error writing yard sign data: " + writeError.message);
       return;
     }
     
@@ -127,11 +134,42 @@ function updateYardSignForTechnician(techName, row, column) {
     
     console.log("Yard Sign update complete for: " + techName + 
                " - " + result.entries.length + " entries, $" + result.totalAmount.toFixed(2));
+    
+    // --- Prepare and Show Summary Popup ---
+    summaryInfo.push("Yard Sign Update for: " + techName);
+    summaryInfo.push("Total Yard Signs: " + result.entries.length);
+    summaryInfo.push("Fixed Amount per Yard Sign: $25.00");
+    summaryInfo.push("Total Amount: $" + (result.entries.length * 25).toFixed(2));
+    
+    summaryInfo.push("\nYARD SIGN DETAILS:");
+    
+    for (var k = 0; k < result.entries.length; k++) {
+      var entry = result.entries[k];
+      summaryInfo.push("\nEntry #" + (k+1) + ":");
+      summaryInfo.push("• Customer: " + entry.customerName);
+      
+      // Format date
+      var dateDisplay = "";
+      if (entry.installDate instanceof Date) {
+        dateDisplay = Utilities.formatDate(entry.installDate, Session.getScriptTimeZone(), "MM/dd/yyyy");
+      } else {
+        dateDisplay = entry.installDate || "N/A";
+      }
+      
+      summaryInfo.push("• Date: " + dateDisplay);
+      summaryInfo.push("• Job #: " + entry.location);
+      summaryInfo.push("• Business Unit: " + (entry.businessUnit || "N/A"));
+      summaryInfo.push("• Amount: $25.00");
+    }
+    
+    ui.alert(summaryInfo.join("\n"));
+    
   } catch (e) {
     console.error("Error in updateYardSignForTechnician: " + e.message);
     if (ratesSheet && row && column) {
       yardSignSetActionStatus(ratesSheet, row, column, 'Error');
     }
+    ui.alert("Error updating yard signs: " + e.message);
   }
 }
 
@@ -177,10 +215,49 @@ function processAllYardSigns() {
       console.log(status); // Log status updates
     });
     
-    // Show result
+    // Prepare detailed summary
+    var summaryMessage = [];
+    
+    summaryMessage.push("YARD SIGN PROCESSING COMPLETE");
+    
     if (processResult.success) {
-      ui.alert('Success', processResult.message, ui.ButtonSet.OK);
+      summaryMessage.push("\nSUMMARY:");
+      
+      // Extract information from the processResult
+      var processed = processResult.processed || [];
+      var totalCount = processResult.totalCount || 0;
+      var totalAmount = totalCount * 25; // Fixed $25 per yard sign
+      
+      summaryMessage.push("• Total Technicians Processed: " + processed.length);
+      summaryMessage.push("• Total Yard Signs Processed: " + totalCount);
+      summaryMessage.push("• Total Amount: $" + totalAmount.toFixed(2));
+      
+      // If we have technician-specific details
+      if (processed.length > 0) {
+        summaryMessage.push("\nDETAILS BY TECHNICIAN:");
+        
+        for (var i = 0; i < processed.length; i++) {
+          var techInfo = processed[i];
+          var techAmount = techInfo.count * 25; // Fixed $25 per yard sign
+          
+          summaryMessage.push("\n" + techInfo.name + ":");
+          summaryMessage.push("• Yard Signs: " + techInfo.count);
+          summaryMessage.push("• Amount: $" + techAmount.toFixed(2));
+        }
+      }
+      
+      // If we have errors or skips
+      if (processResult.errors && processResult.errors.length > 0) {
+        summaryMessage.push("\nERRORS:");
+        for (var j = 0; j < processResult.errors.length; j++) {
+          summaryMessage.push("• " + processResult.errors[j]);
+        }
+      }
+      
+      // Show the complete detailed summary
+      ui.alert('Success', summaryMessage.join("\n"), ui.ButtonSet.OK);
     } else {
+      // Just show the error message
       ui.alert('Error', processResult.message, ui.ButtonSet.OK);
     }
   } catch (e) {

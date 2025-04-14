@@ -48,10 +48,11 @@ function validateYardSignSheet(yardSignSheet) {
     // Required columns and their possible alternate names based on actual spreadsheet
     var requiredColumnVariants = {
       "Customer Name": ["customer", "client", "name", "customer name", "customerName"],
-      "Location": ["location", "address", "site", "place", "loc", "property", "job #", "job#", "job number", "business unit"],
-      "Install Date": ["install date", "date", "installation date", "installed", "installed date", "installdate", "completion date", "completion"],
-      "Amount": ["amount", "fee", "price", "payment", "cost", "charge", "pay", "$", "jobs total", "total", "job total"],
-      "Technician": ["technician", "tech", "installer", "employee", "worker", "person", "staff", "assigned technicians", "assigned tech", "technicians"]
+      "Job #": ["job #", "job", "job number", "job#", "jobnumber"],
+      "Business Unit": ["business unit", "business", "unit", "bu", "division"],
+      "Completion Date": ["completion date", "completion", "install date", "date", "installation date", "installed", "installed date", "installdate"],
+      "Jobs Total": ["jobs total", "total", "job total", "amount", "fee", "price", "payment", "cost", "charge", "pay", "$"],
+      "Assigned Technicians": ["assigned technicians", "technician", "tech", "installer", "employee", "worker", "person", "staff", "assigned tech", "technicians"]
     };
     
     // Check for missing columns with flexible matching
@@ -159,15 +160,17 @@ function processAllYardSignsUtility(statusCallback) {
       return { success: false, message: "Error getting technician names: " + e.message };
     }
     
-    var processedCount = 0;
-    var errorCount = 0;
-    var skippedCount = 0;
+    var processedTechs = [];    // Array to store processed technician info
+    var errorMessages = [];     // Array to store error messages
+    var skippedTechs = [];      // Array to store skipped technicians
+    var processedCount = 0;     // Count of technicians with entries
+    var totalEntryCount = 0;    // Total count of yard sign entries
     
     // Process each technician
     for (var i = 0; i < techNames.length; i++) {
       var techName = techNames[i][0];
       if (!techName) {
-        skippedCount++;
+        skippedTechs.push("Row " + (i + mapping.dataStartRow) + ": Empty name");
         continue; // Skip empty rows
       }
       
@@ -180,8 +183,8 @@ function processAllYardSignsUtility(statusCallback) {
         // Get the technician's sheet
         var techSheet = ss.getSheetByName(techName);
         if (!techSheet) {
+          errorMessages.push(techName + ": Sheet not found");
           console.error("Could not find sheet for technician: " + techName);
-          errorCount++;
           continue;
         }
         
@@ -192,21 +195,33 @@ function processAllYardSignsUtility(statusCallback) {
         if (result.entries.length > 0) {
           writeYardSignDataToSheet(techSheet, result.entries, result.totalAmount);
           processedCount++;
+          totalEntryCount += result.entries.length;
+          
+          // Add info to the processed technicians array
+          processedTechs.push({
+            name: techName,
+            count: result.entries.length,
+            total: result.totalAmount
+          });
+          
           console.log("Processed " + result.entries.length + " yard sign entries for " + techName);
         } else {
-          skippedCount++;
+          skippedTechs.push(techName + ": No entries found");
           console.log("No yard sign entries found for " + techName);
         }
       } catch (e) {
+        errorMessages.push(techName + ": " + e.message);
         console.error("Error processing yard signs for " + techName + ": " + e.message);
-        errorCount++;
       }
     }
     
     return {
       success: true,
-      message: "Processed yard signs for " + processedCount + " technicians. Skipped: " + 
-              skippedCount + ". Errors: " + errorCount
+      message: "Processed yard signs for " + processedCount + " technicians. Total entries: " + totalEntryCount,
+      processed: processedTechs,         // Array of processed tech info objects
+      errors: errorMessages,             // Array of error messages
+      skipped: skippedTechs,             // Array of skipped tech messages
+      totalCount: totalEntryCount        // Total count of all yard sign entries
     };
   } catch (e) {
     return { success: false, message: "Error processing all yard signs: " + e.message };
@@ -236,9 +251,9 @@ function ensureYardSignSheetExists() {
       "Customer Name", 
       "Job #", 
       "Business Unit", 
-      "Install Date", 
-      "Amount", 
-      "Notes", 
+      "Completion Date", 
+      "Jobs Total", 
+      "Tags", 
       "Assigned Technicians"
     ];
     
@@ -250,10 +265,24 @@ function ensureYardSignSheetExists() {
       .setFontWeight("bold")
       .setBackground("#f3f3f3");
     
+    // Set column formats
+    yardSignSheet.getRange(2, 4, 999, 1).setNumberFormat("MM/dd/yyyy"); // Date format for Completion Date
+    yardSignSheet.getRange(2, 5, 999, 1).setNumberFormat("$#,##0.00"); // Currency format for Jobs Total
+    
     // Auto-resize columns
     for (var i = 1; i <= headers.length; i++) {
       yardSignSheet.autoResizeColumn(i);
     }
+    
+    // Add data validation for business unit if needed
+    // This is optional - uncomment if you want to add a dropdown
+    /*
+    var businessUnitRange = yardSignSheet.getRange(2, 3, 999, 1);
+    var rule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(['Main', 'Commercial', 'Residential'], true)
+      .build();
+    businessUnitRange.setDataValidation(rule);
+    */
     
     console.log("Created new Yard Sign sheet with proper headers");
   } else {
@@ -266,7 +295,15 @@ function ensureYardSignSheetExists() {
       var currentHeaders = yardSignSheet.getRange(1, 1, 1, yardSignSheet.getLastColumn()).getDisplayValues()[0];
       
       // Required column names
-      var requiredColumns = ["Customer Name", "Location", "Install Date", "Amount", "Technician"];
+      var requiredColumns = [
+        "Customer Name", 
+        "Job #", 
+        "Business Unit", 
+        "Completion Date", 
+        "Jobs Total", 
+        "Tags", 
+        "Assigned Technicians"
+      ];
       
       // Identify which required columns are missing
       var missingColumns = [];
@@ -294,6 +331,17 @@ function ensureYardSignSheetExists() {
           yardSignSheet.getRange(1, nextCol, 1, missingColumns.length)
             .setFontWeight("bold")
             .setBackground("#f3f3f3");
+        }
+        
+        // Set appropriate number formats for special columns
+        var completionDateIdx = findColumnIndex(missingColumns, "Completion Date");
+        if (completionDateIdx !== -1) {
+          yardSignSheet.getRange(2, nextCol + completionDateIdx - 1, 999, 1).setNumberFormat("MM/dd/yyyy");
+        }
+        
+        var jobsTotalIdx = findColumnIndex(missingColumns, "Jobs Total");
+        if (jobsTotalIdx !== -1) {
+          yardSignSheet.getRange(2, nextCol + jobsTotalIdx - 1, 999, 1).setNumberFormat("$#,##0.00");
         }
         
         console.log("Added missing columns to Yard Sign sheet");

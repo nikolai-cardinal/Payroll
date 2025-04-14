@@ -35,10 +35,10 @@ function writeYardSignDataToSheet(techSheet, allYardSignEntries, totalYardSignAm
     
     dataToWrite.push([
       entry.customerName || "",      // Column E: Customer Name
-      entry.location || "",          // Column F: Location
-      displayDate,                   // Column G: Install Date
-      entry.amount,                  // Column H: Amount
-      "Yard Sign [Tag]",             // Column I: Notes
+      entry.businessUnit || "",      // Column F: Business Unit (from Yard Sign tab column C)
+      displayDate,                   // Column G: Completion Date
+      25,                            // Column H: Fixed $25 amount
+      "ST - Yard Sign Tag",          // Column I: Note
       "Yard Sign"                    // Column J: Type
     ]);
   }
@@ -174,41 +174,45 @@ function writeRemainingYardSignEntries(sheet, entries) {
     targetRange.setValues([entries[k]]);
     
     // Apply formatting
-    sheet.getRange(currentRow, 7, 1, 1).setNumberFormat('MM/dd/yyyy'); // Date column format
-    sheet.getRange(currentRow, 8, 1, 1).setNumberFormat('$#,##0.00'); // Amount column format
+    sheet.getRange(currentRow, 7, 1, 1).setNumberFormat('MM/dd/yyyy'); // Date column format (G)
+    sheet.getRange(currentRow, 8, 1, 1).setNumberFormat('$#,##0.00'); // Amount column format (H) for $25
   }
 }
 
 /**
-* Updates the top summary section ('Total Yard Sign Pay') with amount and count.
+* Updates the top summary section ('Yard Sign Spiff') with count and fixed $25 amount.
 * @param {Sheet} sheet - The technician sheet to update.
-* @param {number} amount - The total Yard Sign amount.
+* @param {number} amount - The total Yard Sign amount (not used, we use fixed $25).
 * @param {number} count - The number of Yard Sign entries.
 */
 function updateTopSummaryYardSignPay(sheet, amount, count) {
   if (!sheet) return;
-  // Target row 12 specifically for Total Yard Sign Pay
+  // Target row 12 specifically for Yard Sign Spiff
   var yardSignPayRow = 12;
   try {
      sheet.getRange(yardSignPayRow, 2).setValue(count); // Count in Col B (B12)
-     sheet.getRange(yardSignPayRow, 3).setValue(amount).setNumberFormat("$#,##0.00"); // Amount in Col C (C12)
-     console.log("Updated Total Yard Sign Pay in B12/C12 with count: " + count + ", amount: $" + amount.toFixed(2));
+     sheet.getRange(yardSignPayRow, 3).setValue(25).setNumberFormat("$#,##0.00"); // Hard-coded $25 in Col C (C12)
+     console.log("Updated Yard Sign Spiff in B12/C12 with count: " + count + ", amount: $25.00");
   } catch (e) { 
      console.error("Error updating top summary yard sign pay for " + sheet.getName() + ": " + e); 
      
-     // Fallback to searching for "Total Yard Sign Pay" if row 12 doesn't work
+     // Fallback to searching for "Yard Sign Spiff" or "Total Yard Sign Pay" if row 12 doesn't work
      var data = sheet.getRange("A1:A20").getValues(); // Check first 20 rows
      for (var row = 0; row < data.length; row++) {
-       if (data[row][0] && data[row][0].toString().trim() === "Total Yard Sign Pay") {
-         yardSignPayRow = row + 1;
-         try {
-           sheet.getRange(yardSignPayRow, 2).setValue(count); // Count in Col B
-           sheet.getRange(yardSignPayRow, 3).setValue(amount).setNumberFormat("$#,##0.00"); // Amount in Col C
-           console.log("Fallback: Updated Total Yard Sign Pay in row " + yardSignPayRow);
-         } catch (err) { 
-           console.error("Fallback also failed to update top summary: " + err); 
+       var cellValue = data[row][0];
+       if (cellValue && typeof cellValue === 'string') {
+         var cellText = cellValue.toString().trim().toLowerCase();
+         if (cellText === "yard sign spiff" || cellText === "total yard sign pay") {
+           yardSignPayRow = row + 1;
+           try {
+             sheet.getRange(yardSignPayRow, 2).setValue(count); // Count in Col B
+             sheet.getRange(yardSignPayRow, 3).setValue(25).setNumberFormat("$#,##0.00"); // Hard-coded $25 in Col C
+             console.log("Fallback: Updated Yard Sign Spiff in row " + yardSignPayRow);
+           } catch (err) { 
+             console.error("Fallback also failed to update top summary: " + err); 
+           }
+           break;
          }
-         break;
        }
      }
   }
