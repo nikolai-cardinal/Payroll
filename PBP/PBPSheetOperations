@@ -39,6 +39,11 @@ function writePbpDataToSheet(techSheet, allPbpEntries, totalTechnicianShare) {
     // Format notes with just percentage and split team details (excluding current technician)
     var percentageText = "(" + entry.splitPercentage.toFixed(1) + "%)";
     
+    // Add apprentice information if applicable
+    if (entry.isApprentice) {
+      percentageText += " [Apprentice]";
+    }
+    
     // Filter split team to exclude the current technician
     var splitTeamText = "";
     if (entry.splitDetails && entry.splitDetails.length > 0) {

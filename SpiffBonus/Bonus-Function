@@ -1,0 +1,161 @@
+/**
+ * Payroll System - Spiff Bonus Functionality Documentation
+ * 
+ * This document explains how the Spiff Bonus functionality works in the Payroll system.
+ */
+
+/**
+ * OVERVIEW:
+ * The Spiff Bonus module processes bonus entries from a dedicated "Spiff/Bonus" sheet,
+ * calculates the bonus amount for each technician based on specific criteria (e.g., being the seller and installer, or just the installer),
+ * and updates the corresponding technician's payroll sheet with the calculated bonus amounts and relevant details.
+ */
+
+/**
+ * TRIGGERS AND ENTRY POINTS:
+ * (Inferred - based on typical patterns and Yard Sign example)
+ * 
+ * 1. Manual Trigger - Action Column:
+ *    - User selects "Spiff and Bonus" (or similar) in the Action column (e.g., column G) of the "Hourly + Spiff Pay" sheet.
+ *    - This likely triggers the onEdit() function in a main script (e.g., Main.js).
+ *    - The onEdit() function identifies the action and technician, then calls a main processing function (likely within SpiffBonusMainProcessor).
+ *    - On completion, displays a summary popup for the specific technician.
+ * 
+ * 2. Manual Trigger - Menu Item (Potential):
+ *    - A menu item like "Process All Spiff/Bonuses" might exist under a "Technician Tools" or similar menu.
+ *    - Clicking this would call a function (likely in SpiffBonusMainProcessor) to process bonuses for all technicians.
+ *    - On completion, displays a comprehensive summary popup for all processed bonuses.
+ */
+
+/**
+ * WORKFLOW STEP BY STEP:
+ * (Inferred - based on file names and original BonusCalculationlogic)
+ * 
+ * A. Initialization (Likely handled by SpiffBonusMainProcessor or a dedicated init function):
+ *    1. Get the active sheet or identify the technician row from the edit event.
+ *    2. Get the technician's name.
+ *    3. Validate or ensure the existence of the "Spiff/Bonus" source sheet (possibly using SpiffBonusSheetManager).
+ *    4. Validate or ensure the existence of the target technician's sheet.
+ * 
+ * B. Data Handling and Calculation (Likely involving SpiffBonusDataHandler, SpiffBonusHeaderMap, and potentially BonusCalculationLogic if it were a separate file):
+ *    1. Read data from the "Spiff/Bonus" sheet using SpiffBonusDataHandler.
+ *    2. Identify relevant columns using SpiffBonusHeaderMap (e.g., "Sold By", "Assigned Technician", "Bonus Amount").
+ *    3. Iterate through rows in the "Spiff/Bonus" sheet.
+ *    4. For each row, apply the bonus calculation logic:
+ *       - Check if the technician's name is in both "Sold By" (e.g., Col F) and "Assigned Technician" (e.g., Col G). If yes, add the bonus amount (e.g., Col I).
+ *       - Check if "Sold By" (e.g., Col F) is empty AND the technician's name is in "Assigned Technician" (e.g., Col G). If yes, add the bonus amount (e.g., Col I).
+ *    5. Aggregate the total bonus amount and collect details of qualifying bonus entries for the technician.
+ * 
+ * C. Updating Technician Sheet (Likely involving SpiffBonusSectionFinders, SpiffBonusSectionClearer, SpiffBonusDataWriter, SpiffBonusSummaryUpdater):
+ *    1. Set the Action column status to "Processing...".
+ *    2. Locate the relevant "Spiff/Bonus" section within the technician's sheet using SpiffBonusSectionFinders.
+ *    3. Clear previous Spiff/Bonus entries within that section using SpiffBonusSectionClearer.
+ *    4. Write the newly calculated bonus details (individual entries) to the technician's sheet using SpiffBonusDataWriter. This includes information like the source job/customer, date, and the specific bonus amount for that entry.
+ *    5. Update the summary section (e.g., a dedicated "Spiff/Bonus Pay" row) on the technician's sheet with the total calculated bonus amount using SpiffBonusSummaryUpdater.
+ *    6. Update the Action column status to "Complete" or "Error".
+ *    7. Display a summary notification/popup with details of the processed bonuses.
+ */
+
+/**
+ * KEY FUNCTIONS AND THEIR ROLES:
+ * (Inferred - mapping file names to likely responsibilities)
+ * 
+ * 1. SpiffBonusMainProcessor.gs:
+ *    - Handles triggers (onEdit, menu clicks).
+ *    - Orchestrates the overall spiff/bonus calculation process for single or all technicians.
+ *    - Calls functions from other SpiffBonus modules.
+ * 
+ * 2. SpiffBonusDataHandler.gs:
+ *    - Responsible for reading data from the "Spiff/Bonus" source sheet.
+ *    - May handle data validation and parsing.
+ * 
+ * 3. SpiffBonusHeaderMap.gs:
+ *    - Contains mappings or functions to find the correct column indices (e.g., "Sold By", "Assigned Technician", "Bonus Amount") in the "Spiff/Bonus" sheet, allowing flexibility in column names/order.
+ * 
+ * 4. (Original) BonusCalculationLogic:
+ *    - Encapsulated the core logic for determining if a bonus row applies to a technician and calculating the amount (now integrated likely into DataHandler or MainProcessor).
+ * 
+ * 5. SpiffBonusSectionFinders.gs:
+ *    - Locates the specific range/section within a technician's sheet where spiff/bonus details should be written.
+ * 
+ * 6. SpiffBonusSectionClearer.gs:
+ *    - Clears out old spiff/bonus entries from the technician's sheet before writing new data.
+ * 
+ * 7. SpiffBonusDataWriter.gs:
+ *    - Writes the detailed lines for each qualifying spiff/bonus entry into the designated section of the technician's sheet.
+ *    - Handles formatting of dates, currency, etc.
+ * 
+ * 8. SpiffBonusSummaryUpdater.gs:
+ *    - Updates the total spiff/bonus amount in the summary section (likely near the top) of the technician's sheet.
+ * 
+ * 9. SpiffBonusSheetManager.gs:
+ *    - Manages the "Spiff/Bonus" source sheet (validation, creation, getting sheet object).
+ *    - May also manage interactions with technician sheets (getting sheet objects).
+ * 
+ * 10. SpiffBonusUtilities.gs:
+ *     - Contains helper functions used across different SpiffBonus modules (e.g., date formatting, error logging, safe operations).
+ * 
+ * 11. SpiffBonusDirectoryExplanation.txt: 
+ *     - Provides meta-documentation about the files within the SpiffBonus directory.
+ */
+
+/**
+ * DATA FLOW:
+ * 
+ * 1. Source Data ("Spiff/Bonus" Sheet):
+ *    - Contains rows detailing potential bonus opportunities.
+ *    - Key Columns: "Sold By" (Technician Name), "Assigned Technician" (Technician Name), "Bonus Amount" (Currency), potentially Customer Name, Job #, Date, etc.
+ * 
+ * 2. Processing:
+ *    - Script reads the "Spiff/Bonus" sheet.
+ *    - Applies calculation logic based on "Sold By" and "Assigned Technician" columns for the target technician(s).
+ *    - Aggregates total bonus and collects details of qualifying entries.
+ * 
+ * 3. Output Data (Technician's Sheet):
+ *    - Updates a summary row with the total calculated "Spiff/Bonus Pay".
+ *    - Writes individual lines in a dedicated section detailing each bonus credited (e.g., Source Job/Customer, Date, Bonus Amount, Type Note like "Spiff/Bonus").
+ */
+
+/**
+ * ERROR HANDLING:
+ * (Inferred - assuming best practices similar to Yard Sign)
+ * 
+ * - Uses try/catch blocks extensively within functions to handle unexpected errors gracefully.
+ * - Utilizes utility functions (e.g., from SpiffBonusUtilities) for safe spreadsheet operations (reading, writing, clearing).
+ * - Logs detailed error messages to the Apps Script execution log or console for debugging.
+ * - Updates the Action column status to "Error" if processing fails for a technician.
+ * - Displays user-friendly error messages in popups or dialogs.
+ * - Includes validation checks for sheet existence, required columns, and potentially data integrity.
+ */
+
+/**
+ * IMPLEMENTATION DETAILS:
+ * 
+ * - Flexible Column Mapping: Uses SpiffBonusHeaderMap to find columns dynamically, avoiding errors if column order changes.
+ * - Specific Calculation Logic: Implements the dual criteria for bonuses (Sold By + Assigned OR Empty Sold By + Assigned).
+ * - Section Management: Uses dedicated functions (Finders, Clearer, Writer) to manage the specific area on the technician sheet where bonus details are listed.
+ * - Summary Update: Ensures the top summary accurately reflects the total calculated bonus using SpiffBonusSummaryUpdater.
+ * - Status Updates: Provides visual feedback via the Action column ("Processing...", "Complete", "Error").
+ * - User Notifications: Informs the user of success or failure via popups/dialogs.
+ */
+
+/**
+ * TECHNICIAN-SPECIFIC PROCESSING:
+ * 
+ * 1. Data Aggregation: The process filters the main "Spiff/Bonus" sheet specifically for rows relevant to the target technician based on the defined logic.
+ * 2. Sheet Interaction:
+ *    - Reads data relevant only to the specific technician from the source sheet.
+ *    - Finds the correct target sheet for the technician.
+ *    - Locates, clears, and writes data within the designated "Spiff/Bonus" section of that specific technician's sheet.
+ *    - Updates the summary row unique to that technician's sheet.
+ * 3. Handling Existing Data: Uses SpiffBonusSectionClearer to remove previous calculations before adding the new ones, preventing duplication or stale data.
+ * 4. Formatting: Applies consistent formatting (dates, currency, notes) to the data written to the technician's sheet via SpiffBonusDataWriter.
+ */
+
+Bonus Calculation Logic (Original Requirements)
+When the "spiff and bonus" action is triggered, the system retrieves the technician's name and the Spiff/Bonus sheet data
+For each row in the Spiff/Bonus sheet:
+The system checks if the technician's name appears in both column F (sold by) and column G (assigned technician)
+If there's a match, a bonus from the column I is added to the total
+The system also checks if column F is empty but the technician name is in column G, and adds a bonus that is in the column I in this case as well
+The total calculated bonus is then updated in the technician's sheet

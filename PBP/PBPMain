@@ -71,10 +71,19 @@ function updatePBPForTechnician(technicianName, actionRow, actionColumn) {
 
     // --- 5. Prepare and Show Summary Popup ---
     summaryInfo.push("PBP Update for: " + technicianName);
+    
+    // Add apprentice information if applicable
+    var isApprentice = allPbpEntries.length > 0 && allPbpEntries[0].isApprentice;
+    if (isApprentice) {
+      var apprenticePercentage = allPbpEntries[0].apprenticePercentage;
+      summaryInfo.push("Apprentice Technician (Tracked at " + apprenticePercentage + "%)");
+    }
+    
     summaryInfo.push("Total Calculated PBP Share: $" + totalTechnicianShare.toFixed(2));
     summaryInfo.push("Number of PBP Entries Processed: " + allPbpEntries.length);
     summaryInfo.push("\nPBP DETAILS:");
-    // (Build detailed summary string - same as before)
+    
+    // Build detailed summary string
     for (var k = 0; k < allPbpEntries.length; k++) {
      var entry = allPbpEntries[k];
      summaryInfo.push("\nEntry #" + (k+1) + ":");
@@ -84,6 +93,7 @@ function updatePBPForTechnician(technicianName, actionRow, actionColumn) {
      summaryInfo.push("• Job Total PBP: $" + entry.totalPbp.toFixed(2));
      summaryInfo.push("• Tech Role (Job): " + entry.roleForJob + " (" + entry.splitPercentage.toFixed(1) + "%)");
      summaryInfo.push("• Calculated Tech Share: $" + entry.technicianShare.toFixed(2));
+     
      if (entry.splitDetails && entry.splitDetails.length > 1) {
        summaryInfo.push("• Split Team: " + entry.splitDetails.join(", "));
      } else if (entry.splitDetails && entry.splitDetails.length === 1) {

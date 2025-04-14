@@ -18,6 +18,36 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
  
  // Track unique entries to prevent duplicates
  var processedEntries = {};
+ 
+ // Check if the technician is an apprentice and get their percentage if applicable
+ var isApprentice = false;
+ var apprenticePercentage = 0;
+ 
+ // Loop through Hourly + Spiff Pay data to check for apprentice status
+ for (var i = 1; i < ratesData.length; i++) {
+   var row = ratesData[i];
+   var name = row[0]; // Column A
+   var title = row[2]; // Column C
+   var percentage = row[7]; // Column H
+   
+   if (name && name.toString().trim().toLowerCase() === technicianName.toLowerCase()) {
+     // Check if title contains "Apprentice"
+     if (title && title.toString().includes("Apprentice")) {
+       isApprentice = true;
+       
+       // Get percentage from Column H
+       if (percentage !== null && percentage !== undefined) {
+         if (typeof percentage === "string" && percentage.includes("%")) {
+           apprenticePercentage = parseFloat(percentage.replace("%", "")) || 0;
+         } else if (typeof percentage === "number") {
+           apprenticePercentage = percentage < 1 ? percentage * 100 : percentage; // Handle decimal or whole number %
+         }
+       }
+       console.log("Apprentice detected: " + technicianName + " with " + apprenticePercentage + "% rate");
+       break;
+     }
+   }
+ }
 
  // Loop through Spiff/Bonus data (skip header row)
  for (var i = 1; i < spiffBonusData.length; i++) {
@@ -74,25 +104,84 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
 
    // Parse names from Col H, fallback to Col G
    var assignedNames = [];
-    if (assignedTechsString) {
-        assignedNames = assignedTechsString.split(",").map(function(name) {
-            return name.replace(/\(\d+%\)/, "").trim();
-        }).filter(function(name){ return name.length > 0; });
-    }
-   if (assignedNames.length === 0 && primaryTechnician) {
-        assignedNames.push(primaryTechnician.trim());
-    } else if (assignedNames.length === 0 && !primaryTechnician) {
-        console.log("Skipping row " + (i+1) + ": No technicians found in Col G or H.");
-        continue;
-    }
-    // Ensure primary tech is included and list is unique
-   if (primaryTechnician && !assignedNames.some(function(name) { return name.toLowerCase() === primaryTechnician.trim().toLowerCase(); })) {
-       assignedNames.push(primaryTechnician.trim());
+   
+   // Parse assigned techs from column H
+   if (assignedTechsString) {
+       // Split by comma but also handle cases without commas
+       if (assignedTechsString.includes(",")) {
+           assignedNames = assignedTechsString.split(",");
+       } else {
+           // If multiple names but no commas, try to separate 
+           // (common pattern: "John Smith Jane Doe")
+           var possibleMultipleNames = assignedTechsString.split(" ");
+           if (possibleMultipleNames.length > 2) {
+               // This might be multiple techs without commas
+               // Try to detect full names (typically First Last format)
+               var builtNames = [];
+               var currentName = "";
+               
+               for (var n = 0; n < possibleMultipleNames.length; n++) {
+                   var part = possibleMultipleNames[n];
+                   if (currentName === "") {
+                       currentName = part;
+                   } else if (n+1 < possibleMultipleNames.length && 
+                              !part.includes("(") && !part.includes(")") &&
+                              part.length > 1) {
+                       // Likely a last name, complete the full name
+                       currentName += " " + part;
+                       builtNames.push(currentName);
+                       currentName = "";
+                   } else {
+                       // Just add to current part
+                       currentName += " " + part;
+                   }
+               }
+               
+               // Add any remaining name parts
+               if (currentName !== "") {
+                   builtNames.push(currentName);
+               }
+               
+               if (builtNames.length > 0) {
+                   assignedNames = builtNames;
+               } else {
+                   // Fallback to treating as one name
+                   assignedNames = [assignedTechsString];
+               }
+           } else {
+               // Just one name or simple format
+               assignedNames = [assignedTechsString];
+           }
+       }
+       
+       // Clean up names
+       assignedNames = assignedNames.map(function(name) {
+           return name.replace(/\(\d+%\)/, "").trim();
+       }).filter(function(name){ return name.length > 0; });
    }
+   
+   // Ensure primary tech is included
+   if (primaryTechnician && primaryTechnician.trim()) {
+       var primaryName = primaryTechnician.trim();
+       var primaryIncluded = assignedNames.some(function(name) {
+           return name.toLowerCase() === primaryName.toLowerCase();
+       });
+       
+       if (!primaryIncluded) {
+           console.log("Adding primary technician " + primaryName + " to assigned techs for row " + (i+1));
+           assignedNames.push(primaryName);
+       }
+   }
+   
+   // Fallback if no techs identified
+   if (assignedNames.length === 0) {
+       console.log("Skipping row " + (i+1) + ": No technicians found in Col G or H.");
+       continue;
+   }
+   
+   // Create unique list of techs preserving original casing
    var uniqueNames = Array.from(new Set(assignedNames.map(name => name.toLowerCase())))
-                        .map(lowerName => assignedNames.find(name => name.toLowerCase() === lowerName)); // Get original casing back
-
-
+                        .map(lowerName => assignedNames.find(name => name.toLowerCase() === lowerName));
 
 
    // Determine role and count paying techs
@@ -111,6 +200,56 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
      jobTechnicians.push({ name: name, role: role, defaultSplit: defaultSplit });
    });
 
+
+   // Special handling: If we have at least one Assistant but no Leads, 
+   // upgrade the primary technician to Lead if they're present
+   var hasAtLeastOneAssistant = assistantCount > 0;
+   var hasNoLeads = leadCount === 0;
+   
+   if (hasAtLeastOneAssistant && hasNoLeads && primaryTechnician) {
+     // Find the primary tech in jobTechnicians
+     var primaryTechIndex = -1;
+     for (var p = 0; p < jobTechnicians.length; p++) {
+       if (jobTechnicians[p].name.toLowerCase() === primaryTechnician.trim().toLowerCase()) {
+         primaryTechIndex = p;
+         break;
+       }
+     }
+     
+     if (primaryTechIndex >= 0) {
+       // Upgrade the primary tech to Lead
+       if (jobTechnicians[primaryTechIndex].role === "None") {
+         console.log("Upgrading primary technician " + primaryTechnician + " to Lead role");
+         jobTechnicians[primaryTechIndex].role = "Lead";
+         jobTechnicians[primaryTechIndex].defaultSplit = 65;
+         leadCount++;
+         totalPayingTechs++;
+       }
+     } else if (assistantCount === 1) {
+       // If only one assistant and no primary tech found, upgrade the assistant to Lead
+       for (var a = 0; a < jobTechnicians.length; a++) {
+         if (jobTechnicians[a].role === "Assistant") {
+           console.log("No Lead found on team with one Assistant. Upgrading " + jobTechnicians[a].name + " to Lead");
+           jobTechnicians[a].role = "Lead";
+           jobTechnicians[a].defaultSplit = 65;
+           leadCount++;
+           assistantCount--;
+           break;
+         }
+       }
+     }
+   }
+
+   // Enhanced logging for debugging Emily Mallen jobs
+   if (customerName && customerName.toString().includes("Emily Mallen")) {
+     console.log("Processing Emily Mallen job: " + itemName);
+     console.log("Primary Tech: " + primaryTechnician);
+     console.log("Assigned Techs: " + assignedTechsString);
+     console.log("Unique techs identified: " + uniqueNames.join(", "));
+     console.log("Techs with roles: " + jobTechnicians.map(function(t) {
+       return t.name + " (" + t.role + "/" + t.defaultSplit + "%)"; 
+     }).join(", "));
+   }
 
    // --- Calculate Split Percentage for the Current Technician ---
    var currentTechShare = 0;
@@ -163,7 +302,6 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
         }
     }
 
-
    // --- Store Processed Entry ---
    var splitDetailsForPopup = jobTechnicians.filter(t => t.role !== "None").map(t => t.name + " (" + t.role + ")");
 
@@ -177,7 +315,9 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
      technicianShare: currentTechShare,
      roleForJob: currentTechRole,
      splitPercentage: currentTechSplitPercent,
-     splitDetails: splitDetailsForPopup
+     splitDetails: splitDetailsForPopup,
+     isApprentice: isApprentice,
+     apprenticePercentage: isApprentice ? apprenticePercentage : 0
    });
 
 
@@ -202,22 +342,63 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
 * @return {number} The default split percentage (e.g., 65, 35, 0) or 0 if not found.
 */
 function getTechnicianDefaultSplit(techName, ratesData) {
-if (!techName || !ratesData) return 0;
-var nameColIndex = 0; // Column A
-var splitColIndex = 7; // Column H
+  if (!techName || !ratesData) return 0;
+  var nameColIndex = 0; // Column A
+  var splitColIndex = 7; // Column H
+  var roleColIndex = 2;  // Column C - Role/Title
+  var titleColIndex = 2; // Column C - Title
 
-
-for (var i = 1; i < ratesData.length; i++) { // Skip header
-  if (ratesData[i][nameColIndex] && ratesData[i][nameColIndex].toString().trim().toLowerCase() === techName.trim().toLowerCase()) {
-    var splitValue = ratesData[i][splitColIndex];
-    if (typeof splitValue === "string" && splitValue.includes("%")) {
-      return parseFloat(splitValue.replace("%", "")) || 0;
-    } else if (typeof splitValue === "number") {
-      return splitValue < 1 ? splitValue * 100 : splitValue; // Handle decimal or whole number %
+  // First pass - look for an exact match in the rates data
+  for (var i = 1; i < ratesData.length; i++) { // Skip header
+    if (ratesData[i][nameColIndex] && ratesData[i][nameColIndex].toString().trim().toLowerCase() === techName.trim().toLowerCase()) {
+      // Found the technician in rates data - get their split value
+      var splitValue = ratesData[i][splitColIndex];
+      if (typeof splitValue === "string" && splitValue.includes("%")) {
+        return parseFloat(splitValue.replace("%", "")) || 0;
+      } else if (typeof splitValue === "number") {
+        return splitValue < 1 ? splitValue * 100 : splitValue; // Handle decimal or whole number %
+      }
+      
+      // If no split value but we found the tech, check their role
+      var roleValue = ratesData[i][titleColIndex];
+      if (roleValue) {
+        var roleLower = roleValue.toString().toLowerCase();
+        // Assign default splits based on role if not explicitly set
+        if (roleLower.includes("lead") || roleLower.includes("senior")) {
+          console.log("Technician " + techName + " assigned default Lead split (65%) based on role: " + roleValue);
+          return 65;
+        } else if (roleLower.includes("assist") || roleLower.includes("apprentice") || roleLower.includes("helper")) {
+          console.log("Technician " + techName + " assigned default Assistant split (35%) based on role: " + roleValue);
+          return 35;
+        }
+      }
+      
+      // No role-based assignment possible from title
+      return 0;
     }
-    return 0;
   }
-}
-return 0; // Not found
+  
+  // If we get here, the technician was not found in rates data
+  // Check if there is at least one apprentice in the rates data
+  var hasApprentice = false;
+  for (var j = 1; j < ratesData.length; j++) {
+    if (ratesData[j][titleColIndex]) {
+      var title = ratesData[j][titleColIndex].toString().toLowerCase();
+      if (title.includes("apprentice")) {
+        hasApprentice = true;
+        break;
+      }
+    }
+  }
+  
+  // If there's an apprentice on the team, any tech not found in rates should be treated as Lead
+  if (hasApprentice) {
+    console.log("Technician " + techName + " not found in rates data, but apprentice exists - assigning as Lead (65%)");
+    return 65;
+  }
+  
+  // If no apprentice found, technician not in rates data gets no default role
+  console.log("No split or role found for technician: " + techName);
+  return 0;
 }
 
