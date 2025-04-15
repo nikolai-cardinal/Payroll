@@ -143,4 +143,122 @@ function processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesS
     ui.alert(`An error occurred processing Spiff/Bonus for ${technicianName}`);
     setActionStatus(ratesSheet, triggerRow, triggerCol, 'Error');
   }
+}
+
+/**
+ * Processes Spiff/Bonus for all technicians.
+ * Called from the menu handler in Main.js.
+ */
+function processSpiffBonusAll() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+  
+  if (!ratesSheet) {
+    ui.alert('Hourly + Spiff Pay sheet not found!');
+    return;
+  }
+
+  var ratesMapping = getRatesSheetMapping(); // Use utility function
+  var ratesData = ratesSheet.getDataRange().getValues();
+  var techsToProcess = [];
+
+  // Get all sheets in the spreadsheet to check for existence
+  var allSheets = ss.getSheets();
+  var sheetNames = allSheets.map(function(sheet) {
+    return sheet.getName();
+  });
+
+  // Gather all technicians regardless of status
+  for (var i = ratesMapping.dataStartRow - 1; i < ratesData.length; i++) { // Adjust index for 0-based array
+    var row = ratesData[i];
+    var techName = row[ratesMapping.nameColumn - 1];
+
+    // Ensure techName is valid and sheet exists
+    if (techName && typeof techName === 'string' && techName.trim() !== "" && sheetNames.indexOf(techName) !== -1) {
+      techsToProcess.push({
+        name: techName,
+        row: i + 1, // 1-based row index
+        col: ratesMapping.actionColumn
+      });
+    }
+  }
+
+  if (techsToProcess.length === 0) {
+    ui.alert('No technicians with sheets found for Spiff/Bonus processing.');
+    return;
+  }
+
+  // Process each technician
+  var errors = [];
+  var successCount = 0;
+  var processedTechs = [];
+  var totalAmount = 0;
+  
+  for (var t = 0; t < techsToProcess.length; t++) {
+    var tech = techsToProcess[t];
+    try {
+      console.log("Processing Spiff/Bonus for: " + tech.name + " (Row: " + tech.row + ")");
+      
+      // Get technician's sheet
+      var techSheet = ss.getSheetByName(tech.name);
+      if (!techSheet) {
+        throw new Error("Technician sheet not found");
+      }
+      
+      // Get the Spiff/Bonus sheet
+      var spiffBonusSheet = ss.getSheetByName('Spiff/Bonus');
+      if (!spiffBonusSheet) {
+        throw new Error("Spiff/Bonus sheet not found");
+      }
+      
+      // Process the data using the new function in SpiffBonusDataHandler
+      var result = processSpiffAndBonusData(techSheet, tech.name, spiffBonusSheet);
+      
+      // Store the results
+      successCount++;
+      processedTechs.push({
+        name: tech.name,
+        count: result.entryCount || 0,
+        amount: result.totalAmount || 0
+      });
+      totalAmount += result.totalAmount || 0;
+      
+    } catch (error) {
+      console.error("Failed processing Spiff/Bonus for " + tech.name + ": " + error.message);
+      errors.push(tech.name + ": " + error.message);
+    }
+  }
+
+  // Build summary message
+  var summaryMessage = [];
+  summaryMessage.push("SPIFF/BONUS PROCESSING COMPLETE");
+  
+  // Add summary section
+  summaryMessage.push("\nSUMMARY:");
+  summaryMessage.push("• Total Technicians Processed: " + successCount);
+  summaryMessage.push("• Total Amount: $" + totalAmount.toFixed(2));
+  
+  // Add technician details section
+  if (processedTechs.length > 0) {
+    summaryMessage.push("\nDETAILS BY TECHNICIAN:");
+    
+    for (var i = 0; i < processedTechs.length; i++) {
+      var techInfo = processedTechs[i];
+      summaryMessage.push("\n" + techInfo.name + ":");
+      summaryMessage.push("• Entries: " + techInfo.count);
+      summaryMessage.push("• Amount: $" + techInfo.amount.toFixed(2));
+    }
+  }
+  
+  // Add errors section if we have any
+  if (errors.length > 0) {
+    summaryMessage.push("\nERRORS:");
+    for (var j = 0; j < errors.length; j++) {
+      summaryMessage.push("• " + errors[j]);
+    }
+  }
+  
+  // Show the popup
+  ui.alert(summaryMessage.join("\n"));
 } 

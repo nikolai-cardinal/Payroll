@@ -58,8 +58,9 @@ function yardSignSetActionStatus(ratesSheet, row, col, status) {
 * @param {string} techName - The technician's name.
 * @param {number} row - The row in the rates sheet where the action was triggered.
 * @param {number} column - The column in the rates sheet where the action was triggered.
+* @param {boolean} skipStatusUpdate - Optional flag to skip status updates (for batch processing)
 */
-function updateYardSignForTechnician(techName, row, column) {
+function updateYardSignForTechnician(techName, row, column, skipStatusUpdate) {
   // Initialize the module
   initYardSign();
   
@@ -70,7 +71,9 @@ function updateYardSignForTechnician(techName, row, column) {
   
   try {
     // First, set status to "Processing..." using our local function
-    yardSignSetActionStatus(ratesSheet, row, column, 'Processing...');
+    if (!skipStatusUpdate) {
+      yardSignSetActionStatus(ratesSheet, row, column, 'Processing...');
+    }
     
     // Get or create yard sign sheet with proper structure
     var yardSignSheet;
@@ -78,8 +81,10 @@ function updateYardSignForTechnician(techName, row, column) {
       yardSignSheet = ensureYardSignSheetExists();
     } catch (sheetError) {
       console.error("Error ensuring Yard Sign sheet exists: " + sheetError.message);
-      yardSignSetActionStatus(ratesSheet, row, column, 'Error');
-      ui.alert("Error: Could not ensure Yard Sign sheet exists. " + sheetError.message);
+      if (!skipStatusUpdate) {
+        yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+        ui.alert("Error: Could not ensure Yard Sign sheet exists. " + sheetError.message);
+      }
       return;
     }
     
@@ -92,9 +97,63 @@ function updateYardSignForTechnician(techName, row, column) {
     var techSheet = ss.getSheetByName(techName);
     if (!techSheet) {
       console.error("Technician sheet not found for: " + techName);
-      yardSignSetActionStatus(ratesSheet, row, column, 'Error');
-      ui.alert("Error: Technician sheet not found for " + techName);
+      if (!skipStatusUpdate) {
+        yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+        ui.alert("Error: Technician sheet not found for " + techName);
+      }
       return;
+    }
+    
+    // --- Check if the technician is an apprentice with 0% commission rate ---
+    var isApprenticeWith0Percent = false;
+    try {
+      // Find the technician's row in the rates sheet
+      var technicianRow = -1;
+      var ratesData = ratesSheet.getDataRange().getValues();
+      
+      for (var i = 1; i < ratesData.length; i++) { // Skip header row
+        var rowData = ratesData[i];
+        var name = rowData[0]; // Column A - Technician name
+        
+        if (name && name.toString().trim().toLowerCase() === techName.toLowerCase()) {
+          technicianRow = i;
+          break;
+        }
+      }
+      
+      if (technicianRow >= 0) {
+        var title = ratesData[technicianRow][2]; // Column C - Position
+        var commissionPercentStr = ratesData[technicianRow][7]; // Column H - Commission %
+        
+        // Parse the commission percentage
+        var commissionPercent = 0;
+        if (typeof commissionPercentStr === "string" && commissionPercentStr.includes("%")) {
+          commissionPercent = parseFloat(commissionPercentStr.replace("%", "")) || 0;
+        } else if (typeof commissionPercentStr === "number") {
+          commissionPercent = commissionPercentStr < 1 ? commissionPercentStr * 100 : commissionPercentStr;
+        }
+        
+        // Check if it's an apprentice with 0% commission
+        if (title && title.toString().includes("Apprentice") && commissionPercent === 0) {
+          isApprenticeWith0Percent = true;
+          console.log(`Skipping Yard Sign processing for apprentice with 0% commission: ${techName}`);
+          
+          // Update summary to 0 and clear any existing yard sign entries
+          updateTopSummaryYardSignPay(techSheet, 0, 0);
+          clearExistingYardSignEntries(techSheet);
+          
+          // Set status to Complete
+          if (!skipStatusUpdate) {
+            yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
+            ui.alert(`Yard Sign processing skipped for ${techName}.\n\nReason: Apprentice with 0% commission rate. No Yard Sign pay is earned.`);
+          }
+          
+          return;
+        }
+      }
+    } catch (e) {
+      console.error(`Error checking apprentice status: ${e.message}`);
+      // Continue with processing to be safe
     }
     
     // Calculate yard sign entries for this technician
@@ -105,16 +164,20 @@ function updateYardSignForTechnician(techName, row, column) {
       result = calculateYardSignEntries(techName, yardSignSheet);
     } catch (calcError) {
       console.error("Error calculating yard sign entries: " + calcError.message);
-      yardSignSetActionStatus(ratesSheet, row, column, 'Error');
-      ui.alert("Error calculating yard sign entries: " + calcError.message);
+      if (!skipStatusUpdate) {
+        yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+        ui.alert("Error calculating yard sign entries for " + techName + ".\n\n" + calcError.message);
+      }
       return;
     }
     
     // If no entries found, show message
     if (!result || !result.entries || result.entries.length === 0) {
       console.log("No yard sign entries found for: " + techName);
-      yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
-      ui.alert("No yard sign entries found for " + techName + " in the Yard Sign sheet for this period.");
+      if (!skipStatusUpdate) {
+        yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
+        ui.alert("No yard sign entries found for " + techName + " in the Yard Sign sheet for this period.");
+      }
       return;
     }
     
@@ -124,13 +187,17 @@ function updateYardSignForTechnician(techName, row, column) {
       writeYardSignDataToSheet(techSheet, result.entries, result.totalAmount);
     } catch (writeError) {
       console.error("Error writing yard sign data: " + writeError.message);
-      yardSignSetActionStatus(ratesSheet, row, column, 'Error');
-      ui.alert("Error writing yard sign data: " + writeError.message);
+      if (!skipStatusUpdate) {
+        yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+        ui.alert("Error writing yard sign data: " + writeError.message);
+      }
       return;
     }
     
     // Update status
-    yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
+    if (!skipStatusUpdate) {
+      yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
+    }
     
     console.log("Yard Sign update complete for: " + techName + 
                " - " + result.entries.length + " entries, $" + result.totalAmount.toFixed(2));
@@ -174,8 +241,8 @@ function updateYardSignForTechnician(techName, row, column) {
 }
 
 /**
-* Processes yard signs for all technicians.
-* Called from the custom menu.
+* Processes yard signs for all technicians with existing sheets
+* No approval required, no "Sheet not found" errors
 */
 function processAllYardSigns() {
   // Initialize the module
@@ -183,15 +250,6 @@ function processAllYardSigns() {
   
   try {
     var ui = SpreadsheetApp.getUi();
-    var result = ui.alert(
-      'Process Yard Signs',
-      'This will process yard sign data for all technicians. Continue?',
-      ui.ButtonSet.YES_NO
-    );
-    
-    if (result !== ui.Button.YES) {
-      return;
-    }
     
     // Make sure the Yard Sign sheet exists and has the proper structure
     try {
@@ -199,18 +257,11 @@ function processAllYardSigns() {
       console.log("Confirmed Yard Sign sheet exists with proper structure");
     } catch (sheetError) {
       console.error("Error with Yard Sign sheet: " + sheetError.message);
-      ui.alert('Error', "Could not ensure Yard Sign sheet exists with proper structure. Error: " + sheetError.message, ui.ButtonSet.OK);
+      ui.alert("Could not ensure Yard Sign sheet exists with proper structure. Error: " + sheetError.message);
       return;
     }
     
-    // Show processing message
-    var statusMessage = ui.alert(
-      'Processing',
-      'Processing yard signs for all technicians. This may take a while.\n\nClick OK to continue in the background.',
-      ui.ButtonSet.OK
-    );
-    
-    // Call the utility function directly instead of through YardSignUtilities namespace
+    // Call the utility function directly with the improved version that skips missing sheets
     var processResult = processAllYardSignsUtility(function(status) {
       console.log(status); // Log status updates
     });
@@ -246,19 +297,25 @@ function processAllYardSigns() {
         }
       }
       
-      // If we have errors or skips
+      // Only show errors if we have some (and only real errors, not "Sheet not found")
       if (processResult.errors && processResult.errors.length > 0) {
-        summaryMessage.push("\nERRORS:");
-        for (var j = 0; j < processResult.errors.length; j++) {
-          summaryMessage.push("• " + processResult.errors[j]);
+        var realErrors = processResult.errors.filter(function(err) {
+          return !err.includes("Sheet not found");
+        });
+        
+        if (realErrors.length > 0) {
+          summaryMessage.push("\nERRORS:");
+          for (var j = 0; j < realErrors.length; j++) {
+            summaryMessage.push("• " + realErrors[j]);
+          }
         }
       }
       
       // Show the complete detailed summary
-      ui.alert('Success', summaryMessage.join("\n"), ui.ButtonSet.OK);
+      ui.alert(summaryMessage.join("\n"));
     } else {
       // Just show the error message
-      ui.alert('Error', processResult.message, ui.ButtonSet.OK);
+      ui.alert(processResult.message);
     }
   } catch (e) {
     console.error("Error in processAllYardSigns: " + e.message);

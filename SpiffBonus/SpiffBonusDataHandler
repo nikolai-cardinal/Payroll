@@ -6,6 +6,8 @@
 /**
  * Writes spiff/bonus data to a technician sheet, preserving any existing customer data if there isn't 
  * a replacement for that specific customer in the new data.
+ * IMPORTANT: Only modifies cells in columns E-J, preserving columns A-D.
+ * 
  * @param {Sheet} sheet - The technician sheet to write spiff data to.
  * @param {Array} newSpiffData - The new spiff data to write to the sheet.
  * @param {number} customerNameColIndex - The column index (0-based) in newSpiffData that contains customer names.
@@ -56,6 +58,7 @@ function writeSpiffDataWithPreservation(sheet, newSpiffData, customerNameColInde
     // Now clear the section to prepare for writing
     clearSpiffDataSection(sheet, false, dataToWrite);
     
+    // Skip if no data to write
     if (dataToWrite.length === 0) {
       console.log("No spiff data to write for " + sheet.getName());
       return;
@@ -71,61 +74,211 @@ function writeSpiffDataWithPreservation(sheet, newSpiffData, customerNameColInde
     var spiffHeaderRow = spiffSectionRow + 1;
     var spiffDataStartRow = spiffHeaderRow + 1;
     
-    // We need to insert rows for each data entry + 1 for the total row
+    // Calculate the next section row to know available space
+    var nextSectionRow = findNextSectionStart(sheet, spiffHeaderRow + 1);
+    if (nextSectionRow <= 0) {
+      nextSectionRow = sheet.getLastRow() + 1;
+    }
+    
+    // Calculate rows needed vs available rows
     var rowsNeeded = dataToWrite.length;
+    var availableRows = nextSectionRow - spiffDataStartRow;
+    
+    // Write the data only if we have actual rows to write
     if (rowsNeeded > 0) {
-      // Insert required number of rows after the header row
-      sheet.insertRowsAfter(spiffHeaderRow + 1, rowsNeeded);
-      console.log("Inserted " + rowsNeeded + " rows after row " + (spiffHeaderRow + 1) + " in sheet " + sheet.getName());
+      // Write only to existing rows - do NOT add new rows to preserve table structure
+      var rowsToWrite = Math.min(rowsNeeded, availableRows);
       
-      // Write the data
-      var dataRange = sheet.getRange(spiffDataStartRow, 1, rowsNeeded, dataToWrite[0].length);
-      dataRange.setValues(dataToWrite);
-      console.log("Wrote " + rowsNeeded + " spiff entries to sheet " + sheet.getName() + " starting at row " + spiffDataStartRow + ".");
-      
-      // Format the data area
-      try {
-        dataRange.setBorder(true, true, true, true, true, false);
-        
-        // Format any numeric cells that might contain money values (usually column D for amounts)
-        var amountCol = 4; // Typical column for amounts (D)
-        if (amountCol <= dataToWrite[0].length) {
-          sheet.getRange(spiffDataStartRow, amountCol, rowsNeeded, 1).setNumberFormat("$#,##0.00");
-        }
-      } catch (formatErr) {
-        console.warn("Minor error applying formatting: " + formatErr);
+      // We only want to write to columns E-J (5-10), but our dataToWrite may have more columns
+      // Extract just the data for columns E-J
+      var dataForEToJ = [];
+      for (var i = 0; i < rowsToWrite; i++) {
+        var rowData = dataToWrite[i];
+        // Assuming the data layout matches E-J format (usually we'd map it more explicitly)
+        var eToJData = [
+          rowData[4] || "",  // Column E - Customer Name (index 4)
+          rowData[5] || "",  // Column F - Job Business Unit (index 5)
+          rowData[6] || "",  // Column G - Date (index 6)
+          rowData[7] || 0,   // Column H - Amount (index 7)
+          rowData[8] || "",  // Column I - Notes (index 8)
+          rowData[9] || "Spiff" // Column J - Type (index 9)
+        ];
+        dataForEToJ.push(eToJData);
       }
       
-      // Add a "Total" row at the end
-      var totalRow = spiffDataStartRow + rowsNeeded;
-      sheet.getRange(totalRow, 1).setValue("Total").setFontWeight("bold");
+      // Write to columns E-J only
+      if (dataForEToJ.length > 0) {
+        var targetRange = sheet.getRange(spiffDataStartRow, 5, rowsToWrite, 6); // Columns E-J (5-10)
+        targetRange.setValues(dataForEToJ);
+        console.log("Wrote " + rowsToWrite + " spiff entries to columns E-J in sheet " + sheet.getName());
+        
+        // Apply formatting to amounts in column H
+        sheet.getRange(spiffDataStartRow, 8, rowsToWrite, 1).setNumberFormat("$#,##0.00");
+        
+        // Apply formatting to dates in column G
+        sheet.getRange(spiffDataStartRow, 7, rowsToWrite, 1).setNumberFormat("MM/dd/yyyy");
+      }
       
-      // Calculate the total (assuming amounts are in column D)
-      var amountCol = 4; // Column D for Spiffs
+      // Calculate the total amount
       var total = 0;
       for (var k = 0; k < dataToWrite.length; k++) {
-        if (dataToWrite[k].length > amountCol - 1) {
-          var val = dataToWrite[k][amountCol - 1];
-          if (typeof val === 'number') {
-            total += val;
-          } else if (typeof val === 'string') {
-            // Try to parse a number from the string (e.g. "$100" -> 100)
-            var numStr = val.replace(/[^0-9.-]+/g, "");
-            if (numStr) {
-              total += parseFloat(numStr) || 0;
-            }
+        var val = dataToWrite[k][7]; // Column H - Amount (index 7)
+        if (typeof val === 'number') {
+          total += val;
+        } else if (typeof val === 'string') {
+          // Try to parse a number from the string (e.g. "$100" -> 100)
+          var numStr = val.replace(/[^0-9.-]+/g, "");
+          if (numStr) {
+            total += parseFloat(numStr) || 0;
           }
         }
       }
       
-      sheet.getRange(totalRow, amountCol).setValue(total).setNumberFormat("$#,##0.00").setFontWeight("bold");
-      sheet.getRange(totalRow, 1, 1, Math.max(5, amountCol))
-           .setBorder(null, null, true, null, null, null, "black", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
-           
+      // Update the "Total" row in column H with the total amount
+      var totalRow = spiffDataStartRow + rowsToWrite;
+      sheet.getRange(totalRow, 5).setValue("Total").setFontWeight("bold");
+      sheet.getRange(totalRow, 8).setValue(total).setNumberFormat("$#,##0.00").setFontWeight("bold");
+      
       console.log("Added Total row at " + totalRow + " with calculated value " + total + " in sheet " + sheet.getName() + ".");
+      
+      // Clear any remaining rows with "Spiff" in Type column (column J)
+      if (availableRows > rowsNeeded) {
+        var remainingRows = availableRows - rowsNeeded;
+        if (remainingRows > 0) {
+          // Find remaining rows that have "Spiff" in Type column
+          var startRow = spiffDataStartRow + rowsNeeded;
+          var remainingSpiffRows = [];
+          
+          var typeColumnIndex = 10; // Column J
+          var typeValues = sheet.getRange(startRow, typeColumnIndex, remainingRows, 1).getValues();
+          
+          for (var i = 0; i < typeValues.length; i++) {
+            var cellValue = typeValues[i][0];
+            if (cellValue && typeof cellValue === 'string' && 
+                cellValue.toString().toLowerCase().includes("spiff")) {
+              remainingSpiffRows.push(startRow + i);
+            }
+          }
+          
+          // Only clear cells in columns E-J for rows with "Spiff" in Type column
+          for (var j = 0; j < remainingSpiffRows.length; j++) {
+            sheet.getRange(remainingSpiffRows[j], 5, 1, 6).clearContent(); // Clear E-J (5-10) only
+          }
+          
+          console.log(`Cleared ${remainingSpiffRows.length} remaining Spiff rows (columns E-J only)`);
+        }
+      }
     }
     
   } catch (e) {
     console.error("Error writing spiff data with preservation for " + sheet.getName() + ": " + e);
+  }
+}
+
+/**
+ * Processes spiff and bonus data for a technician.
+ * Extracts data from spiffBonusSheet for the specified technician and updates their sheet.
+ * 
+ * @param {Sheet} techSheet The technician's sheet object.
+ * @param {string} technicianName The name of the technician being processed.
+ * @param {Sheet} spiffBonusSheet The 'Spiff/Bonus' sheet object.
+ * @return {Object} Result object with entryCount and totalAmount properties.
+ */
+function processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet) {
+  try {
+    console.log(`Starting Spiff/Bonus data processing for: ${technicianName}`);
+    
+    // Get Header Map
+    var headerMap = getSpiffBonusHeaderMap(spiffBonusSheet);
+    if (!headerMap || !headerMap.soldBy || !headerMap.assignedTechnician || 
+        !headerMap.customerName || !headerMap.jobBusinessUnit || 
+        !headerMap.completionDate || !headerMap.bonusAmount) {
+      console.error("Failed to get valid header map from Spiff/Bonus sheet");
+      throw new Error("Could not find expected columns in the Spiff/Bonus sheet");
+    }
+    
+    // Get all data from Spiff/Bonus sheet
+    var spiffBonusData = spiffBonusSheet.getDataRange().getValues();
+    
+    // Collect customer data for the technician
+    var customerData = [];
+    var totalSpiffAmount = 0;
+    var tz = Session.getScriptTimeZone() || 'America/New_York';
+    
+    // Filter data for rows where 'Sold By' matches or is empty and 'Assigned Tech' includes this technician
+    for (var i = 1; i < spiffBonusData.length; i++) {
+      var row = spiffBonusData[i];
+      var soldBy = row[headerMap.soldBy - 1] || "";
+      var assignedTech = row[headerMap.assignedTechnician - 1] || "";
+      
+      // Check if this row applies to this technician
+      var isMatch = false;
+      if (soldBy === technicianName && assignedTech.includes(technicianName)) {
+        isMatch = true;
+      } 
+      else if ((soldBy === "" || !soldBy) && assignedTech.includes(technicianName)) {
+        isMatch = true;
+      }
+      
+      // Skip if not a match
+      if (!isMatch) continue;
+      
+      // Extract data using the map
+      var custName = row[headerMap.customerName - 1] || "";
+      var busUnit = row[headerMap.jobBusinessUnit - 1] || "";
+      var dateVal = row[headerMap.completionDate - 1] || "";
+      var notesVal = row[headerMap.itemName - 1] || ""; // Using item name as notes
+      
+      // Extract bonus amount (handle different formats)
+      var bonusAmountRaw = row[headerMap.bonusAmount - 1];
+      var bonusAmt = 0;
+      
+      if (typeof bonusAmountRaw === 'string' && bonusAmountRaw.includes('$')) {
+        bonusAmt = parseFloat(bonusAmountRaw.replace(/[^0-9.-]+/g,''));
+      } else {
+        bonusAmt = parseFloat(bonusAmountRaw || 0);
+      }
+      
+      // Add to customer data if valid amount
+      if (!isNaN(bonusAmt) && bonusAmt > 0) {
+        totalSpiffAmount += bonusAmt;
+        
+        customerData.push({
+          customerName: custName,
+          jobBusinessUnit: busUnit,
+          completionDate: dateVal,
+          commission: bonusAmt,
+          notes: notesVal
+        });
+      }
+    }
+    
+    // Find customer data section
+    var customerHeaderRow = findSpiffCustomerDataSection(techSheet);
+    if (customerHeaderRow <= 0) {
+      console.error(`Could not find Customer section in ${technicianName}'s sheet`);
+      throw new Error(`No Customer section found in ${technicianName}'s sheet`);
+    }
+    
+    // Clear existing Spiff rows
+    var rowsCleared = clearSpiffDataSection(techSheet, customerData);
+    console.log(`Cleared ${rowsCleared} existing spiff rows`);
+    
+    // Update technician's top summary
+    updateTopSummarySpiffs(techSheet, totalSpiffAmount, customerData.length);
+    
+    // Write new Spiff data
+    writeSpiffDataToSheet(techSheet, customerHeaderRow, customerData);
+    
+    console.log(`Successfully processed Spiff/Bonus data for: ${technicianName}`);
+    
+    return {
+      entryCount: customerData.length,
+      totalAmount: totalSpiffAmount
+    };
+    
+  } catch (e) {
+    console.error(`Error processing Spiff/Bonus data for ${technicianName}: ${e.message}`);
+    throw e;
   }
 } 

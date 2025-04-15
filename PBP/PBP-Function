@@ -110,6 +110,76 @@
  */
 
 /**
+ * APPRENTICE TECHNICIAN HANDLING:
+ * The system includes special handling for apprentice technicians:
+ *
+ * 1. Apprentice Detection:
+ *    - Checks the "Hourly + Spiff Pay" sheet to identify if a technician has "Apprentice" in their title (column C).
+ *    - Records the apprentice's percentage value from column H (e.g., 35%).
+ *    - Tracks apprentice status throughout calculations for informational purposes.
+ *
+ * 2. Role Assignment Logic:
+ *    - When a technician is not found in the "Hourly + Spiff Pay" sheet but is working with apprentices:
+ *      - The system automatically assigns them a Lead role (65% split).
+ *      - This ensures proper split calculation without requiring explicit role assignments for all technicians.
+ *    - If a job has assistants but no leads:
+ *      - The primary technician (from column G "Sold By Technician") is automatically promoted to Lead.
+ *      - If no primary technician is available, an assistant may be promoted to Lead to ensure proper split calculation.
+ *
+ * 3. PBP Split Calculation:
+ *    - Apprentices receive their full calculated PBP share based on their role (Lead/Assistant) and the standard split rules.
+ *    - While apprentice status and percentage are tracked, they do not reduce the PBP amount earned.
+ *    - The apprentice information is included in notes and documentation for reference only.
+ */
+
+/**
+ * TECHNICIAN ROLE ASSIGNMENT:
+ * The system assigns roles to technicians using the following priority:
+ *
+ * 1. Explicit Split Value:
+ *    - First checks column H in the "Hourly + Spiff Pay" sheet for explicit percentage values:
+ *      - 65% = Lead role
+ *      - 35% = Assistant role
+ *      - Other values are handled based on specific business rules
+ *
+ * 2. Title-Based Assignment:
+ *    - If no explicit split value is found, checks column C (Title/Role):
+ *      - Titles containing "Lead" or "Senior" = Lead role (65%)
+ *      - Titles containing "Assistant", "Apprentice", or "Helper" = Assistant role (35%)
+ *
+ * 3. Apprentice Context Assignment:
+ *    - For technicians not found in "Hourly + Spiff Pay" sheet:
+ *      - If working with apprentices = automatically assigned Lead role (65%)
+ *      - This ensures appropriate split calculation when apprentices are involved
+ *
+ * 4. Team Balance Logic:
+ *    - If a job has assistants but no leads:
+ *      - The primary technician (from column G) is promoted to Lead
+ *      - If no primary technician available, an assistant may be promoted to Lead
+ *      - Ensures at least one Lead role for proper split calculation
+ */
+
+/**
+ * TECHNICIAN NAME PARSING:
+ * The system includes robust technician name parsing from column H ("Assigned Technicians"):
+ *
+ * 1. Comma-Separated Lists:
+ *    - Parses standard comma-separated lists of technician names
+ *
+ * 2. Space-Separated Names:
+ *    - Handles cases where technician names are separated by spaces without commas
+ *    - Intelligently identifies full names (First Last format) to create proper splits
+ *
+ * 3. Primary Technician Inclusion:
+ *    - Always ensures the primary technician (column G) is included in the technician list
+ *    - Prevents primary technicians from being excluded from PBP splits
+ *
+ * 4. Name Cleaning:
+ *    - Removes percentage indicators and extraneous formatting from names
+ *    - Creates unique list of technicians to prevent duplicate entries
+ */
+
+/**
  * ERROR HANDLING:
  * (Inferred - assuming best practices similar to other modules)
  *

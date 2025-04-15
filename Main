@@ -19,11 +19,13 @@ var processingTimeoutId = null; // Changed variable name from processingTimeout
 function onOpen() {
 var ui = SpreadsheetApp.getUi();
 ui.createMenu('Technician Tools')
+  .addItem('✅Payroll', 'runFullPayroll')
   .addItem('Update All Rates', 'updateAllTechnicianRates')
-  .addItem('Create New Sheet', 'createNewTechnicianSheet')
   .addItem('All Spiff/Bonus', 'processAllSpiffBonusWithCustomers')
   .addItem('All PBP', 'processAllPBP')
   .addItem('All Yard Signs', 'menuProcessAllYardSigns')
+  .addItem('All Timesheet', 'processAllTimesheets')
+  .addItem('Create New Sheet', 'createNewTechnicianSheet')
   .addToUi();
 }
 
@@ -128,6 +130,9 @@ if (isProcessing) {
            console.error("Error in Yard Sign processing: " + yardSignError.message);
            setActionStatus(sheet, row, column, '⚠️ Error');
          }
+      } else if (value === "Payroll") {
+        // Run all payroll processes for this specific technician
+        runPayrollForTechnician(techName, row, column);
       } else {
          // If value is something else (like Ready or Complete), reset status
          setActionStatus(sheet, row, column, 'Ready'); 
@@ -218,10 +223,51 @@ for (var i = 0; i < data.length; i++) {
 // --- Placeholder functions potentially called by onOpen menu items ---
 // You would need to define these or ensure they exist elsewhere in your project.
 // updateAllTechnicianRates is defined in TechnicianRates.gs
-function createNewTechnicianSheet() { SpreadsheetApp.getUi().alert('createNewTechnicianSheet function needs to be defined.'); }
-// processAllSpiffBonusWithCustomers is now defined in Spiff/Bonus/SpiffBonusMain.gs
-// processAllPBP is defined in PBP/PBPMain.gs
-// processAllYardSigns is defined in YardSign/YardSignMain.gs
+function createNewTechnicianSheet() { 
+  // Check if we have a proper implementation in NewTechnicianSheet.gs
+  if (typeof window !== 'undefined' && 
+      typeof window.createNewTechnicianSheet === 'function') {
+    window.createNewTechnicianSheet();
+  } else {
+    SpreadsheetApp.getUi().alert('createNewTechnicianSheet function needs to be defined.'); 
+  }
+}
+
+/**
+* Menu handler for processing all spiff/bonus entries
+* Ensures proper initialization before calling the main function
+* Ignores action column status completely
+*/
+function processAllSpiffBonusWithCustomers() {
+  try {
+    // Call the main processing function directly, without any reference to action column
+    processSpiffBonusAll();
+  } catch (e) {
+    console.error("Error in processSpiffBonusAll: " + e.message);
+    SpreadsheetApp.getUi().alert("Error processing spiff/bonus entries: " + e.message);
+  }
+}
+
+/**
+* Menu handler for processing all PBP entries
+* Ensures proper initialization before calling the main function
+* Ignores action column status completely
+*/
+function processAllPBP() {
+  try {
+    // If PBPMain.processAllPBP exists, call it directly
+    try {
+      // Direct function call - no reference to action column
+      processAllPBP();
+    } catch (e) {
+      console.error("Error in processAllPBP: " + e.message);
+      SpreadsheetApp.getUi().alert("Error processing PBP entries: " + e.message);
+    }
+  } catch (e) {
+    console.error("Error initializing PBP processing: " + e.message);
+    SpreadsheetApp.getUi().alert("Error: Could not initialize PBP processing. See logs for details.");
+  }
+}
 
 // --- Placeholder functions potentially called by onEdit actions ---
 // You would need to define these or ensure they exist elsewhere in your project.
@@ -325,39 +371,629 @@ return {
 
 /**
 * Menu handler for processing all yard signs
-* Ensures proper initialization before calling the main function
+* Ignores action column status completely
 */
 function menuProcessAllYardSigns() {
   try {
-    // Check if the YardSign module is available
-    if (typeof initYardSign !== 'function') {
-      console.error("YardSign module not found");
-      SpreadsheetApp.getUi().alert("Error: YardSign module not properly loaded. Please reload the script editor and try again.");
-      return;
+    // Initialize the Yard Sign module if needed
+    if (typeof initYardSign === 'function') {
+      initYardSign();
     }
     
-    // Initialize the Yard Sign module
-    initYardSign();
-    
-    // Wait a moment to ensure initialization is complete
-    Utilities.sleep(500);
-    
-    // Check if the processAllYardSigns function exists
-    if (typeof processAllYardSigns !== 'function') {
-      console.error("processAllYardSigns function not found");
-      SpreadsheetApp.getUi().alert("Error: processAllYardSigns function not properly loaded. Please reload the script editor and try again.");
-      return;
-    }
-    
-    // Call the main processing function with error handling
-    try {
-      processAllYardSigns();
-    } catch (e) {
-      console.error("Error in processAllYardSigns: " + e.message);
-      SpreadsheetApp.getUi().alert("Error processing yard signs: " + e.message);
-    }
+    // Call the main processing function directly, with no reference to action column
+    processAllYardSigns();
   } catch (e) {
-    console.error("Error initializing Yard Sign processing: " + e.message);
-    SpreadsheetApp.getUi().alert("Error: Could not initialize Yard Sign processing. See logs for details.");
+    console.error("Error in processAllYardSigns: " + e.message);
+    SpreadsheetApp.getUi().alert("Error processing yard signs: " + e.message);
+  }
+}
+
+/**
+* Menu handler for processing all technician timesheets
+* Ignores action column status completely
+*/
+function processAllTimesheets() {
+  try {
+    var ui = SpreadsheetApp.getUi();
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var timeSheet = ss.getSheetByName('Time Sheet');
+    
+    if (!ratesSheet) {
+      ui.alert('Error: Could not find "Hourly + Spiff Pay" sheet.');
+      return;
+    }
+    
+    if (!timeSheet) {
+      ui.alert('Error: Could not find "Time Sheet" sheet.');
+      return;
+    }
+    
+    // Get technicians with sheets
+    var ratesMapping = getRatesSheetMapping();
+    var dataRange = ratesSheet.getRange(ratesMapping.dataStartRow, ratesMapping.nameColumn, 
+                                       ratesSheet.getLastRow() - ratesMapping.dataStartRow + 1, 1);
+    var technicianNames = dataRange.getValues().flat().filter(function(name) {
+      return name && typeof name === 'string' && name.trim() !== '';
+    });
+    
+    if (technicianNames.length === 0) {
+      ui.alert('No technicians found in Hourly + Spiff Pay sheet.');
+      return;
+    }
+    
+    var processed = [];
+    var skipped = [];
+    var errors = [];
+    
+    // Process each technician
+    for (var i = 0; i < technicianNames.length; i++) {
+      var techName = technicianNames[i];
+      var techSheet = ss.getSheetByName(techName);
+      
+      if (!techSheet) {
+        skipped.push(techName + ' (Sheet not found)');
+        continue;
+      }
+      
+      try {
+        // Calculate hours for this technician
+        var timeMapping = getTimeSheetMapping();
+        var timeSheetData = timeSheet.getDataRange().getValues();
+        var regHours = 0;
+        var otHours = 0;
+        var dtHours = 0;
+        
+        // Skip the header rows
+        for (var j = timeMapping.dataStartRow - 1; j < timeSheetData.length; j++) {
+          var row = timeSheetData[j];
+          var name = row[timeMapping.nameColumn - 1];
+          
+          // Only process rows for this specific technician
+          if (name === techName) {
+            var regHoursValue = parseFloat(row[timeMapping.regHoursColumn - 1] || 0);
+            var otHoursValue = parseFloat(row[timeMapping.otHoursColumn - 1] || 0);
+            var dtHoursValue = parseFloat(row[timeMapping.dtHoursColumn - 1] || 0);
+            
+            regHours += regHoursValue;
+            otHours += otHoursValue;
+            dtHours += dtHoursValue;
+          }
+        }
+        
+        // Get the mapping for this technician sheet
+        var mapping = getTechnicianSheetMappingForTimesheet(techSheet);
+        
+        // Get the current pay period
+        var currentPayPeriod = getCurrentPayPeriod();
+        
+        // Update the Pay Period
+        techSheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
+        
+        // Update the Regular Hours
+        techSheet.getRange(mapping.regHoursRow, mapping.valueColumn).setValue(regHours);
+        
+        // Update the Overtime Hours
+        techSheet.getRange(mapping.otHoursRow, mapping.valueColumn).setValue(otHours);
+        
+        // Update the Double Time Hours
+        techSheet.getRange(mapping.ptoHoursRow, mapping.valueColumn).setValue(dtHours);
+        
+        // Add to processed list
+        processed.push({
+          name: techName,
+          regHours: regHours,
+          otHours: otHours,
+          dtHours: dtHours
+        });
+        
+      } catch (err) {
+        errors.push(techName + ': ' + err.message);
+        console.error("Error processing " + techName + ": " + err.message);
+      }
+    }
+    
+    // Display summary message
+    var summaryMessage = [];
+    summaryMessage.push("TIMESHEET PROCESSING COMPLETE");
+    summaryMessage.push("\nSUMMARY:");
+    summaryMessage.push("• Total Technicians Processed: " + processed.length);
+    
+    if (processed.length > 0) {
+      summaryMessage.push("\nDETAILS BY TECHNICIAN:");
+      
+      for (var k = 0; k < processed.length; k++) {
+        var techInfo = processed[k];
+        summaryMessage.push("\n" + techInfo.name + ":");
+        summaryMessage.push("• Regular Hours: " + formatHoursToHM(techInfo.regHours));
+        summaryMessage.push("• Overtime Hours: " + formatHoursToHM(techInfo.otHours));
+        summaryMessage.push("• Double Time Hours: " + formatHoursToHM(techInfo.dtHours));
+      }
+    }
+    
+    // We'll still log skipped and errors to console but not show them in the UI
+    if (skipped.length > 0) {
+      console.log("Skipped technicians: " + skipped.join(", "));
+    }
+    
+    if (errors.length > 0) {
+      console.log("Errors: " + errors.join(", "));
+    }
+    
+    // Show the detailed summary (without skipped/errors sections)
+    ui.alert(summaryMessage.join("\n"));
+    
+  } catch (e) {
+    console.error("Error in processAllTimesheets: " + e.message);
+    SpreadsheetApp.getUi().alert("Error processing timesheets: " + e.message);
+  }
+}
+
+/**
+ * Formats decimal hours to H:m format
+ * @param {number} decimalHours - The hours in decimal format
+ * @return {string} The formatted time in H:m format
+ */
+function formatHoursToHM(decimalHours) {
+  // Extract whole hours
+  const hours = Math.floor(decimalHours);
+  
+  // Calculate minutes from decimal part
+  const minutes = Math.round((decimalHours - hours) * 60);
+  
+  // Handle case where minutes rounds to 60
+  if (minutes === 60) {
+    return (hours + 1) + ":0";
+  }
+  
+  // Format as H:m
+  return hours + ":" + (minutes < 10 ? "0" + minutes : minutes);
+}
+
+/**
+* Gets the field mappings for a technician sheet for timesheet processing
+* @param {Sheet} sheet - The technician sheet to map
+* @return {Object} An object containing row and column indexes for important fields
+*/
+function getTechnicianSheetMappingForTimesheet(sheet) {
+  try {
+    // Make sure sheet is defined
+    if (!sheet) {
+      console.error("Sheet is undefined in getTechnicianSheetMappingForTimesheet");
+      return {
+        hourlyRateRow: 5,
+        regHoursRow: 6,
+        otHoursRow: 7,
+        ptoHoursRow: 8,
+        totalHourlyPayRow: 9,
+        totalSalesPayRow: 15,
+        totalPayRow: 17,
+        positionRow: 2,
+        payPeriodRow: 3,
+        valueColumn: 2,
+        calculatedValueColumn: 3,
+        ptoRateColumn: 14
+      };
+    }
+    
+    // Find rows by label text
+    var mapping = {
+      // Common fields in technician sheets
+      hourlyRateRow: findRowByLabel(sheet, 'Hourly Rate'),
+      regHoursRow: findRowByLabel(sheet, 'Regular Hours'),
+      otHoursRow: findRowByLabel(sheet, 'Overtime Hours'),
+      ptoHoursRow: findRowByLabel(sheet, 'PTO'),
+      totalHourlyPayRow: findRowByLabel(sheet, 'Total Hourly Pay'),
+      totalSalesPayRow: findRowByLabel(sheet, 'Total Sales Pay'),
+      totalPayRow: findRowByLabel(sheet, 'Total Pay'),
+      positionRow: findRowByLabel(sheet, 'Position'),
+      payPeriodRow: 3 // Based on the structure, Pay Period is typically in row 3
+    };
+
+    // If any key fields are not found, fall back to the known structure
+    if (mapping.hourlyRateRow === -1) mapping.hourlyRateRow = 5;
+    if (mapping.regHoursRow === -1) mapping.regHoursRow = 6;
+    if (mapping.otHoursRow === -1) mapping.otHoursRow = 7;
+    if (mapping.ptoHoursRow === -1) mapping.ptoHoursRow = 8;
+    if (mapping.totalHourlyPayRow === -1) mapping.totalHourlyPayRow = 9;
+    if (mapping.totalSalesPayRow === -1) mapping.totalSalesPayRow = 15;
+    if (mapping.totalPayRow === -1) mapping.totalPayRow = 17;
+    if (mapping.positionRow === -1) mapping.positionRow = 2;
+    
+    // Set the standard columns (typically B for values, C for calculated amounts)
+    mapping.valueColumn = 2;  // B column
+    mapping.calculatedValueColumn = 3;  // C column
+    
+    // Find PTO Rate column
+    mapping.ptoRateColumn = 14;  // Default to N column
+    
+    return mapping;
+  } catch (error) {
+    console.error("Error in getTechnicianSheetMappingForTimesheet: " + error.message);
+    // Return default mapping
+    return {
+      hourlyRateRow: 5,
+      regHoursRow: 6,
+      otHoursRow: 7,
+      ptoHoursRow: 8,
+      totalHourlyPayRow: 9,
+      totalSalesPayRow: 15,
+      totalPayRow: 17,
+      positionRow: 2,
+      payPeriodRow: 3,
+      valueColumn: 2,
+      calculatedValueColumn: 3,
+      ptoRateColumn: 14
+    };
+  }
+}
+
+/**
+ * Helper function to find a row by its label in a specific column
+ * @param {Sheet} sheet - The sheet to search in
+ * @param {string} labelText - The text to search for
+ * @param {number} searchColumn - The column index to search in (0-based)
+ * @return {number} The row index (1-based) or -1 if not found
+ */
+function findRowByLabel(sheet, labelText, searchColumn = 0) {
+  try {
+    // Make sure sheet is defined
+    if (!sheet) {
+      console.error("Sheet is undefined in findRowByLabel");
+      return -1;
+    }
+    
+    // Get all data from the sheet
+    var data = sheet.getDataRange().getValues();
+    
+    // Search for the label text
+    for (var i = 0; i < data.length; i++) {
+      if (data[i][searchColumn] === labelText) {
+        return i + 1; // +1 because sheets are 1-indexed
+      }
+    }
+    
+    return -1; // Not found
+  } catch (error) {
+    console.error("Error in findRowByLabel: " + error.message);
+    return -1;
+  }
+}
+
+/**
+* Gets the field mappings for the time sheet
+* @return {Object} An object containing column indexes for important fields
+*/
+function getTimeSheetMapping() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var timeSheet = ss.getSheetByName('Time Sheet');
+    
+    if (!timeSheet) {
+      console.error("Time Sheet not found!");
+      return {
+        nameColumn: 1,
+        dateColumn: 2,
+        regHoursColumn: 3,
+        otHoursColumn: 4,
+        dtHoursColumn: 5,
+        dataStartRow: 2
+      };
+    }
+    
+    var headerRow = 1; // Assuming headers are in row 1
+    var mapping = {
+      nameColumn: findColumnByHeader(timeSheet, 'Employee Name', headerRow - 1),
+      dateColumn: findColumnByHeader(timeSheet, 'Date', headerRow - 1),
+      regHoursColumn: findColumnByHeader(timeSheet, 'Reg Hours', headerRow - 1),
+      otHoursColumn: findColumnByHeader(timeSheet, 'OT Hours', headerRow - 1),
+      dtHoursColumn: findColumnByHeader(timeSheet, 'DT Hours', headerRow - 1)
+    };
+    
+    // If any columns are not found, fall back to the known structure
+    if (mapping.nameColumn === -1) mapping.nameColumn = 1;  // A column
+    if (mapping.dateColumn === -1) mapping.dateColumn = 2;  // B column
+    if (mapping.regHoursColumn === -1) mapping.regHoursColumn = 3;  // C column
+    if (mapping.otHoursColumn === -1) mapping.otHoursColumn = 4;  // D column
+    if (mapping.dtHoursColumn === -1) mapping.dtHoursColumn = 5;  // E column
+    
+    mapping.dataStartRow = 2; // First row with actual data (after headers)
+    
+    return mapping;
+  } catch (error) {
+    console.error("Error in getTimeSheetMapping: " + error.message);
+    // Return default mapping
+    return {
+      nameColumn: 1,
+      dateColumn: 2,
+      regHoursColumn: 3,
+      otHoursColumn: 4,
+      dtHoursColumn: 5,
+      dataStartRow: 2
+    };
+  }
+}
+
+/**
+ * Helper function to find a column by its header text in a specific row
+ * @param {Sheet} sheet - The sheet to search in
+ * @param {string} headerText - The text to search for
+ * @param {number} searchRow - The row index to search in (0-based)
+ * @return {number} The column index (1-based) or -1 if not found
+ */
+function findColumnByHeader(sheet, headerText, searchRow = 0) {
+  try {
+    // Make sure sheet is defined
+    if (!sheet) {
+      console.error("Sheet is undefined in findColumnByHeader");
+      return -1;
+    }
+    
+    // Get the data range for the header row
+    var headerRange = sheet.getRange(searchRow + 1, 1, 1, sheet.getLastColumn());
+    var headerValues = headerRange.getValues()[0];
+    
+    // Search for the header text
+    for (var j = 0; j < headerValues.length; j++) {
+      if (headerValues[j] === headerText) {
+        return j + 1; // +1 because sheets are 1-indexed
+      }
+    }
+    
+    return -1; // Not found
+  } catch (error) {
+    console.error("Error in findColumnByHeader: " + error.message);
+    return -1;
+  }
+}
+
+/**
+* Runs all payroll functions in sequence (Spiff/Bonus, PBP, Yard Signs, Timesheet)
+*/
+function runFullPayroll() {
+  try {
+    var ui = SpreadsheetApp.getUi();
+    ui.alert("Starting full payroll process. This will run all payroll functions in sequence.");
+    
+    // Run All Spiff/Bonus
+    processAllSpiffBonusWithCustomers();
+    
+    // Run All PBP
+    processAllPBP();
+    
+    // Run All Yard Signs
+    menuProcessAllYardSigns();
+    
+    // Run All Timesheet
+    processAllTimesheets();
+    
+    ui.alert("Full payroll process completed.");
+  } catch (e) {
+    console.error("Error in runFullPayroll: " + e.message);
+    SpreadsheetApp.getUi().alert("Error processing full payroll: " + e.message);
+  }
+}
+
+/**
+* Runs all payroll functions in sequence for a single technician
+* @param {string} technicianName - The name of the technician to process
+* @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
+* @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
+*/
+function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var techSheet = ss.getSheetByName(technicianName);
+    
+    if (!techSheet) {
+      console.error(`Technician sheet not found for: ${technicianName}`);
+      if (actionRow && actionColumn) {
+        setActionStatus(ratesSheet, actionRow, actionColumn, 'Error: Tech Sheet Not Found');
+      }
+      SpreadsheetApp.getUi().alert(`Error: Could not find a sheet named "${technicianName}".`);
+      return;
+    }
+    
+    // Set status to Processing (only if we have valid row and column)
+    if (actionRow && actionColumn) {
+      setActionStatus(ratesSheet, actionRow, actionColumn, 'Processing...');
+    }
+    
+    // Store success status for each process
+    var processResults = {
+      spiffBonus: false,
+      pbp: false,
+      yardSign: false,
+      timesheet: false
+    };
+    
+    // Only fetch ratesMapping once if needed
+    var ratesMapping = null;
+    var tempRow = actionRow;
+    var tempCol = actionColumn;
+    
+    if (!tempRow || !tempCol) {
+      ratesMapping = getRatesSheetMapping();
+      tempRow = findTechnicianRow(ratesSheet, technicianName, ratesMapping.dataStartRow);
+      tempCol = ratesMapping.actionColumn;
+    }
+    
+    // Check if technician is an apprentice with 0% rate first
+    var isApprenticeWith0Percent = false;
+    try {
+      // First, initialize ratesMapping if not already done
+      if (!ratesMapping) {
+        ratesMapping = getRatesSheetMapping();
+      }
+      
+      // Get the technician's row data
+      var techRow = ratesSheet.getRange(tempRow, 1, 1, 10).getValues()[0];
+      var techTitle = techRow[ratesMapping.positionColumn - 1] || "";
+      var commissionPercentStr = techRow[7]; // Column H (0-based = 7)
+      
+      // Parse the commission percentage
+      var commissionPercent = 0;
+      if (typeof commissionPercentStr === "string" && commissionPercentStr.includes("%")) {
+        commissionPercent = parseFloat(commissionPercentStr.replace("%", "")) || 0;
+      } else if (typeof commissionPercentStr === "number") {
+        commissionPercent = commissionPercentStr < 1 ? commissionPercentStr * 100 : commissionPercentStr;
+      }
+      
+      // Check if it's an apprentice with 0% commission
+      if (techTitle && techTitle.toString().includes("Apprentice") && commissionPercent === 0) {
+        isApprenticeWith0Percent = true;
+        console.log(`Detected apprentice with 0% commission rate: ${technicianName}. Skipping PBP and Spiff/Bonus processing.`);
+      }
+    } catch (e) {
+      console.error(`Error checking apprentice status: ${e.message}`);
+      // Continue with processing to be safe
+    }
+    
+    // 1. Process Spiff/Bonus - Only if not an apprentice with 0% commission
+    if (!isApprenticeWith0Percent) {
+      try {
+        var spiffBonusSheet = ss.getSheetByName('Spiff/Bonus');
+        if (spiffBonusSheet) {
+          // Try the more direct function first
+          try {
+            processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet);
+            processResults.spiffBonus = true;
+          } catch (e) {
+            console.error(`Error using processSpiffAndBonusData: ${e.message}. Falling back.`);
+            
+            // Fall back to the main function
+            processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, tempRow, tempCol);
+            processResults.spiffBonus = true;
+          }
+        }
+      } catch (e) {
+        console.error(`Error processing Spiff/Bonus for ${technicianName}: ${e.message}`);
+      }
+    } else {
+      // Mark as skipped but successful since it's intentional
+      processResults.spiffBonus = true;
+      console.log(`Skipped Spiff/Bonus processing for apprentice with 0% commission: ${technicianName}`);
+    }
+    
+    // 2. Process PBP - Only if not an apprentice with 0% commission
+    if (!isApprenticeWith0Percent) {
+      try {
+        // Try with skipStatusUpdate parameter
+        try {
+          updatePBPForTechnician(technicianName, tempRow, tempCol, true);
+          processResults.pbp = true;
+        } catch (e) {
+          console.error(`Error with skipStatusUpdate parameter: ${e.message}`);
+          // Fall back to standard call
+          updatePBPForTechnician(technicianName, tempRow, tempCol);
+          processResults.pbp = true;
+        }
+      } catch (e) {
+        console.error(`Error processing PBP for ${technicianName}: ${e.message}`);
+      }
+    } else {
+      // Mark as skipped but successful since it's intentional
+      processResults.pbp = true;
+      console.log(`Skipped PBP processing for apprentice with 0% commission: ${technicianName}`);
+    }
+    
+    // 3. Process Yard Signs - Only if not an apprentice with 0% commission
+    if (!isApprenticeWith0Percent) {
+      try {
+        if (typeof initYardSign === 'function') {
+          initYardSign();
+          
+          if (typeof updateYardSignForTechnician === 'function') {
+            try {
+              updateYardSignForTechnician(technicianName, tempRow, tempCol, true);
+              processResults.yardSign = true;
+            } catch (e) {
+              // Fall back to standard call
+              updateYardSignForTechnician(technicianName, tempRow, tempCol);
+              processResults.yardSign = true;
+            }
+          }
+        }
+      } catch (e) {
+        console.error(`Error processing Yard Signs for ${technicianName}: ${e.message}`);
+      }
+    } else {
+      // Mark as skipped but successful since it's intentional
+      processResults.yardSign = true;
+      console.log(`Skipped Yard Signs processing for apprentice with 0% commission: ${technicianName}`);
+    }
+    
+    // 4. Process Timesheet - Simplified with better error handling
+    try {
+      try {
+        updateHoursForTechnician(technicianName, tempRow, tempCol, true);
+        processResults.timesheet = true;
+      } catch (e) {
+        // Fall back to standard call
+        updateHoursForTechnician(technicianName, tempRow, tempCol);
+        processResults.timesheet = true;
+      }
+    } catch (e) {
+      console.error(`Error processing Timesheet for ${technicianName}: ${e.message}`);
+    }
+    
+    // Set status to Complete (only if we have valid row and column)
+    if (actionRow && actionColumn) {
+      setActionStatus(ratesSheet, actionRow, actionColumn, 'Complete');
+    }
+    
+    // Create simplified summary of what was processed
+    var summaryMessage = `Payroll processed for ${technicianName}:`;
+    if (isApprenticeWith0Percent) {
+      summaryMessage += `\n(Apprentice with 0% commission - only processed Timesheet)`;
+    }
+    var processDetails = [];
+    
+    if (processResults.spiffBonus) {
+      if (isApprenticeWith0Percent) {
+        processDetails.push("✓ Spiff/Bonus (Skipped - Apprentice with 0%)");
+      } else {
+        processDetails.push("✓ Spiff/Bonus");
+      }
+    } else {
+      processDetails.push("✗ Spiff/Bonus (Failed)");
+    }
+    
+    if (processResults.pbp) {
+      if (isApprenticeWith0Percent) {
+        processDetails.push("✓ PBP (Skipped - Apprentice with 0%)");
+      } else {
+        processDetails.push("✓ PBP");
+      }
+    } else {
+      processDetails.push("✗ PBP (Failed)");
+    }
+    
+    if (processResults.yardSign) {
+      if (isApprenticeWith0Percent) {
+        processDetails.push("✓ Yard Signs (Skipped - Apprentice with 0%)");
+      } else {
+        processDetails.push("✓ Yard Signs");
+      }
+    } else {
+      processDetails.push("✗ Yard Signs (Failed)");
+    }
+    
+    if (processResults.timesheet) processDetails.push("✓ Timesheet");
+    else processDetails.push("✗ Timesheet (Failed)");
+    
+    // Show completion message with details
+    SpreadsheetApp.getUi().alert(summaryMessage + "\n\n" + processDetails.join("\n"));
+    
+  } catch (error) {
+    console.error(`Error in runPayrollForTechnician for ${technicianName}: ${error.message}`);
+    
+    // Set status to Error (only if we have valid row and column)
+    if (actionRow && actionColumn) {
+      setActionStatus(ratesSheet, actionRow, actionColumn, 'Error');
+    }
+    
+    SpreadsheetApp.getUi().alert(`Error processing full payroll for ${technicianName}: ${error.message}`);
   }
 }

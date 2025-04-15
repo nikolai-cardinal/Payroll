@@ -4,8 +4,8 @@
  */
 
 /**
- * Updates hourly rates for all technician sheets based on the Hourly + Spiff Pay sheet
- * Only processes technicians with "Ready" status in the Action column
+ * Updates hourly rates for all technician sheets 
+ * Ignores the action column status completely
  */
 function updateAllTechnicianRates() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -25,7 +25,6 @@ function updateAllTechnicianRates() {
   // Create lookup objects for quick access
   var techRates = {};
   var techPositions = {};
-  var techStatuses = {};
   
   // Start from data start row (skipping headers)
   for (var i = ratesMapping.dataStartRow - 1; i < ratesData.length; i++) {
@@ -33,14 +32,12 @@ function updateAllTechnicianRates() {
     var techName = row[ratesMapping.nameColumn - 1];
     var techPosition = row[ratesMapping.positionColumn - 1];
     var techRate = row[ratesMapping.rateColumn - 1];
-    var techStatus = row[ratesMapping.actionColumn - 1] || "";
     
     // Skip empty rows
     if (!techName) continue;
     
     techRates[techName] = techRate;
     techPositions[techName] = techPosition;
-    techStatuses[techName] = techStatus;
   }
   
   // Get the current pay period
@@ -58,6 +55,8 @@ function updateAllTechnicianRates() {
   
   var updatedCount = 0;
   var skippedCount = 0;
+  var processedTechs = [];
+  var errors = [];
   
   // Go through each sheet
   for (var i = 0; i < sheets.length; i++) {
@@ -71,45 +70,73 @@ function updateAllTechnicianRates() {
     
     // Check if this sheet name matches a technician
     if (techRates[sheetName]) {
-      // Only process if status is "Ready"
-      if (techStatuses[sheetName] === "Ready") {
-        try {
-          console.log('Processing ' + sheetName + ' with rate: ' + techRates[sheetName]);
-          
-          // Get mapping for this technician sheet (for position and pay period rows)
-          var mapping = getTechnicianSheetMapping(sheet);
-          
-          // Update the position
-          sheet.getRange(mapping.positionRow, 1).setValue(techPositions[sheetName]);
-          
-          // Update hourly rate directly in B5
-          sheet.getRange(5, 2).setValue(techRates[sheetName]);
-          
-          // Update PTO rate (if applicable) - directly reference the cell if needed
-          if (mapping.ptoRateColumn) {
-            sheet.getRange(5, mapping.ptoRateColumn).setValue(techRates[sheetName]);
-          }
-          
-          // Update pay period
-          sheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
-          
-          // Mark as complete in the rates sheet
-          var techRowInRatesSheet = findTechnicianRow(ratesSheet, sheetName, ratesMapping.dataStartRow);
-          if (techRowInRatesSheet > 0) {
-            ratesSheet.getRange(techRowInRatesSheet, ratesMapping.actionColumn).setValue("Complete");
-          }
-          
-          updatedCount++;
-          console.log('Updated rates for ' + sheetName);
-        } catch (error) {
-          console.error("Error updating rates for " + sheetName + ": " + error.message);
+      try {
+        console.log('Processing ' + sheetName + ' with rate: ' + techRates[sheetName]);
+        
+        // Get mapping for this technician sheet (for position and pay period rows)
+        var mapping = getTechnicianSheetMapping(sheet);
+        
+        // Update the position
+        sheet.getRange(mapping.positionRow, 1).setValue(techPositions[sheetName]);
+        
+        // Update hourly rate directly in B5
+        sheet.getRange(5, 2).setValue(techRates[sheetName]);
+        
+        // Update PTO rate (if applicable) - directly reference the cell if needed
+        if (mapping.ptoRateColumn) {
+          sheet.getRange(5, mapping.ptoRateColumn).setValue(techRates[sheetName]);
         }
-      } else {
+        
+        // Update pay period
+        sheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
+        
+        updatedCount++;
+        processedTechs.push({
+          name: sheetName,
+          rate: techRates[sheetName]
+        });
+        console.log('Updated rates for ' + sheetName);
+      } catch (error) {
+        console.error("Error updating rates for " + sheetName + ": " + error.message);
+        errors.push(sheetName + ": " + error.message);
         skippedCount++;
-        console.log('Skipped ' + sheetName + ' - Status is not Ready: ' + techStatuses[sheetName]);
       }
+    } else {
+      skippedCount++;
+      console.log('Skipped ' + sheetName + ' - Not found in Hourly + Spiff Pay sheet');
     }
   }
   
-  SpreadsheetApp.getUi().alert('Updated rates for ' + updatedCount + ' technicians.\nSkipped ' + skippedCount + ' technicians without "Ready" status.');
+  // Build a pretty summary message
+  var summaryMessage = [];
+  summaryMessage.push("RATE UPDATE COMPLETE");
+  
+  // Add summary section
+  summaryMessage.push("\nSUMMARY:");
+  summaryMessage.push("• Total Technicians Updated: " + updatedCount);
+  if (skippedCount > 0) {
+    summaryMessage.push("• Technicians Skipped: " + skippedCount);
+  }
+  
+  // Add technician details section
+  if (processedTechs.length > 0) {
+    summaryMessage.push("\nDETAILS BY TECHNICIAN:");
+    
+    for (var t = 0; t < processedTechs.length; t++) {
+      var tech = processedTechs[t];
+      summaryMessage.push("\n" + tech.name + ":");
+      summaryMessage.push("• New Rate: $" + tech.rate.toFixed(2) + "/hr");
+    }
+  }
+  
+  // Add errors section if we have any
+  if (errors.length > 0) {
+    summaryMessage.push("\nERRORS:");
+    for (var e = 0; e < errors.length; e++) {
+      summaryMessage.push("• " + errors[e]);
+    }
+  }
+  
+  // Show the popup
+  SpreadsheetApp.getUi().alert(summaryMessage.join("\n"));
 }

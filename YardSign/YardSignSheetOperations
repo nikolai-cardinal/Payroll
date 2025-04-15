@@ -118,6 +118,35 @@ function findExistingYardSignRows(sheet) {
 }
 
 /**
+ * Clears all existing Yard Sign entries in a technician's sheet.
+ * IMPORTANT: Only clears columns E-J (5-10) where Type column (J) contains 'Yard Sign'.
+ * 
+ * @param {Sheet} sheet - The technician sheet to clear.
+ * @return {number} The number of rows cleared
+ */
+function clearExistingYardSignEntries(sheet) {
+  if (!sheet) return 0;
+  try {
+    // Find existing Yard Sign rows
+    var yardSignRows = findExistingYardSignRows(sheet);
+    
+    // ONLY clear the CELLS in columns E-J where Type column (J) contains 'Yard Sign'
+    var rowsCleared = 0;
+    for (var i = 0; i < yardSignRows.length; i++) {
+      var rowToClear = yardSignRows[i];
+      sheet.getRange(rowToClear, 5, 1, 6).clearContent(); // Clear ONLY columns E-J (5-10)
+      rowsCleared++;
+    }
+    
+    console.log("Cleared " + rowsCleared + " Yard Sign rows in " + sheet.getName());
+    return rowsCleared;
+  } catch (e) {
+    console.error("Error clearing Yard Sign entries: " + e.message);
+    return 0;
+  }
+}
+
+/**
  * Writes Yard Sign entries to empty rows in columns E-J
  * @param {Sheet} sheet - The technician sheet
  * @param {Array} entries - The Yard Sign entries to write

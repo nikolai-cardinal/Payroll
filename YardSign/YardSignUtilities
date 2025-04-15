@@ -113,9 +113,10 @@ function getRatesSheetMapping() {
 }
 
 /**
-* Processes all technicians for yard signs.
-* @param {function} statusCallback - Optional callback to update status.
-* @return {Object} Object with success flag and message.
+* Processes all yard signs
+* Only processes technicians with existing sheets
+* @param {function} statusCallback - Optional callback function for status updates
+* @return {object} Result information including success status, message, and processed technicians
 */
 function processAllYardSignsUtility(statusCallback) {
   try {
@@ -160,6 +161,12 @@ function processAllYardSignsUtility(statusCallback) {
       return { success: false, message: "Error getting technician names: " + e.message };
     }
     
+    // Get all existing sheet names to check against
+    var allSheets = ss.getSheets();
+    var existingSheetNames = allSheets.map(function(sheet) {
+      return sheet.getName();
+    });
+    
     var processedTechs = [];    // Array to store processed technician info
     var errorMessages = [];     // Array to store error messages
     var skippedTechs = [];      // Array to store skipped technicians
@@ -170,8 +177,13 @@ function processAllYardSignsUtility(statusCallback) {
     for (var i = 0; i < techNames.length; i++) {
       var techName = techNames[i][0];
       if (!techName) {
-        skippedTechs.push("Row " + (i + mapping.dataStartRow) + ": Empty name");
         continue; // Skip empty rows
+      }
+      
+      // Skip technicians without an existing sheet
+      if (existingSheetNames.indexOf(techName) === -1) {
+        console.log("Skipping " + techName + " - no sheet exists");
+        continue;
       }
       
       // Update status if callback provided
@@ -180,12 +192,51 @@ function processAllYardSignsUtility(statusCallback) {
       }
       
       try {
-        // Get the technician's sheet
+        // Get the technician's sheet (we already know it exists)
         var techSheet = ss.getSheetByName(techName);
-        if (!techSheet) {
-          errorMessages.push(techName + ": Sheet not found");
-          console.error("Could not find sheet for technician: " + techName);
-          continue;
+        
+        // --- Check if the technician is an apprentice with 0% commission rate ---
+        var isApprenticeWith0Percent = false;
+        try {
+          // Find the technician's row in the rates sheet
+          var technicianRow = -1;
+          for (var j = 1; j < ratesSheet.getLastRow(); j++) { // Skip header row
+            var name = ratesSheet.getRange(j, 1).getValue();
+            if (name && name.toString().trim().toLowerCase() === techName.toLowerCase()) {
+              technicianRow = j;
+              break;
+            }
+          }
+          
+          if (technicianRow >= 0) {
+            var title = ratesSheet.getRange(technicianRow, 3).getValue(); // Column C - Position
+            var commissionPercentStr = ratesSheet.getRange(technicianRow, 8).getValue(); // Column H - Commission %
+            
+            // Parse the commission percentage
+            var commissionPercent = 0;
+            if (typeof commissionPercentStr === "string" && commissionPercentStr.includes("%")) {
+              commissionPercent = parseFloat(commissionPercentStr.replace("%", "")) || 0;
+            } else if (typeof commissionPercentStr === "number") {
+              commissionPercent = commissionPercentStr < 1 ? commissionPercentStr * 100 : commissionPercentStr;
+            }
+            
+            // Check if it's an apprentice with 0% commission
+            if (title && title.toString().includes("Apprentice") && commissionPercent === 0) {
+              isApprenticeWith0Percent = true;
+              console.log(`Skipping Yard Sign processing for apprentice with 0% commission: ${techName}`);
+              
+              // Update summary to 0 and clear any existing yard sign entries
+              updateTopSummaryYardSignPay(techSheet, 0, 0);
+              clearExistingYardSignEntries(techSheet);
+              
+              // Add to skipped techs list
+              skippedTechs.push(techName + ": Apprentice with 0% commission - No yard sign pay earned");
+              continue;
+            }
+          }
+        } catch (e) {
+          console.error(`Error checking apprentice status: ${e.message}`);
+          // Continue with processing to be safe
         }
         
         // Calculate yard sign entries for this technician

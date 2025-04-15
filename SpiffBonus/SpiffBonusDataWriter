@@ -6,6 +6,7 @@
 /**
 * Writes the collected Spiff data into the technician sheet using the new column layout.
 * Writes data to columns E-J, with Type column set to 'Spiff'.
+* IMPORTANT: Only modifies cells in columns E-J, preserving columns A-D.
 *
 * @param {Sheet} techSheet The technician's sheet object.
 * @param {number} headerRow The 1-based row index of the section's header row.
@@ -36,9 +37,6 @@ function writeSpiffDataToSheet(techSheet, headerRow, customerData) {
   var tz = Session.getScriptTimeZone() || 'America/New_York';
   var totalSpiff = 0;
   
-  // Don't insert new rows - only use existing rows
-  var availableRows = nextSectionRow - dataStartRow;
-  
   // Prepare data array for writing (map to columns E-J)
   var dataToWrite = customerData.map(function(c) {
     var commissionAmount = Number(c.commission || 0);
@@ -58,18 +56,52 @@ function writeSpiffDataToSheet(techSheet, headerRow, customerData) {
       "Spiff"                     // Column J: Type
     ];
   });
-
-  // Write data to columns E-J (indices 5-10)
-  var rowsToWrite = Math.min(dataToWrite.length, availableRows);
-  if (rowsToWrite > 0) {
+  
+  // Calculate rows needed vs available rows - ONLY for actual data entries
+  var rowsNeeded = dataToWrite.length;
+  var availableRows = nextSectionRow - dataStartRow;
+  
+  // Write data to columns E-J (indices 5-10) - ONLY if we have actual data
+  if (rowsNeeded > 0) {
+    // Make sure we have enough rows to write our data to (using existing rows)
+    // Do NOT insert new rows - this would disrupt the table structure
+    var rowsToWrite = Math.min(rowsNeeded, availableRows);
+    
+    // Write to existing rows first
     var targetRange = techSheet.getRange(dataStartRow, 5, rowsToWrite, 6);
     targetRange.setValues(dataToWrite.slice(0, rowsToWrite));
 
     // Apply formatting
     techSheet.getRange(dataStartRow, 7, rowsToWrite, 1).setNumberFormat('MM/dd/yyyy'); // Date format
     techSheet.getRange(dataStartRow, 8, rowsToWrite, 1).setNumberFormat('$#,##0.00'); // Currency format
+    
+    // Clear any remaining rows that have "Spiff" in Type column (column J)
+    if (availableRows > rowsNeeded) {
+      var remainingRows = availableRows - rowsNeeded;
+      if (remainingRows > 0) {
+        // Find remaining rows that have "Spiff" in Type column
+        var remainingSpiffRows = [];
+        if (remainingRows > 0) {
+          var typeValues = techSheet.getRange(dataStartRow + rowsNeeded, 10, remainingRows, 1).getValues();
+          for (var i = 0; i < typeValues.length; i++) {
+            var cellValue = typeValues[i][0];
+            if (cellValue && typeof cellValue === 'string' && 
+                cellValue.toString().toLowerCase().includes("spiff")) {
+              remainingSpiffRows.push(dataStartRow + rowsNeeded + i);
+            }
+          }
+        }
+        
+        // Only clear cells in columns E-J with "Spiff" in Type column
+        for (var j = 0; j < remainingSpiffRows.length; j++) {
+          techSheet.getRange(remainingSpiffRows[j], 5, 1, 6).clearContent();
+        }
+        
+        console.log(`Cleared ${remainingSpiffRows.length} remaining Spiff rows (columns E-J only)`);
+      }
+    }
   }
 
-  console.log(`Wrote ${rowsToWrite} spiff entries starting at row ${dataStartRow}, total: ${totalSpiff}`);
+  console.log(`Wrote ${rowsNeeded} spiff entries starting at row ${dataStartRow}, total: ${totalSpiff}`);
   return totalSpiff;
 } 

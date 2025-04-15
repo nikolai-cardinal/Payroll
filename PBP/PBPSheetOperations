@@ -375,3 +375,56 @@ function tryParseDate(dateValue) {
   return null;
 }
 
+/**
+* Clears the data rows in the Install section where Type column (J) contains 'PBP'.
+* Only clears columns E-J (5-10), preserving columns A-D.
+*
+* @param {Sheet} sheet - The technician sheet to clear.
+* @return {number} The number of rows cleared
+*/
+function clearInstallDataSection(sheet) {
+  if (!sheet) return 0;
+  try {
+    // First, find the Install section
+    var installSectionRow = findInstallCustomerDataSection(sheet);
+    if (installSectionRow <= 0) {
+      console.log("Clear Install Data: Install section not found in " + sheet.getName());
+      return 0;
+    }
+    
+    var dataStartRow = installSectionRow + 1;
+    var nextSectionRow = findNextSectionAfterInstall(sheet, installSectionRow);
+    
+    if (nextSectionRow <= 0) {
+      nextSectionRow = sheet.getLastRow() + 1;
+      console.log("No next section found, using last row + 1 (" + nextSectionRow + ") as boundary");
+    }
+
+    var rowsAvailable = nextSectionRow - dataStartRow;
+    if (rowsAvailable <= 0) {
+      console.log("No data rows available to clear in " + sheet.getName());
+      return 0;
+    }
+    
+    // Find existing PBP rows
+    var pbpRows = findExistingPbpRows(sheet);
+    
+    // ONLY clear the CELLS in columns E-J where Type column (J) contains 'PBP'
+    var rowsCleared = 0;
+    for (var i = 0; i < pbpRows.length; i++) {
+      var rowToClear = pbpRows[i];
+      // Only clear row if it's in the Install section range
+      if (rowToClear >= dataStartRow && rowToClear < nextSectionRow) {
+        sheet.getRange(rowToClear, 5, 1, 6).clearContent(); // Clear ONLY columns E-J (5-10)
+        rowsCleared++;
+      }
+    }
+    
+    console.log("Cleared " + rowsCleared + " rows with Type='PBP' in " + sheet.getName());
+    return rowsCleared;
+  } catch (e) {
+    console.error("Error clearing install data section: " + e.message);
+    return 0;
+  }
+}
+

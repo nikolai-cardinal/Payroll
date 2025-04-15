@@ -5,6 +5,8 @@
 
 /**
 * Clears the data rows where Type column (J) contains 'Spiff'.
+* IMPORTANT: Only clears columns E-J (5-10), preserving columns A-D.
+*
 * @param {Sheet} sheet - The technician sheet to clear.
 * @param {Array} newData - The new spiff data rows to replace existing data with.
 * @return {number} The number of rows cleared
@@ -36,11 +38,11 @@ function clearSpiffDataSection(sheet, newData) {
     // Find the rows that have "Spiff" in column J
     var spiffRows = findSpiffTypeRows(sheet, dataStartRow, rowsAvailable);
     
-    // ONLY clear the rows where Type column (J) contains 'Spiff'
+    // ONLY clear the CELLS in columns E-J where Type column (J) contains 'Spiff'
     var rowsCleared = 0;
     for (var i = 0; i < spiffRows.length; i++) {
       var rowToClear = spiffRows[i];
-      sheet.getRange(rowToClear, 5, 1, 6).clearContent(); // Clear columns E-J (5-10)
+      sheet.getRange(rowToClear, 5, 1, 6).clearContent(); // Clear ONLY columns E-J (5-10)
       rowsCleared++;
     }
     
@@ -80,11 +82,12 @@ function getExistingSpiffData(sheet) {
     
     if (rowsToRead <= 0) return [];
     
-    var numColsToRead = 10; // Read columns A-J
-    var dataRange = sheet.getRange(spiffDataStartRow, 1, rowsToRead, numColsToRead);
+    // Read only columns E-J (5-10) since that's where our data is
+    var numColsToRead = 6; // Read columns E-J
+    var dataRange = sheet.getRange(spiffDataStartRow, 5, rowsToRead, numColsToRead);
     var data = dataRange.getValues();
     
-    // Filter out Total row and empty rows
+    // Filter out Total row and empty rows (check first column - customer name)
     var filteredData = data.filter(function(row) {
       return row[0] && row[0].toString().trim().toLowerCase() !== "total";
     });

@@ -10,8 +10,9 @@
 * @param {string} technicianName - The name of the technician to update.
 * @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered.
 * @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered.
+* @param {boolean} skipStatusUpdate - Optional flag to skip status updates (for batch processing)
 */
-function updatePBPForTechnician(technicianName, actionRow, actionColumn) {
+function updatePBPForTechnician(technicianName, actionRow, actionColumn, skipStatusUpdate) {
   var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var techSheet;
@@ -27,11 +28,68 @@ function updatePBPForTechnician(technicianName, actionRow, actionColumn) {
 
     if (!ratesSheet || !spiffBonusSheet || !techSheet) {
       var missingSheet = !ratesSheet ? "Hourly + Spiff Pay" : !spiffBonusSheet ? "Spiff/Bonus" : "Technician: " + technicianName;
-      ui.alert("Error: Required sheet not found: " + missingSheet);
-      // Attempt to set error status on the sheet where the action occurred (likely ratesSheet)
-      var sheetForStatus = ratesSheet || ss.getActiveSheet(); // Fallback to active sheet
-      setActionStatus(sheetForStatus, actionRow, actionColumn, "⚠️ Error");
-      return;
+      throw new Error("Required sheet not found: " + missingSheet);
+    }
+    
+    // Set status to Processing if not skipping status updates
+    if (!skipStatusUpdate && actionRow && actionColumn) {
+      setActionStatus(ratesSheet, actionRow, actionColumn, "Processing...");
+    }
+    
+    // --- Check if the technician is an apprentice with 0% commission rate ---
+    var isApprenticeWith0Percent = false;
+    try {
+      // Find the technician's row in the rates sheet
+      var technicianRow = -1;
+      var ratesData = ratesSheet.getDataRange().getValues();
+      
+      for (var i = 1; i < ratesData.length; i++) { // Skip header row
+        var row = ratesData[i];
+        var name = row[0]; // Column A - Technician name
+        
+        if (name && name.toString().trim().toLowerCase() === technicianName.toLowerCase()) {
+          technicianRow = i;
+          break;
+        }
+      }
+      
+      if (technicianRow >= 0) {
+        var title = ratesData[technicianRow][2]; // Column C - Position
+        var commissionPercentStr = ratesData[technicianRow][7]; // Column H - Commission %
+        
+        // Parse the commission percentage
+        var commissionPercent = 0;
+        if (typeof commissionPercentStr === "string" && commissionPercentStr.includes("%")) {
+          commissionPercent = parseFloat(commissionPercentStr.replace("%", "")) || 0;
+        } else if (typeof commissionPercentStr === "number") {
+          commissionPercent = commissionPercentStr < 1 ? commissionPercentStr * 100 : commissionPercentStr;
+        }
+        
+        // Check if it's an apprentice with 0% commission
+        if (title && title.toString().includes("Apprentice") && commissionPercent === 0) {
+          isApprenticeWith0Percent = true;
+          console.log(`Skipping PBP processing for apprentice with 0% commission: ${technicianName}`);
+          
+          // Update summary to 0 and clear section
+          updateTopSummaryInstallPay(techSheet, 0, 0);
+          clearInstallDataSection(techSheet);
+          
+          // Set status to Complete if not skipping status updates
+          if (!skipStatusUpdate && actionRow && actionColumn) {
+            setActionStatus(ratesSheet, actionRow, actionColumn, "Complete");
+          }
+          
+          // Show popup with info about skipping
+          if (!skipStatusUpdate) {
+            ui.alert(`PBP processing skipped for ${technicianName}.\n\nReason: Apprentice with 0% commission rate. No PBP is earned.`);
+          }
+          
+          return;
+        }
+      }
+    } catch (e) {
+      console.error(`Error checking apprentice status: ${e.message}`);
+      // Continue with processing to be safe
     }
 
     // Get Data for lookups - Fetch ONCE for efficiency
@@ -118,5 +176,237 @@ function updatePBPForTechnician(technicianName, actionRow, actionColumn) {
     } catch (e) {
       console.error("Failed to set error status: " + e.message);
     }
+  }
+}
+
+/**
+* Processes PBP for all technicians in the Hourly + Spiff Pay sheet
+* Called from the Technician Tools menu when "All PBP" is clicked
+* No approval required
+*/
+function processAllPBP() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ratesSheet = ss.getSheetByName("Hourly + Spiff Pay");
+  var successCount = 0;
+  var errorCount = 0;
+  var skippedCount = 0;
+  var techniciansProcessed = [];
+  var errors = [];
+  var totalAmount = 0;
+  
+  if (!ratesSheet) {
+    ui.alert("Error: Could not find 'Hourly + Spiff Pay' sheet.");
+    return;
+  }
+  
+  // Use the mapping from SpiffBonusUtilities if available, or fallback to defaults
+  var ratesMapping;
+  try {
+    ratesMapping = getRatesSheetMapping();
+  } catch (e) {
+    console.log("getRatesSheetMapping not found, using defaults");
+    ratesMapping = {
+      nameColumn: 1,      // Column A - Technician name
+      dataStartRow: 3     // Data starts at row 3
+    };
+  }
+  
+  // Get all sheet names to check for existence
+  var allSheets = ss.getSheets();
+  var sheetNames = allSheets.map(function(sheet) {
+    return sheet.getName();
+  });
+  
+  // Get all technicians from Hourly + Spiff Pay sheet
+  var dataRange = ratesSheet.getRange(ratesMapping.dataStartRow, 1, ratesSheet.getLastRow() - ratesMapping.dataStartRow + 1, 1);
+  var data = dataRange.getValues();
+  
+  // Process each technician
+  for (var i = 0; i < data.length; i++) {
+    var techName = data[i][0]; // First column (name)
+    
+    // Skip empty rows or rows with no technician name
+    if (!techName) {
+      continue;
+    }
+    
+    // Check if the technician has a sheet
+    if (sheetNames.indexOf(techName) === -1) {
+      console.log("Skipping " + techName + " - no sheet exists");
+      skippedCount++;
+      continue;
+    }
+    
+    // Calculate row index in the rates sheet (for modified function call)
+    var actualRow = i + ratesMapping.dataStartRow;
+    
+    try {
+      // Call the technician-specific update function
+      var result = updatePBPForTechnicianAll(techName);
+      
+      // Record success and track amount
+      successCount++;
+      techniciansProcessed.push({
+        name: techName,
+        count: result.entryCount || 0,
+        amount: result.totalAmount || 0
+      });
+      
+      totalAmount += (result.totalAmount || 0);
+      
+    } catch (error) {
+      console.error("Error processing PBP for " + techName + ": " + error.message);
+      
+      // Record error
+      errorCount++;
+      errors.push(techName + ": " + error.message);
+    }
+  }
+  
+  // Build pretty summary message
+  var summaryMessage = [];
+  summaryMessage.push("PBP PROCESSING COMPLETE");
+  
+  // Add summary section
+  summaryMessage.push("\nSUMMARY:");
+  summaryMessage.push("• Total Technicians Processed: " + successCount);
+  summaryMessage.push("• Total Amount: $" + totalAmount.toFixed(2));
+  
+  // Add technician details section if we have any
+  if (techniciansProcessed.length > 0) {
+    summaryMessage.push("\nDETAILS BY TECHNICIAN:");
+    
+    for (var t = 0; t < techniciansProcessed.length; t++) {
+      var tech = techniciansProcessed[t];
+      if (tech.count > 0) {
+        summaryMessage.push("\n" + tech.name + ":");
+        summaryMessage.push("• Entries: " + tech.count);
+        summaryMessage.push("• Amount: $" + tech.amount.toFixed(2));
+      }
+    }
+  }
+  
+  // Add errors section if any
+  if (errors.length > 0) {
+    summaryMessage.push("\nERRORS:");
+    for (var e = 0; e < errors.length; e++) {
+      summaryMessage.push("• " + errors[e]);
+    }
+  }
+  
+  // Show the popup
+  ui.alert(summaryMessage.join("\n"));
+}
+
+/**
+* Modified version of updatePBPForTechnician that doesn't rely on action column
+* Called only from processAllPBP when processing all technicians
+* @param {string} technicianName - The name of the technician to update.
+* @return {object} Result with count of entries and total amount
+*/
+function updatePBPForTechnicianAll(technicianName) {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var techSheet;
+  var ratesSheet;
+  var spiffBonusSheet;
+  var summaryInfo = []; // Array to collect detailed information for the popup
+
+  try {
+    // --- 1. Setup and Sheet Validation ---
+    ratesSheet = ss.getSheetByName("Hourly + Spiff Pay");
+    spiffBonusSheet = ss.getSheetByName("Spiff/Bonus");
+    techSheet = ss.getSheetByName(technicianName);
+
+    if (!ratesSheet || !spiffBonusSheet || !techSheet) {
+      var missingSheet = !ratesSheet ? "Hourly + Spiff Pay" : !spiffBonusSheet ? "Spiff/Bonus" : "Technician: " + technicianName;
+      throw new Error("Required sheet not found: " + missingSheet);
+    }
+    
+    // --- Check if the technician is an apprentice with 0% commission rate ---
+    var isApprenticeWith0Percent = false;
+    try {
+      // Find the technician's row in the rates sheet
+      var technicianRow = -1;
+      var ratesData = ratesSheet.getDataRange().getValues();
+      
+      for (var i = 1; i < ratesData.length; i++) { // Skip header row
+        var row = ratesData[i];
+        var name = row[0]; // Column A - Technician name
+        
+        if (name && name.toString().trim().toLowerCase() === technicianName.toLowerCase()) {
+          technicianRow = i;
+          break;
+        }
+      }
+      
+      if (technicianRow >= 0) {
+        var title = ratesData[technicianRow][2]; // Column C - Position
+        var commissionPercentStr = ratesData[technicianRow][7]; // Column H - Commission %
+        
+        // Parse the commission percentage
+        var commissionPercent = 0;
+        if (typeof commissionPercentStr === "string" && commissionPercentStr.includes("%")) {
+          commissionPercent = parseFloat(commissionPercentStr.replace("%", "")) || 0;
+        } else if (typeof commissionPercentStr === "number") {
+          commissionPercent = commissionPercentStr < 1 ? commissionPercentStr * 100 : commissionPercentStr;
+        }
+        
+        // Check if it's an apprentice with 0% commission
+        if (title && title.toString().includes("Apprentice") && commissionPercent === 0) {
+          isApprenticeWith0Percent = true;
+          console.log(`Skipping PBP processing for apprentice with 0% commission: ${technicianName}`);
+          
+          // Update summary to 0 and clear section
+          updateTopSummaryInstallPay(techSheet, 0, 0);
+          clearInstallDataSection(techSheet);
+          
+          // No alert needed for batch processing
+          return { entryCount: 0, totalAmount: 0 };
+        }
+      }
+    } catch (e) {
+      console.error(`Error checking apprentice status: ${e.message}`);
+      // Continue with processing to be safe
+    }
+
+    // Get Data for lookups - Fetch ONCE for efficiency
+    var spiffBonusData = spiffBonusSheet.getDataRange().getValues();
+    var ratesData = ratesSheet.getDataRange().getValues(); // Used for default splits
+
+    // --- 2. Perform Calculations (Delegate to PBPCalculation.gs) ---
+    console.log("Starting PBP calculation for: " + technicianName);
+    var calculationResult = calculatePbpEntries(technicianName, spiffBonusData, ratesData); // Calls function in PBPCalculation.gs
+
+    var allPbpEntries = calculationResult.entries;
+    var totalTechnicianShare = calculationResult.totalShare;
+    console.log("Calculation complete. Entries found: " + allPbpEntries.length + ", Total Share: $" + totalTechnicianShare.toFixed(2));
+
+    // --- 3. Handle No Entries Found ---
+    if (allPbpEntries.length === 0) {
+      var techExists = ratesData.some(function(rateRow) {
+           return rateRow[0] && rateRow[0].toString().trim().toLowerCase() === technicianName.trim().toLowerCase();
+      });
+      if (techExists) {
+         // Update summary to 0 and clear section (Delegate to PBPSheetOperations.gs)
+         updateTopSummaryInstallPay(techSheet, 0, 0); // Calls function in PBPSheetOperations.gs
+         clearInstallDataSection(techSheet); // Calls function in PBPSheetOperations.gs
+      } else {
+         throw new Error("Technician " + technicianName + " not found in Hourly + Spiff Pay tab.");
+      }
+      return { entryCount: 0, totalAmount: 0 };
+    }
+
+    // --- 4. Update Technician Sheet (Delegate to PBPSheetOperations.gs) ---
+    console.log("Starting sheet update for: " + technicianName);
+    writePbpDataToSheet(techSheet, allPbpEntries, totalTechnicianShare); // Calls function in PBPSheetOperations.gs
+    console.log("Sheet update finished for: " + technicianName);
+    
+    return { entryCount: allPbpEntries.length, totalAmount: totalTechnicianShare };
+
+  } catch (error) {
+    console.error("Error updating PBP for " + technicianName + ": " + error.message + " Stack: " + error.stack);
+    throw error; // Rethrow to be handled by the calling function
   }
 }
