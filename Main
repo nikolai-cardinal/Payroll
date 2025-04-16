@@ -25,6 +25,7 @@ ui.createMenu('Technician Tools')
   .addItem('All PBP', 'processAllPBP')
   .addItem('All Yard Signs', 'menuProcessAllYardSigns')
   .addItem('All Timesheet', 'processAllTimesheets')
+  .addItem('All Lead Set', 'processAllLeadSets')
   .addItem('Create New Sheet', 'createNewTechnicianSheet')
   .addToUi();
 }
@@ -130,6 +131,27 @@ if (isProcessing) {
            console.error("Error in Yard Sign processing: " + yardSignError.message);
            setActionStatus(sheet, row, column, '⚠️ Error');
          }
+      } else if (value === "Lead Set" || value === "Leads") {
+         // Process Lead Set data for this technician
+         try {
+           // Check if the updateLeadSetForTechnician function exists
+           if (typeof updateLeadSetForTechnician !== 'function') {
+             console.error("Lead Set module not found or not properly loaded");
+             setActionStatus(sheet, row, column, '⚠️ Error');
+             return;
+           }
+           
+           // Call the main function from LeadSet module
+           var result = updateLeadSetForTechnician(ss, null, techName);
+           if (result && result.success) {
+             setActionStatus(sheet, row, column, 'Complete');
+           } else {
+             setActionStatus(sheet, row, column, '⚠️ Error');
+           }
+         } catch (leadSetError) {
+           console.error("Error in Lead Set processing: " + leadSetError.message);
+           setActionStatus(sheet, row, column, '⚠️ Error');
+         }
       } else if (value === "Payroll") {
         // Run all payroll processes for this specific technician
         runPayrollForTechnician(techName, row, column);
@@ -137,6 +159,17 @@ if (isProcessing) {
          // If value is something else (like Ready or Complete), reset status
          setActionStatus(sheet, row, column, 'Ready'); 
       }
+    }
+  } else if (column === 10 && typeof value === 'string' && value.toUpperCase().includes('LEAD')) {
+    // Column J with LEAD text - delegate to LeadSet module
+    try {
+      if (typeof handleLeadEntryInColumnJ === 'function') {
+        handleLeadEntryInColumnJ(sheet, row, sheetName);
+      } else {
+        console.error("Lead Set module's handleLeadEntryInColumnJ function not found");
+      }
+    } catch (error) {
+      console.error("Error handling LEAD entry in column J: " + error.message);
     }
   }
 } catch (error) {
@@ -847,6 +880,7 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
       spiffBonus: false,
       pbp: false,
       yardSign: false,
+      leadSet: false,
       timesheet: false
     };
     
@@ -964,6 +998,34 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
       // Mark as skipped but successful since it's intentional
       processResults.yardSign = true;
       console.log(`Skipped Yard Signs processing for technician with 0% commission: ${technicianName}`);
+    }
+    
+    // 3.5. Process Lead Sets - Only if not a technician with 0% commission
+    if (!has0PercentCommission) {
+      try {
+        var leadSetSheet = ss.getSheetByName('Lead Set');
+        if (leadSetSheet) {
+          try {
+            // Get lead data for this technician
+            var leadData = getLeadDataForTechnician(leadSetSheet, technicianName);
+            
+            // Write the lead data to the technician's sheet
+            writeLeadSetDataToSheet(techSheet, leadData);
+            
+            processResults.leadSet = true;
+          } catch (e) {
+            console.error(`Error processing Lead Set for ${technicianName}: ${e.message}`);
+          }
+        } else {
+          console.log(`Lead Set sheet not found, skipping Lead Set processing for ${technicianName}`);
+        }
+      } catch (e) {
+        console.error(`Error in Lead Set processing for ${technicianName}: ${e.message}`);
+      }
+    } else {
+      // Mark as skipped but successful since it's intentional
+      processResults.leadSet = true;
+      console.log(`Skipped Lead Set processing for technician with 0% commission: ${technicianName}`);
     }
     
     // 4. Process Timesheet - Simplified with better error handling

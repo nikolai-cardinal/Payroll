@@ -1,0 +1,76 @@
+// All Lead Set Feature Requirements
+// For Google Apps Script implementation in Google Sheets
+
+/**
+ * FEATURE OVERVIEW:
+ * The All Lead Set feature automates the process of calculating and setting lead pay
+ * for technicians based on job revenue. It will be integrated into the Technician Tools
+ * menu under Payroll and will follow the existing Payroll sequence.
+ */
+
+/**
+ * TRIGGERS:
+ * 1. Manual trigger via menu: User selects "All Lead Set" from Technician Tools > Payroll menu
+ * 2. Action column trigger: When a technician's action is changed to "leads" in column G
+ */
+
+/**
+ * WORKFLOW REQUIREMENTS:
+ * 1. Find the technician's tab
+ * 2. Navigate to the "Lead Set" tab
+ * 3. Calculate lead pay based on job's total revenue:
+ *    - 2% for $1-$10,000
+ *    - 3% for $10,000-$30,000
+ *    - 4% for $30,000+
+ * 4. Post the result in the technician's tab:
+ *    - Update column E with customer name
+ *    - Look for "lead" in column J and delete any existing entries
+ *    - Enter a report with:
+ *      * Customer name (column E)
+ *      * Business unit (column F)
+ *      * Completion date (column G)
+ *      * Commission amount (column H)
+ *      * Notes (column I)
+ *      * Add "L-E-A-D" in column J
+ * 5. Track the number of leads in row 14, column B
+ * 6. Update row 13, column C with commission information
+ */
+
+/**
+ * MENU INTEGRATION:
+ * 1. Add "All Lead Set" to the Technician Tools > Payroll menu
+ * 2. Position in sequence:
+ *    - Update All Rates
+ *    - All Spiff/Bonus
+ *    - All PBP
+ *    - All Yard Signs
+ *    - All Timesheet
+ *    - All Lead Set (new item)
+ *    - Create New Sheet
+ */
+
+/**
+ * DATA HANDLING REQUIREMENTS:
+ * 1. Only update specific cells, not entire rows
+ * 2. Replace existing entries rather than adding new rows
+ * 3. Maintain proper formatting for currency and dates
+ * 4. Handle errors gracefully with appropriate user feedback
+ */
+
+/**
+ * CODE QUALITY REQUIREMENTS:
+ * 1. Keep functions small and focused (25-30 lines maximum)
+ * 2. Use descriptive variable names
+ * 3. Implement proper error handling
+ * 4. Minimize API calls to the spreadsheet
+ * 5. Use batch operations where possible
+ * 6. Document all functions with JSDoc comments
+ */
+
+/**
+ * IMPLEMENTATION FILES:
+ * 1. LeadSetMain.js - Main entry points and initialization
+ * 2. LeadSetCalculation.js - Calculates lead payments based on revenue tiers
+ * 3. LeadSetSheetOperations.js - Handles sheet operations for lead data
+ * 4. LeadSetUtilities.js - Helper functions for the Lead Set module
+ */ 
