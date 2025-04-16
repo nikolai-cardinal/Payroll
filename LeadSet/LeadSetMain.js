@@ -120,114 +120,173 @@ function processLeadData(ss, leadSetSheet) {
 }
 
 /**
- * Updates the lead set for a specific technician.
- * First clears existing lead entries, then adds the new leads.
- * 
- * @param {String} technicianName - The name of the technician.
- * @param {Object} dateRange - Optional date range filter (startDate, endDate).
- * @param {Number} commissionRate - Optional custom commission rate.
- * @return {Object} Object containing processing results.
+ * Main function to update the Lead Set data for a technician
+ * @param {String} technicianName - The name of the technician
+ * @param {Object} options - Optional parameters
+ * @return {Object} Status of the operation
  */
-function updateLeadSetForTechnician(technicianName, dateRange, commissionRate) {
+function updateLeadSetForTechnician(technicianName, options = {}) {
+  console.log(`Starting updateLeadSetForTechnician for ${technicianName}`);
+  
+  if (!technicianName) {
+    return { success: false, message: "No technician name provided" };
+  }
+  
   try {
-    // Set default commission rate
-    commissionRate = commissionRate || LEAD_COMMISSION_RATE;
-    
-    // Update status message and alerts
-    console.log(`Processing lead set for ${technicianName}...`);
-    updateStatus(`Processing lead set for ${technicianName}...`);
-    
-    // Get settings
-    const settings = getSettingsFromSheet();
-    if (!settings || !settings.leadSpreadsheetId) {
-      const errorMsg = "Lead spreadsheet ID not found in settings.";
-      console.error(errorMsg);
-      SpreadsheetApp.getUi().alert(errorMsg);
-      updateStatus("Error: Could not process lead set. See log for details.");
-      return { success: false, error: errorMsg };
-    }
-    
-    // Open the appropriate tech sheet
-    const techSheet = openTechnicianSheet(technicianName);
-    if (!techSheet) {
-      const errorMsg = `Could not find sheet for technician: ${technicianName}`;
-      console.error(errorMsg);
-      SpreadsheetApp.getUi().alert(errorMsg);
-      updateStatus("Error: Could not process lead set. See log for details.");
-      return { success: false, error: errorMsg };
-    }
-    
-    // Get lead sheet
-    const leadSetSheet = openLeadSetSheet(settings.leadSpreadsheetId);
+    // Open the Lead Set sheet
+    const leadSetSheet = openLeadSetSheet();
     if (!leadSetSheet) {
-      const errorMsg = "Could not open Lead Set sheet.";
-      console.error(errorMsg);
-      SpreadsheetApp.getUi().alert(errorMsg);
-      updateStatus("Error: Could not process lead set. See log for details.");
-      return { success: false, error: errorMsg };
+      return { success: false, message: "Failed to open Lead Set sheet" };
     }
     
-    // Get lead data for the technician
-    console.log(`Retrieving lead data for ${technicianName}...`);
-    const leadData = getLeadDataForTechnician(leadSetSheet, technicianName);
+    // Get the technician's sheet
+    const techSheet = getTechnicianSheet(technicianName);
+    if (!techSheet) {
+      return { success: false, message: `Could not find sheet for technician: ${technicianName}` };
+    }
+    
+    // Initialize date range if provided
+    let dateRange = null;
+    if (options.startDate && options.endDate) {
+      dateRange = {
+        startDate: new Date(options.startDate),
+        endDate: new Date(options.endDate)
+      };
+    }
+    
+    // Get lead data for this technician
+    const leadData = getLeadDataForTechnician(leadSetSheet, technicianName, dateRange);
     
     if (!leadData || leadData.length === 0) {
-      const msg = `No leads found for ${technicianName} in the specified date range.`;
-      console.log(msg);
-      SpreadsheetApp.getUi().alert(msg);
-      updateStatus(`Completed: ${msg}`);
-      return { success: true, leadsProcessed: 0, totalCommission: 0 };
+      return { 
+        success: true, 
+        message: `No lead data found for ${technicianName}`,
+        leadsProcessed: 0,
+        totalCommission: 0 
+      };
     }
+    
+    console.log(`Found ${leadData.length} leads for ${technicianName}`);
     
     // First, clear any existing lead entries
     const existingLeadRows = findExistingLeadSetRows(techSheet);
     console.log(`Found ${existingLeadRows.length} existing lead entries to clear`);
+    
+    // IMPORTANT: Ensure we clear existing lead entries before adding new ones
     clearExistingLeadEntries(techSheet, existingLeadRows);
     
-    // Process leads and write to the technician's sheet
-    console.log(`Processing ${leadData.length} leads for ${technicianName}...`);
+    // Give the sheet a moment to process the clearing operation
+    Utilities.sleep(500);
     
-    let totalCommission = 0;
-    const formattedLeads = [];
+    // Update the technician's sheet with lead data
+    const result = updateTechnicianSheet(techSheet, leadData);
     
-    for (const lead of leadData) {
-      const commissionData = calculateCommission(lead.revenue);
-      totalCommission += commissionData.amount;
-      
-      formattedLeads.push({
-        customerName: lead.customer,
-        businessUnit: lead.businessUnit,
-        completionDate: lead.completionDate,
-        commissionAmount: commissionData.amount,
-        notes: commissionData.note,
-        leadMarker: "L-E-A-D"
-      });
+    // Success message with additional details
+    const successMessage = `Successfully processed ${result.leadsProcessed} leads for ${technicianName}. Total commission: $${result.totalCommission.toFixed(2)}`;
+    
+    // Show a summary alert with the results
+    SpreadsheetApp.getActiveSpreadsheet().toast(
+      successMessage,
+      "Lead Set Update Complete",
+      30
+    );
+    
+    return {
+      success: true,
+      message: successMessage,
+      leadsProcessed: result.leadsProcessed,
+      totalCommission: result.totalCommission
+    };
+    
+  } catch (error) {
+    console.error(`Error in updateLeadSetForTechnician: ${error.message}`);
+    console.error(error.stack);
+    
+    return {
+      success: false,
+      message: `Error updating lead set: ${error.message}`,
+      error: error.toString()
+    };
+  }
+}
+
+/**
+ * Update a technician's sheet with lead data
+ * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet
+ * @param {Array} leadData - Array of lead data objects
+ * @return {Object} Results of the operation
+ */
+function updateTechnicianSheet(techSheet, leadData) {
+  if (!techSheet || !leadData) {
+    return { leadsProcessed: 0, totalCommission: 0 };
+  }
+  
+  // Calculate the first empty row after the existing content
+  const lastRow = Math.max(15, techSheet.getLastRow() + 1);
+  let currentRow = lastRow;
+  let totalCommission = 0;
+  let leadsProcessed = 0;
+  
+  // Process each lead
+  leadData.forEach(lead => {
+    if (!lead.customer || !lead.revenue) {
+      console.log("Skipping lead with missing customer or revenue data");
+      return; // Skip this iteration
     }
     
-    // Write the data to the technician's sheet
-    updateTechnicianSheet(techSheet, formattedLeads);
-    updateLeadSummary(techSheet, formattedLeads.length, totalCommission);
+    // Format the completion date
+    let formattedDate = '';
+    if (lead.completionDate) {
+      if (lead.completionDate instanceof Date) {
+        formattedDate = Utilities.formatDate(lead.completionDate, 
+          Session.getScriptTimeZone(), 'MM/dd/yyyy');
+      } else {
+        // Try to parse the date
+        try {
+          const parsedDate = new Date(lead.completionDate);
+          formattedDate = Utilities.formatDate(parsedDate, 
+            Session.getScriptTimeZone(), 'MM/dd/yyyy');
+        } catch (e) {
+          formattedDate = String(lead.completionDate);
+        }
+      }
+    }
     
-    // Provide summary alert
-    const summary = `Successfully processed ${formattedLeads.length} leads for ${technicianName}. Total commission: $${totalCommission.toFixed(2)}`;
-    console.log(summary);
-    updateStatus(`Completed: ${summary}`);
-    SpreadsheetApp.getUi().alert(summary);
+    // Calculate lead commission (assuming 3% of revenue)
+    const commission = lead.revenue * 0.03;
+    totalCommission += commission;
     
-    return { 
-      success: true, 
-      leadsProcessed: formattedLeads.length, 
-      totalCommission: totalCommission 
-    };
-  } catch (error) {
-    const errorMsg = `Error updating lead set for ${technicianName}: ${error.message || error}`;
-    console.error(errorMsg);
-    Logger.log(errorMsg);
-    Logger.log(error.stack);
-    updateStatus(`Error: ${errorMsg}`);
-    SpreadsheetApp.getUi().alert(`Error: ${errorMsg}`);
-    return { success: false, error: errorMsg };
+    // Write data to sheet
+    // E (5): Date
+    techSheet.getRange(currentRow, 5).setValue(formattedDate);
+    
+    // F (6): Customer Name
+    techSheet.getRange(currentRow, 6).setValue(lead.customer);
+    
+    // G (7): Business Unit 
+    techSheet.getRange(currentRow, 7).setValue(lead.businessUnit || '');
+    
+    // H (8): Revenue
+    techSheet.getRange(currentRow, 8).setValue(lead.revenue);
+    
+    // I (9): Commission amount
+    techSheet.getRange(currentRow, 9).setValue(commission);
+    
+    // J (10): "L-E-A-D" marker
+    techSheet.getRange(currentRow, 10).setValue("L-E-A-D");
+    
+    currentRow++;
+    leadsProcessed++;
+  });
+  
+  // If we processed any leads, format the cells
+  if (leadsProcessed > 0) {
+    // Format the revenue and commission columns as currency
+    techSheet.getRange(lastRow, 8, leadsProcessed, 1).setNumberFormat("$#,##0.00");
+    techSheet.getRange(lastRow, 9, leadsProcessed, 1).setNumberFormat("$#,##0.00");
   }
+  
+  return { leadsProcessed, totalCommission };
 }
 
 /**
@@ -331,61 +390,6 @@ function calculateCommission(revenue) {
   }
   
   return { amount, note, percentage };
-}
-
-/**
- * Updates technician sheet with lead data.
- * @param {SpreadsheetApp.Sheet} techSheet - The technician sheet.
- * @param {Array} leads - Array of lead data objects.
- */
-function updateTechnicianSheet(techSheet, leads) {
-  try {
-    if (!leads || leads.length === 0) {
-      console.log("No leads to update in technician sheet.");
-      return;
-    }
-    
-    // First, make sure any existing leads are cleared
-    const existingRows = findExistingLeadSetRows(techSheet);
-    if (existingRows && existingRows.length > 0) {
-      console.log(`Clearing ${existingRows.length} existing lead rows before adding new ones`);
-      clearExistingLeadEntries(techSheet, existingRows);
-    }
-    
-    // Find the first empty row for writing new data
-    const startRow = findFirstEmptyRow(techSheet);
-    console.log(`First empty row for new leads: ${startRow}`);
-    
-    // Prepare batch operation
-    const values = [];
-    
-    for (let i = 0; i < leads.length; i++) {
-      const lead = leads[i];
-      values.push([
-        lead.customerName,
-        lead.businessUnit,
-        lead.completionDate,
-        lead.commissionAmount,
-        lead.notes,
-        lead.leadMarker
-      ]);
-    }
-    
-    // Write all leads at once if we have any
-    if (values.length > 0) {
-      techSheet.getRange(startRow, 5, values.length, 6).setValues(values);
-      console.log(`Wrote ${values.length} leads to rows ${startRow}-${startRow + values.length - 1}`);
-      
-      // Format the commission amounts
-      techSheet.getRange(startRow, 8, values.length, 1).setNumberFormat('$#,##0.00');
-      
-      // Format dates if they are valid dates
-      const dateRange = techSheet.getRange(startRow, 7, values.length, 1);
-      dateRange.setNumberFormat('mm/dd/yyyy');
-    }
-  } catch (error) {
-    console.error(`Error updating technician sheet: ${error.message}`);
-  }
 }
 
 /**
@@ -585,67 +589,54 @@ function updateLeadTotalsAfterEdit(techSheet) {
 }
 
 /**
- * Finds rows containing "L-E-A-D" in column J of a technician's sheet.
- * This function specifically looks for the lead marker text "L-E-A-D" with dashes.
- * 
- * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet to search
- * @return {Array} Array of row indexes (1-based) that have lead entries
+ * Finds rows containing lead set entries in a technician's sheet
+ * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet
+ * @return {Array} Array of row indexes (1-based) containing lead entries
  */
 function findExistingLeadSetRows(techSheet) {
-  try {
-    // Get last row with data
-    const lastRow = techSheet.getLastRow();
-    if (lastRow < 1) return [];
-    
-    // Get all values from column J (index 10, column 10)
-    const jColumnValues = techSheet.getRange(1, 10, lastRow, 1).getValues();
-    const leadRows = [];
-    
-    // Look specifically for "L-E-A-D" in column J
-    for (let i = 0; i < jColumnValues.length; i++) {
-      const cellValue = jColumnValues[i][0]; // First (and only) column in the range
-      if (cellValue && typeof cellValue === 'string' && 
-          (cellValue.includes('L-E-A-D') || cellValue.includes('LEAD'))) {
-        leadRows.push(i + 1); // +1 for 1-based row index
-      }
+  const data = techSheet.getDataRange().getValues();
+  const leadRows = [];
+  
+  // Look for "L-E-A-D" (with or without dashes) in column J (index 9)
+  for (let i = 0; i < data.length; i++) {
+    const cellValue = String(data[i][9] || '');
+    // Check for various ways "LEAD" might be written
+    if (cellValue.toUpperCase().includes('LEAD') || 
+        cellValue.toUpperCase().includes('L-E-A-D') || 
+        cellValue.toUpperCase().includes('L E A D')) {
+      leadRows.push(i + 1); // +1 for 1-based row index
     }
-    
-    console.log(`Found ${leadRows.length} lead rows: ${leadRows.join(', ')}`);
-    return leadRows;
-  } catch (error) {
-    console.error(`Error finding existing lead rows: ${error.message}`);
-    return [];
   }
+  
+  return leadRows;
 }
 
 /**
- * Clears existing lead entries from a technician's sheet.
- * 
- * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
- * @param {Array} rowIndexes - Array of row indexes to clear.
+ * Clear existing lead entries from a technician's sheet
+ * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet
+ * @param {Array} rowIndexes - Optional array of row indexes to clear
  */
 function clearExistingLeadEntries(techSheet, rowIndexes) {
-  try {
-    // If row indexes not provided, find them
-    if (!rowIndexes || !rowIndexes.length) {
-      rowIndexes = findExistingLeadSetRows(techSheet);
-    }
-    
-    if (rowIndexes.length === 0) {
-      console.log("No existing lead entries to clear.");
-      return;
-    }
-    
-    console.log(`Clearing ${rowIndexes.length} lead entries from rows: ${rowIndexes.join(', ')}`);
-    
-    // Clear each row (columns E through J) - indices 5 through 10
-    rowIndexes.forEach(rowIndex => {
-      techSheet.getRange(rowIndex, 5, 1, 6).clearContent();
-      console.log(`Cleared row ${rowIndex}, columns E-J`);
-    });
-  } catch (error) {
-    console.error(`Error clearing existing lead entries: ${error.message}`);
+  // If row indexes not provided, find them
+  if (!rowIndexes || !rowIndexes.length) {
+    rowIndexes = findExistingLeadSetRows(techSheet);
   }
+  
+  if (rowIndexes.length === 0) {
+    console.log("No existing lead entries found to clear");
+    return;
+  }
+  
+  console.log(`Clearing ${rowIndexes.length} lead entries at rows: ${rowIndexes.join(', ')}`);
+  
+  // Clear each row (columns E through J)
+  rowIndexes.forEach(rowIndex => {
+    // Clear columns E through J (5 through 10)
+    techSheet.getRange(rowIndex, 5, 1, 6).clearContent();
+    
+    // Specifically verify column J (index 10) is cleared
+    techSheet.getRange(rowIndex, 10, 1, 1).clearContent();
+  });
 }
 
 /**
