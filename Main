@@ -753,21 +753,65 @@ function findColumnByHeader(sheet, headerText, searchRow = 0) {
 function runFullPayroll() {
   try {
     var ui = SpreadsheetApp.getUi();
-    ui.alert("Starting full payroll process. This will run all payroll functions in sequence.");
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
     
-    // Run All Spiff/Bonus
-    processAllSpiffBonusWithCustomers();
+    if (!ratesSheet) {
+      ui.alert("Error: Hourly + Spiff Pay sheet not found.");
+      return;
+    }
     
-    // Run All PBP
-    processAllPBP();
+    ui.alert("Starting full payroll process. This will run payroll for all technicians with existing sheets.");
     
-    // Run All Yard Signs
-    menuProcessAllYardSigns();
+    // Get the list of technicians from the rates sheet
+    var ratesMapping = getRatesSheetMapping();
+    var technicianRange = ratesSheet.getRange(ratesMapping.dataStartRow, ratesMapping.nameColumn, 
+                                             ratesSheet.getLastRow() - ratesMapping.dataStartRow + 1, 1);
+    var technicianData = technicianRange.getValues();
     
-    // Run All Timesheet
-    processAllTimesheets();
+    var processedTechs = [];
+    var skippedTechs = [];
     
-    ui.alert("Full payroll process completed.");
+    // Process each technician individually
+    for (var i = 0; i < technicianData.length; i++) {
+      var techName = technicianData[i][0];
+      
+      // Skip empty rows
+      if (!techName || techName.toString().trim() === "") {
+        continue;
+      }
+      
+      // Check if technician sheet exists before processing
+      var techSheet = ss.getSheetByName(techName);
+      if (!techSheet) {
+        console.log(`Skipping ${techName} - sheet does not exist`);
+        skippedTechs.push(`${techName} (no sheet)`);
+        continue; // Skip to next technician
+      }
+      
+      // Find the row number for this technician
+      var rowIndex = ratesMapping.dataStartRow + i;
+      
+      // Run payroll for this technician
+      try {
+        // Use our custom function instead of default behavior to avoid alerts
+        processPayrollForTechnicianSilently(techName, rowIndex, ratesMapping.actionColumn);
+        processedTechs.push(techName);
+      } catch (techError) {
+        console.error(`Error processing payroll for ${techName}: ${techError.message}`);
+        skippedTechs.push(techName);
+      }
+    }
+    
+    // Show final summary message
+    var summaryMessage = "Full payroll process completed.\n\n";
+    summaryMessage += `✅ Processed ${processedTechs.length} technicians successfully.`;
+    
+    if (processedTechs.length > 0) {
+      summaryMessage += `\nProcessed: ${processedTechs.join(", ")}`;
+    }
+    
+    ui.alert(summaryMessage);
   } catch (e) {
     console.error("Error in runFullPayroll: " + e.message);
     SpreadsheetApp.getUi().alert("Error processing full payroll: " + e.message);
@@ -775,23 +819,21 @@ function runFullPayroll() {
 }
 
 /**
-* Runs all payroll functions in sequence for a single technician
+* Runs all payroll functions in sequence for a single technician without showing error alerts
+* This is a modified version of runPayrollForTechnician that suppresses sheet-not-found errors
 * @param {string} technicianName - The name of the technician to process
 * @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
 * @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
 */
-function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
+function processPayrollForTechnicianSilently(technicianName, actionRow, actionColumn) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
     var techSheet = ss.getSheetByName(technicianName);
     
+    // If sheet doesn't exist, silently return without error
     if (!techSheet) {
-      console.error(`Technician sheet not found for: ${technicianName}`);
-      if (actionRow && actionColumn) {
-        setActionStatus(ratesSheet, actionRow, actionColumn, 'Error: Tech Sheet Not Found');
-      }
-      SpreadsheetApp.getUi().alert(`Error: Could not find a sheet named "${technicianName}".`);
+      console.log(`Technician sheet not found for: ${technicianName} - skipping silently`);
       return;
     }
     
@@ -819,8 +861,8 @@ function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
       tempCol = ratesMapping.actionColumn;
     }
     
-    // Check if technician is an apprentice with 0% rate first
-    var isApprenticeWith0Percent = false;
+    // Check if technician has 0% commission
+    var has0PercentCommission = false;
     try {
       // First, initialize ratesMapping if not already done
       if (!ratesMapping) {
@@ -840,18 +882,18 @@ function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
         commissionPercent = commissionPercentStr < 1 ? commissionPercentStr * 100 : commissionPercentStr;
       }
       
-      // Check if it's an apprentice with 0% commission
-      if (techTitle && techTitle.toString().includes("Apprentice") && commissionPercent === 0) {
-        isApprenticeWith0Percent = true;
-        console.log(`Detected apprentice with 0% commission rate: ${technicianName}. Skipping PBP and Spiff/Bonus processing.`);
+      // Check if it's any technician with 0% commission
+      if (commissionPercent === 0) {
+        has0PercentCommission = true;
+        console.log(`Detected technician with 0% commission rate: ${technicianName}. Skipping PBP and Spiff/Bonus processing.`);
       }
     } catch (e) {
-      console.error(`Error checking apprentice status: ${e.message}`);
+      console.error(`Error checking commission status: ${e.message}`);
       // Continue with processing to be safe
     }
     
-    // 1. Process Spiff/Bonus - Only if not an apprentice with 0% commission
-    if (!isApprenticeWith0Percent) {
+    // 1. Process Spiff/Bonus - Only if not a technician with 0% commission
+    if (!has0PercentCommission) {
       try {
         var spiffBonusSheet = ss.getSheetByName('Spiff/Bonus');
         if (spiffBonusSheet) {
@@ -873,11 +915,11 @@ function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
     } else {
       // Mark as skipped but successful since it's intentional
       processResults.spiffBonus = true;
-      console.log(`Skipped Spiff/Bonus processing for apprentice with 0% commission: ${technicianName}`);
+      console.log(`Skipped Spiff/Bonus processing for technician with 0% commission: ${technicianName}`);
     }
     
-    // 2. Process PBP - Only if not an apprentice with 0% commission
-    if (!isApprenticeWith0Percent) {
+    // 2. Process PBP - Only if not a technician with 0% commission
+    if (!has0PercentCommission) {
       try {
         // Try with skipStatusUpdate parameter
         try {
@@ -895,11 +937,11 @@ function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
     } else {
       // Mark as skipped but successful since it's intentional
       processResults.pbp = true;
-      console.log(`Skipped PBP processing for apprentice with 0% commission: ${technicianName}`);
+      console.log(`Skipped PBP processing for technician with 0% commission: ${technicianName}`);
     }
     
-    // 3. Process Yard Signs - Only if not an apprentice with 0% commission
-    if (!isApprenticeWith0Percent) {
+    // 3. Process Yard Signs - Only if not a technician with 0% commission
+    if (!has0PercentCommission) {
       try {
         if (typeof initYardSign === 'function') {
           initYardSign();
@@ -921,7 +963,7 @@ function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
     } else {
       // Mark as skipped but successful since it's intentional
       processResults.yardSign = true;
-      console.log(`Skipped Yard Signs processing for apprentice with 0% commission: ${technicianName}`);
+      console.log(`Skipped Yard Signs processing for technician with 0% commission: ${technicianName}`);
     }
     
     // 4. Process Timesheet - Simplified with better error handling
@@ -938,62 +980,78 @@ function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
       console.error(`Error processing Timesheet for ${technicianName}: ${e.message}`);
     }
     
+    // 5. Copy the total pay value from cell C18 in technician's sheet to column I in rates sheet
+    try {
+      // Get the total pay value from the technician's sheet (cell C18)
+      var totalPayValue = techSheet.getRange("C18").getValue();
+      
+      // If we don't already have ratesMapping, get it now
+      if (!ratesMapping) {
+        ratesMapping = getRatesSheetMapping();
+      }
+      
+      // Find the technician's row in the rates sheet if not already known
+      if (!tempRow) {
+        tempRow = findTechnicianRow(ratesSheet, technicianName, ratesMapping.dataStartRow);
+      }
+      
+      // If we found the row, update column I with the total pay value
+      if (tempRow > 0) {
+        // Column I is the 9th column (index 9)
+        ratesSheet.getRange(tempRow, 9).setValue(totalPayValue);
+        console.log(`Updated pay value for ${technicianName} in Hourly + Spiff Pay sheet: ${totalPayValue}`);
+        
+        // Add warning emoji to Column D of technician's sheet (merged cell)
+        techSheet.getRange("D2").setValue("⚠️");
+      } else {
+        console.error(`Could not find row for ${technicianName} in Hourly + Spiff Pay sheet`);
+      }
+    } catch (e) {
+      console.error(`Error copying total pay for ${technicianName}: ${e.message}`);
+    }
+    
     // Set status to Complete (only if we have valid row and column)
     if (actionRow && actionColumn) {
       setActionStatus(ratesSheet, actionRow, actionColumn, 'Complete');
     }
     
-    // Create simplified summary of what was processed
-    var summaryMessage = `Payroll processed for ${technicianName}:`;
-    if (isApprenticeWith0Percent) {
-      summaryMessage += `\n(Apprentice with 0% commission - only processed Timesheet)`;
-    }
-    var processDetails = [];
+    // No popup for individual technician processing when running bulk payroll
+  } catch (error) {
+    console.error(`Error in processPayrollForTechnicianSilently for ${technicianName}: ${error.message}`);
+    // Don't show alerts or set error status - just log to console
+  }
+}
+
+/**
+* Runs all payroll functions in sequence for a single technician
+* @param {string} technicianName - The name of the technician to process
+* @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
+* @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
+*/
+function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
+  try {
+    var ui = SpreadsheetApp.getUi();
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
     
-    if (processResults.spiffBonus) {
-      if (isApprenticeWith0Percent) {
-        processDetails.push("✓ Spiff/Bonus (Skipped - Apprentice with 0%)");
-      } else {
-        processDetails.push("✓ Spiff/Bonus");
-      }
-    } else {
-      processDetails.push("✗ Spiff/Bonus (Failed)");
-    }
+    // Call the silent version of the function
+    processPayrollForTechnicianSilently(technicianName, actionRow, actionColumn);
     
-    if (processResults.pbp) {
-      if (isApprenticeWith0Percent) {
-        processDetails.push("✓ PBP (Skipped - Apprentice with 0%)");
-      } else {
-        processDetails.push("✓ PBP");
-      }
-    } else {
-      processDetails.push("✗ PBP (Failed)");
-    }
-    
-    if (processResults.yardSign) {
-      if (isApprenticeWith0Percent) {
-        processDetails.push("✓ Yard Signs (Skipped - Apprentice with 0%)");
-      } else {
-        processDetails.push("✓ Yard Signs");
-      }
-    } else {
-      processDetails.push("✗ Yard Signs (Failed)");
-    }
-    
-    if (processResults.timesheet) processDetails.push("✓ Timesheet");
-    else processDetails.push("✗ Timesheet (Failed)");
-    
-    // Show completion message with details
-    SpreadsheetApp.getUi().alert(summaryMessage + "\n\n" + processDetails.join("\n"));
-    
+    // Show a popup for individual technician processing
+    ui.alert(`Payroll processing completed for ${technicianName}.`);
   } catch (error) {
     console.error(`Error in runPayrollForTechnician for ${technicianName}: ${error.message}`);
     
-    // Set status to Error (only if we have valid row and column)
+    // Set status to Error
     if (actionRow && actionColumn) {
-      setActionStatus(ratesSheet, actionRow, actionColumn, 'Error');
+      try {
+        setActionStatus(ratesSheet, actionRow, actionColumn, 'Error');
+      } catch (e) {
+        console.error("Failed to set error status: " + e.message);
+      }
     }
     
-    SpreadsheetApp.getUi().alert(`Error processing full payroll for ${technicianName}: ${error.message}`);
+    // Show error alert
+    ui.alert(`Error processing payroll for ${technicianName}: ${error.message}`);
   }
 }
