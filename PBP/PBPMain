@@ -11,8 +11,9 @@
 * @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered.
 * @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered.
 * @param {boolean} skipStatusUpdate - Optional flag to skip status updates (for batch processing)
+* @param {boolean} suppressPopup - Optional flag to suppress popup notifications
 */
-function updatePBPForTechnician(technicianName, actionRow, actionColumn, skipStatusUpdate) {
+function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn, skipStatusUpdate, suppressPopup = false) {
   var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var techSheet;
@@ -80,7 +81,7 @@ function updatePBPForTechnician(technicianName, actionRow, actionColumn, skipSta
           }
           
           // Show popup with info about skipping
-          if (!skipStatusUpdate) {
+          if (!skipStatusUpdate && !suppressPopup) {
             ui.alert(`PBP processing skipped for ${technicianName}.\n\nReason: Apprentice with 0% commission rate. No PBP is earned.`);
           }
           
@@ -110,13 +111,17 @@ function updatePBPForTechnician(technicianName, actionRow, actionColumn, skipSta
            return rateRow[0] && rateRow[0].toString().trim().toLowerCase() === technicianName.trim().toLowerCase();
       });
       if (techExists) {
-         ui.alert("No PBP entries found for " + technicianName + " in the Spiff/Bonus tab for this period.");
+         if (!suppressPopup) {
+           ui.alert("No PBP entries found for " + technicianName + " in the Spiff/Bonus tab for this period.");
+         }
          // Update summary to 0 and clear section (Delegate to PBPSheetOperations.gs)
          updateTopSummaryInstallPay(techSheet, 0, 0); // Calls function in PBPSheetOperations.gs
          clearInstallDataSection(techSheet); // Calls function in PBPSheetOperations.gs
          setActionStatus(ratesSheet, actionRow, actionColumn, "Complete"); // Mark as complete even if 0 entries
       } else {
-         ui.alert("Technician " + technicianName + " not found in Hourly + Spiff Pay tab.");
+         if (!suppressPopup) {
+           ui.alert("Technician " + technicianName + " not found in Hourly + Spiff Pay tab.");
+         }
          setActionStatus(ratesSheet, actionRow, actionColumn, "⚠️ Error");
       }
       return;
@@ -160,7 +165,9 @@ function updatePBPForTechnician(technicianName, actionRow, actionColumn, skipSta
         summaryInfo.push("• Split Team: N/A (No split applicable)");
      }
     }
-    ui.alert(summaryInfo.join("\n"));
+    if (!suppressPopup) {
+      ui.alert(summaryInfo.join("\n"));
+    }
 
     // --- 6. Final Status Update ---
     setActionStatus(ratesSheet, actionRow, actionColumn, "Complete");
@@ -168,7 +175,9 @@ function updatePBPForTechnician(technicianName, actionRow, actionColumn, skipSta
   } catch (error) {
     console.error("Error updating PBP for " + technicianName + ": " + error.message + " Stack: " + error.stack);
     var errorMsg = "Error updating PBP: " + error.toString();
-    ui.alert(errorMsg);
+    if (!suppressPopup) {
+      ui.alert(errorMsg);
+    }
     // Attempt to set error status
     try {
       var sheetForError = ratesSheet || ss.getActiveSheet(); // Fallback
@@ -184,7 +193,7 @@ function updatePBPForTechnician(technicianName, actionRow, actionColumn, skipSta
 * Called from the Technician Tools menu when "All PBP" is clicked
 * No approval required
 */
-function processAllPBP() {
+function pbpMain_processAllPBP() {
   var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var ratesSheet = ss.getSheetByName("Hourly + Spiff Pay");
@@ -410,3 +419,8 @@ function updatePBPForTechnicianAll(technicianName) {
     throw error; // Rethrow to be handled by the calling function
   }
 }
+
+// Export functions to make them available to Main.gs
+// This is necessary for Google Apps Script to recognize these functions across files
+var updatePBPForTechnician = pbpMain_updatePBPForTechnician;
+var processAllPBP = pbpMain_processAllPBP;

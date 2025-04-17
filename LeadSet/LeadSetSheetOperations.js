@@ -87,7 +87,7 @@ function getLeadDataForTechnician(leadSetSheet, technicianName) {
         businessUnit: row[unitIndex],
         completionDate: row[dateIndex],
         revenue: row[revenueIndex],
-        notes: '',
+        notes: '' // Empty string for notes - will be populated during calculation
       });
     }
   }
@@ -214,31 +214,47 @@ function clearAndWriteLeadEntries(techSheet, entries) {
 }
 
 /**
- * Updates the lead summary information in a batch operation.
+ * Updates the lead summary information in the technician's sheet.
  * 
- * @param {SpreadsheetApp.Sheet} techSheet - The technician sheet.
- * @param {Number} count - Number of leads.
- * @param {Number} total - Total commission amount.
+ * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
+ * @param {Number} leadCount - The number of leads processed.
+ * @param {Number} totalCommission - The total commission amount.
  */
-function updateLeadSummaryInfo(techSheet, count, total) {
-  // Update summary info in batch
-  const updateRanges = [
-    techSheet.getRange(14, 2), // Lead count
-    techSheet.getRange(13, 3)  // Commission total
-  ];
-  
-  const updateValues = [
-    [count],
-    [total]
-  ];
-  
-  // Update count and total
-  for (let i = 0; i < updateRanges.length; i++) {
-    updateRanges[i].setValue(updateValues[i][0]);
+function updateLeadSummaryInfo(techSheet, leadCount, totalCommission) {
+  try {
+    console.log(`Updating lead summary in ${techSheet.getName()}: ${leadCount} leads, $${totalCommission}`);
+    
+    // Look for the Lead Total row in the payroll sheet (usually around row 18-22)
+    const data = techSheet.getRange("A1:A30").getValues();
+    let leadTotalRow = -1;
+    
+    for (let i = 0; i < data.length; i++) {
+      const cellValue = data[i][0];
+      if (cellValue && typeof cellValue === 'string') {
+        const text = cellValue.toString().toLowerCase().trim();
+        if (text.includes("lead") && (text.includes("total") || text.includes("pay"))) {
+          leadTotalRow = i + 1;
+          console.log(`Found Lead Total row at ${leadTotalRow}: "${cellValue}"`);
+          break;
+        }
+      }
+    }
+    
+    // If Lead Total row found, update it
+    if (leadTotalRow > 0) {
+      // Update count in column B and amount in column C
+      techSheet.getRange(leadTotalRow, 2).setValue(leadCount);
+      techSheet.getRange(leadTotalRow, 3).setValue(totalCommission).setNumberFormat("$#,##0.00");
+      console.log(`Updated Lead Total: Count=${leadCount}, Amount=${totalCommission} at row ${leadTotalRow}`);
+    } else {
+      // If not found, log a warning but don't stop execution
+      console.warn(`Could not find Lead Total row in ${techSheet.getName()}, summary not updated`);
+    }
+  } catch (error) {
+    console.error(`Error in updateLeadSummaryInfo: ${error.message}`);
+    console.error(`Stack: ${error.stack}`);
+    // Don't throw, this should not stop the main processing
   }
-  
-  // Format commission total
-  updateRanges[1].setNumberFormat('$#,##0.00');
 }
 
 /**
@@ -290,10 +306,13 @@ function clearExistingLeadEntries(techSheet, rowIndexes) {
     rowIndexes = findExistingLeadSetRows(techSheet);
   }
   
-  // Clear each row (columns E through J)
-  rowIndexes.forEach(rowIndex => {
-    techSheet.getRange(rowIndex, 5, 1, 6).clearContent();
-  });
+  // If no rows to clear, return early
+  if (!rowIndexes || rowIndexes.length === 0) {
+    return;
+  }
+  
+  // Clear all rows in batch using the batch clearRowsInBatch helper function
+  clearRowsInBatch(techSheet, rowIndexes);
 }
 
 /**
@@ -307,8 +326,8 @@ function updateTopSummaryLeadSet(techSheet, count, total) {
   // Update row 14, column B with lead count
   techSheet.getRange(14, 2).setValue(count);
   
-  // Update row 13, column C with commission information
-  const totalCell = techSheet.getRange(13, 3);
+  // Update row 14, column C with commission information instead of row 13
+  const totalCell = techSheet.getRange(14, 3);
   totalCell.setValue(total);
   formatLeadSetCells(totalCell);
 }
@@ -325,46 +344,71 @@ function writeNewLeadEntries(techSheet, entries) {
     return;
   }
   
-  console.log(`Debug: Writing ${entries.length} new lead entries to ${techSheet.getName()}`);
+  console.log(`DEBUG: Starting writeNewLeadEntries for ${techSheet.getName()} with ${entries.length} entries`);
   
-  // Find where to start writing data (first empty row in the commission section)
-  const startRow = findFirstEmptyRow(techSheet);
-  console.log(`Debug: Starting to write at row ${startRow}`);
-  
-  // Prepare data for batch update
-  const values = [];
-  
-  for (const entry of entries) {
-    // Format completion date if it's a Date object
-    let formattedDate = entry.completionDate || entry.date || '';
-    if (formattedDate instanceof Date) {
-      formattedDate = Utilities.formatDate(formattedDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+  try {
+    // Find where to start writing data (first empty row in the commission section)
+    const startRow = findFirstEmptyRow(techSheet);
+    console.log(`DEBUG: First empty row found at ${startRow} in ${techSheet.getName()}`);
+    
+    // Prepare data for batch update
+    const values = [];
+    
+    for (const entry of entries) {
+      // Format completion date if it's a Date object
+      let formattedDate = entry.completionDate || entry.date || '';
+      if (formattedDate instanceof Date) {
+        formattedDate = Utilities.formatDate(formattedDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+      }
+      
+      // Ensure notes field has a value even if undefined or null
+      const notes = entry.notes || 'Lead commission';
+      
+      // ALWAYS use 'L-E-A-D' in column J for easy identification
+      const marker = 'L-E-A-D';
+      
+      values.push([
+        entry.customer || entry.customerName || '',  // Column E: Customer name
+        entry.businessUnit || entry.unit || '',      // Column F: Business unit
+        formattedDate,                               // Column G: Completion date
+        entry.amount || entry.payment || 0,          // Column H: Commission amount
+        notes,                                       // Column I: Notes
+        marker                                       // Column J: Lead identifier
+      ]);
+      
+      console.log(`DEBUG: Prepared entry for ${entry.customer || entry.customerName || 'Unknown'} with amount: ${entry.amount}, notes: "${notes}", marker: "${marker}"`);
     }
     
-    // Ensure we always write 'L-E-A-D' in column J for easy identification
-    const marker = 'L-E-A-D';
+    // Check if we have any values to write
+    if (values.length === 0) {
+      console.log(`DEBUG: No values to write after preparation in ${techSheet.getName()}`);
+      return;
+    }
     
-    values.push([
-      entry.customer || entry.customerName || '', // Column E: Customer name
-      entry.businessUnit || entry.unit || '',     // Column F: Business unit
-      formattedDate,                              // Column G: Completion date
-      entry.amount || entry.payment || 0,         // Column H: Commission amount
-      entry.notes || '',                          // Column I: Notes
-      marker                                      // Column J: Lead identifier
-    ]);
+    // Write all data at once
+    techSheet.getRange(startRow, 5, values.length, 6).setValues(values);
+    console.log(`DEBUG: Wrote ${values.length} entries at row ${startRow}, columns E-J (5-10) in ${techSheet.getName()}`);
     
-    console.log(`Debug: Prepared entry for ${entry.customer || entry.customerName || 'Unknown'} with marker "${marker}"`);
+    // Format all commission amounts at once
+    techSheet.getRange(startRow, 8, values.length, 1).setNumberFormat('$#,##0.00');
+    
+    // Format all dates at once
+    techSheet.getRange(startRow, 7, values.length, 1).setNumberFormat('mm/dd/yyyy');
+    
+    // Verify the write was successful
+    const verifyData = techSheet.getRange(startRow, 10, values.length, 1).getValues();
+    let markersFound = 0;
+    for (let i = 0; i < verifyData.length; i++) {
+      if (verifyData[i][0] === 'L-E-A-D') {
+        markersFound++;
+      }
+    }
+    console.log(`DEBUG: Verification - Found ${markersFound}/${values.length} 'L-E-A-D' markers after writing`);
+    
+  } catch (error) {
+    console.error(`ERROR in writeNewLeadEntries: ${error.message}`);
+    console.error(`Stack: ${error.stack}`);
   }
-  
-  // Write all data at once
-  techSheet.getRange(startRow, 5, values.length, 6).setValues(values);
-  console.log(`Debug: Wrote ${values.length} entries starting at row ${startRow}, columns E-J (5-10)`);
-  
-  // Format all commission amounts at once
-  techSheet.getRange(startRow, 8, values.length, 1).setNumberFormat('$#,##0.00');
-  
-  // Format all dates at once
-  techSheet.getRange(startRow, 7, values.length, 1).setNumberFormat('mm/dd/yyyy');
 }
 
 /**
@@ -394,22 +438,76 @@ function formatLeadSetCells(range) {
  * @return {Number} The row number of the first empty row.
  */
 function findFirstEmptyRow(techSheet) {
-  const data = techSheet.getDataRange().getValues();
-  
-  // Start from row 2 (index 1) right after the header row
-  // and look for the first empty row in columns E-J (indexes 4-9)
-  for (let i = 1; i < data.length; i++) {
-    // Check if this row is empty in columns E-J
-    const rowEmpty = !data[i][4] && !data[i][5] && !data[i][6] && 
-                     !data[i][7] && !data[i][8] && !data[i][9];
+  try {
+    console.log(`DEBUG: Finding first empty row in ${techSheet.getName()}`);
     
-    if (rowEmpty) {
-      return i + 1; // +1 because array is 0-indexed, but sheets are 1-indexed
+    // First, try to find the header row
+    const headerRow = findCustomerNameHeaderRow(techSheet);
+    console.log(`DEBUG: Found Customer Name header at row ${headerRow}`);
+    
+    if (headerRow > 0) {
+      // Start looking from the row after the header
+      const startSearchRow = headerRow + 1;
+      
+      // Get data from a reasonable range below the header (30 rows max)
+      const maxRows = 30;
+      const lastRow = Math.min(techSheet.getLastRow(), headerRow + maxRows);
+      const rowsToCheck = lastRow - startSearchRow + 1;
+      
+      if (rowsToCheck > 0) {
+        console.log(`DEBUG: Checking ${rowsToCheck} rows from row ${startSearchRow} to ${lastRow}`);
+        
+        // Get all data in columns E-J
+        const data = techSheet.getRange(startSearchRow, 5, rowsToCheck, 6).getValues();
+        
+        // Look for the first completely empty row
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i];
+          const rowIsEmpty = row.every(cell => !cell || cell === '');
+          
+          if (rowIsEmpty) {
+            const emptyRow = startSearchRow + i;
+            console.log(`DEBUG: Found empty row at ${emptyRow}`);
+            return emptyRow;
+          }
+        }
+      }
+      
+      // If we didn't find an empty row, return the next row after the data
+      const nextRow = lastRow + 1;
+      console.log(`DEBUG: No empty row found, using next row after data: ${nextRow}`);
+      return nextRow;
+    } else {
+      // Fallback: If we couldn't find the header row, start from row 5
+      console.log(`DEBUG: Could not find header row, defaulting to row 5`);
+      return 5;
+    }
+  } catch (error) {
+    console.error(`ERROR in findFirstEmptyRow: ${error.message}`);
+    console.error(`Stack: ${error.stack}`);
+    // Default to a safe row if there's an error
+    return 5;
+  }
+}
+
+/**
+ * Finds the row that contains "Customer Name" in column E
+ * @param {SpreadsheetApp.Sheet} sheet - The technician sheet
+ * @return {number} The row number (1-based) or -1 if not found
+ */
+function findCustomerNameHeaderRow(sheet) {
+  var lastRow = Math.min(50, sheet.getLastRow()); // Check first 50 rows
+  var columnE = sheet.getRange(1, 5, lastRow, 1).getValues();
+  
+  for (var i = 0; i < columnE.length; i++) {
+    var cellValue = columnE[i][0];
+    if (cellValue && typeof cellValue === 'string' &&
+        cellValue.toString().trim().toLowerCase() === "customer name") {
+      return i + 1; // Convert to 1-based row index
     }
   }
   
-  // If no empty row found, return the next row after the last data row
-  return data.length + 1;
+  return -1; // Not found
 }
 
 /**
@@ -620,49 +718,129 @@ function findNextSectionAfterInstall(sheet, installSectionRow) {
 }
 
 /**
- * Clears the data rows in the Install section where Type column (J) contains 'L-E-A-D'.
- * Only clears columns E-J (5-10), preserving columns A-D.
- *
- * @param {SpreadsheetApp.Sheet} sheet - The technician sheet to clear.
- * @return {number} The number of rows cleared
+ * Clears lead data in the Installation section of the technician sheet.
+ * This includes marking (L-E-A-D), commission amount, and notes columns.
+ * 
+ * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
+ * @return {Number} The number of rows cleared.
  */
-function clearLeadDataInInstallSection(sheet) {
-  if (!sheet) return 0;
+function clearLeadDataInInstallSection(techSheet) {
   try {
-    console.log(`Starting clearLeadDataInInstallSection for sheet ${sheet.getName()}`);
+    console.log(`Starting to clear lead data in ${techSheet.getName()}`);
     
-    // Get all values in column J
-    var columnJ = sheet.getRange(1, 10, sheet.getLastRow(), 1).getValues();
-    console.log(`Scanning ${columnJ.length} rows in column J for L-E-A-D markers`);
+    // Find Installation section
+    const data = techSheet.getDataRange().getValues();
+    let installRowStart = -1;
     
-    // Find rows with L-E-A-D in column J
-    var rowsToClean = [];
-    for (var i = 0; i < columnJ.length; i++) {
-      var cellValue = columnJ[i][0];
-      if (cellValue && cellValue.toString().includes('L-E-A-D')) {
-        rowsToClean.push(i + 1); // Add 1 for 1-based row index
+    for (let i = 0; i < data.length; i++) {
+      if (data[i][0] === 'Installation') {
+        installRowStart = i;
+        console.log(`Found Installation section at row ${installRowStart + 1}`);
+        break;
+      } else if (i < 20) {
+        console.log(`Debug: Checking row ${i+1}, value: "${data[i][0]}"`);
       }
     }
     
-    console.log(`Found ${rowsToClean.length} rows with L-E-A-D markers to clear`);
-    
-    // Clear those rows (columns E-J)
-    for (var i = 0; i < rowsToClean.length; i++) {
-      var row = rowsToClean[i];
-      sheet.getRange(row, 5, 1, 6).clearContent(); // Clear columns E-J (5-10)
+    if (installRowStart === -1) {
+      // Try alternative search for Installation section
+      for (let i = 0; i < Math.min(30, data.length); i++) {
+        if (data[i][0] && typeof data[i][0] === 'string' && 
+            data[i][0].toString().toLowerCase().includes('install')) {
+          installRowStart = i;
+          console.log(`Found Installation section (partial match) at row ${installRowStart + 1}: "${data[i][0]}"`);
+          break;
+        }
+      }
+      
+      if (installRowStart === -1) {
+        console.error(`Installation section not found in ${techSheet.getName()}`);
+        return 0;
+      }
     }
     
-    console.log(`Cleared ${rowsToClean.length} rows with L-E-A-D markers`);
-    return rowsToClean.length;
-  } catch (e) {
-    console.error(`Error clearing lead data: ${e.message}`);
-    return 0;
+    // Find all rows with L-E-A-D marker in column J (index 9)
+    let leadRows = [];
+    let totalRowsSearched = 0;
+    
+    for (let i = installRowStart; i < data.length && i < installRowStart + 100; i++) {
+      totalRowsSearched++;
+      // Log column J value for debugging
+      if (i < installRowStart + 10 || data[i][9] === 'L-E-A-D' || 
+          (data[i][9] && data[i][9].toString().includes('L-E-A-D'))) {
+        console.log(`Debug: Row ${i+1}, Column J value: "${data[i][9]}", type: ${typeof data[i][9]}`);
+      }
+      
+      if (data[i][9] === 'L-E-A-D' || 
+          (data[i][9] && typeof data[i][9] === 'string' && data[i][9].toString().includes('L-E-A-D'))) {
+        leadRows.push(i + 1);  // +1 for 1-indexed sheet rows
+      }
+    }
+    
+    console.log(`Debug: Searched ${totalRowsSearched} rows, found ${leadRows.length} rows with L-E-A-D markers`);
+    if (leadRows.length > 0) {
+      console.log(`Debug: Lead rows found at: ${leadRows.join(', ')}`);
+    }
+    
+    // Clear each lead row (columns J, K, I for marker, commission, notes)
+    leadRows.forEach(row => {
+      techSheet.getRange(row, 10).clearContent();  // Column J - Marker
+      techSheet.getRange(row, 11).clearContent();  // Column K - Commission
+      techSheet.getRange(row, 9).clearContent();   // Column I - Notes
+      console.log(`Cleared lead data in row ${row}`);
+    });
+    
+    return leadRows.length;
+  } catch (error) {
+    console.error(`Error in clearLeadDataInInstallSection: ${error.message}`);
+    console.error(`Stack: ${error.stack}`);
+    throw error;  // Re-throw to be handled by caller
+  }
+}
+
+/**
+ * Finds all rows in a sheet containing L-E-A-D markers in column J.
+ * 
+ * @param {SpreadsheetApp.Sheet} sheet - The sheet to search in.
+ * @return {number[]} Array of row numbers (1-based) containing L-E-A-D markers.
+ */
+function findRowsWithLeadMarkers(sheet) {
+  // Get all values in column J
+  const columnJ = sheet.getRange(1, 10, sheet.getLastRow(), 1).getValues();
+  
+  // Find rows with L-E-A-D in column J
+  const rowsToClean = [];
+  for (let i = 0; i < columnJ.length; i++) {
+    const cellValue = columnJ[i][0];
+    if (cellValue && typeof cellValue === 'string' && cellValue.includes('L-E-A-D')) {
+      rowsToClean.push(i + 1); // Add 1 for 1-based row index
+    }
+  }
+  
+  return rowsToClean;
+}
+
+/**
+ * Clears content from columns E-J for the specified rows in batch.
+ * 
+ * @param {SpreadsheetApp.Sheet} sheet - The sheet to modify.
+ * @param {number[]} rowNumbers - Array of row numbers to clear.
+ */
+function clearRowsInBatch(sheet, rowNumbers) {
+  // Process rows in batches for larger sets
+  const batchSize = 20;
+  
+  for (let i = 0; i < rowNumbers.length; i += batchSize) {
+    const batch = rowNumbers.slice(i, i + batchSize);
+    batch.forEach(row => {
+      sheet.getRange(row, 5, 1, 6).clearContent(); // Clear columns E-J (5-10)
+    });
   }
 }
 
 /**
  * Smart data writing function that reuses existing rows when possible.
- * Updates technician sheet with lead data in a efficient way that minimizes disruption.
+ * Updates technician sheet with lead data in an efficient way.
  * 
  * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
  * @param {Array} leadEntries - The lead entries to write.
@@ -678,14 +856,39 @@ function smartWriteLeadDataToSheet(techSheet, leadEntries, totalAmount) {
   updateTopSummaryLeadSet(techSheet, leadEntries.length, totalAmount);
   
   // 2. Find existing LEAD rows
-  var existingLeadRows = findExistingLeadSetRows(techSheet);
+  const existingLeadRows = findExistingLeadSetRows(techSheet);
   
   // 3. Prepare data for writing
-  var dataToWrite = [];
+  const dataToWrite = prepareLeadDataForWrite(leadEntries);
   
-  for (var i = 0; i < leadEntries.length; i++) {
-    var entry = leadEntries[i];
-    var dateStr = "";
+  // 4. Write data to the sheet
+  if (dataToWrite.length === 0) {
+    Logger.log("No lead data to write");
+    return;
+  }
+  
+  // Handle the data writing based on existing rows
+  if (existingLeadRows.length > 0) {
+    updateExistingAndAddNewLeadRows(techSheet, existingLeadRows, dataToWrite);
+  } else {
+    writeRemainingLeadEntries(techSheet, dataToWrite);
+  }
+  
+  Logger.log("Smart update finished for: " + techSheet.getName());
+}
+
+/**
+ * Prepares lead entry data for writing to the sheet.
+ * 
+ * @param {Array} leadEntries - The lead entries to prepare.
+ * @return {Array} Formatted data ready for sheet insertion.
+ */
+function prepareLeadDataForWrite(leadEntries) {
+  const dataToWrite = [];
+  
+  for (let i = 0; i < leadEntries.length; i++) {
+    const entry = leadEntries[i];
+    let dateStr = "";
     
     // Format date if needed
     if (entry.completionDate) {
@@ -708,46 +911,54 @@ function smartWriteLeadDataToSheet(techSheet, leadEntries, totalAmount) {
     ]);
   }
   
-  // 4. Write data to the sheet
-  if (dataToWrite.length === 0) {
-    Logger.log("No lead data to write");
-    return;
+  return dataToWrite;
+}
+
+/**
+ * Updates existing lead rows and adds new ones if needed.
+ * 
+ * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
+ * @param {Array} existingLeadRows - Row numbers of existing lead rows.
+ * @param {Array} dataToWrite - Formatted data to write.
+ */
+function updateExistingAndAddNewLeadRows(techSheet, existingLeadRows, dataToWrite) {
+  Logger.log("Found " + existingLeadRows.length + " existing LEAD rows to update");
+  
+  // The number of rows we need to update
+  const rowsToUpdate = Math.min(existingLeadRows.length, dataToWrite.length);
+  
+  // Update existing rows first
+  for (let i = 0; i < rowsToUpdate; i++) {
+    const targetRow = existingLeadRows[i];
+    const targetRange = techSheet.getRange(targetRow, 5, 1, 6); // Columns E-J (5-10)
+    targetRange.setValues([dataToWrite[i]]);
   }
   
-  // If we have existing lead rows, update them
-  if (existingLeadRows.length > 0) {
-    Logger.log("Found " + existingLeadRows.length + " existing LEAD rows to update");
-    
-    // The number of rows we need to update
-    var rowsToUpdate = Math.min(existingLeadRows.length, dataToWrite.length);
-    
-    // Update existing rows first
-    for (var i = 0; i < rowsToUpdate; i++) {
-      var targetRow = existingLeadRows[i];
-      var targetRange = techSheet.getRange(targetRow, 5, 1, 6); // Columns E-J (5-10)
-      targetRange.setValues([dataToWrite[i]]);
-    }
-    
-    // If we have more entries than existing lead rows, find empty rows for the rest
-    if (dataToWrite.length > existingLeadRows.length) {
-      var remainingEntries = dataToWrite.slice(existingLeadRows.length);
-      writeRemainingLeadEntries(techSheet, remainingEntries);
-    }
-    
-    // If we have fewer entries than existing lead rows, clear the excess rows
-    if (existingLeadRows.length > dataToWrite.length) {
-      Logger.log("Clearing " + (existingLeadRows.length - dataToWrite.length) + " excess L-E-A-D rows");
-      for (var j = dataToWrite.length; j < existingLeadRows.length; j++) {
-        var excessRow = existingLeadRows[j];
-        techSheet.getRange(excessRow, 5, 1, 6).clearContent();
-      }
-    }
-  } else {
-    // No existing lead rows, write all entries to empty rows
-    writeRemainingLeadEntries(techSheet, dataToWrite);
+  // If we have more entries than existing lead rows, find empty rows for the rest
+  if (dataToWrite.length > existingLeadRows.length) {
+    const remainingEntries = dataToWrite.slice(existingLeadRows.length);
+    writeRemainingLeadEntries(techSheet, remainingEntries);
   }
   
-  Logger.log("Smart update finished for: " + techSheet.getName());
+  // If we have fewer entries than existing lead rows, clear the excess rows
+  if (existingLeadRows.length > dataToWrite.length) {
+    Logger.log("Clearing " + (existingLeadRows.length - dataToWrite.length) + " excess L-E-A-D rows");
+    clearExcessLeadRows(techSheet, existingLeadRows, dataToWrite.length);
+  }
+}
+
+/**
+ * Clears excess lead rows that are no longer needed.
+ * 
+ * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
+ * @param {Array} existingLeadRows - Row numbers of existing lead rows.
+ * @param {Number} usedRowCount - Number of rows that have been used/updated.
+ */
+function clearExcessLeadRows(techSheet, existingLeadRows, usedRowCount) {
+  for (let j = usedRowCount; j < existingLeadRows.length; j++) {
+    const excessRow = existingLeadRows[j];
+    techSheet.getRange(excessRow, 5, 1, 6).clearContent();
+  }
 }
 
 /**
@@ -815,21 +1026,131 @@ function writeRemainingLeadEntries(sheet, entries) {
 }
 
 /**
- * Finds the row that contains "Customer Name" in column E
- * @param {SpreadsheetApp.Sheet} sheet - The technician sheet
- * @return {number} The row number (1-based) or -1 if not found
+ * Processes lead set data and writes relevant leads to the technician's sheet.
+ * 
+ * @param {SpreadsheetApp.Sheet} leadSetSheet - The Lead Set sheet.
+ * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
+ * @param {String} technicianName - The name of the technician.
+ * @return {Object} Object containing processing results.
  */
-function findCustomerNameHeaderRow(sheet) {
-  var lastRow = Math.min(50, sheet.getLastRow()); // Check first 50 rows
-  var columnE = sheet.getRange(1, 5, lastRow, 1).getValues();
-  
-  for (var i = 0; i < columnE.length; i++) {
-    var cellValue = columnE[i][0];
-    if (cellValue && typeof cellValue === 'string' &&
-        cellValue.toString().trim().toLowerCase() === "customer name") {
-      return i + 1; // Convert to 1-based row index
+function processAndWriteLeadData(leadSetSheet, techSheet, technicianName) {
+  try {
+    console.log(`Processing lead data for ${technicianName}`);
+    
+    // Validate Lead Set sheet
+    if (typeof validateLeadSetSheet === 'function') {
+      const validation = validateLeadSetSheet(leadSetSheet);
+      if (!validation.valid) {
+        const errorMsg = `Lead Set sheet validation failed: ${validation.reason}`;
+        console.error(errorMsg);
+        return { success: false, error: errorMsg };
+      }
+      console.log('Lead Set sheet validation passed');
     }
+    
+    // Extract and process leads
+    const leads = extractLeadsFromSheet(leadSetSheet, technicianName);
+    console.log(`Extracted ${leads.length} leads for ${technicianName}`);
+    
+    if (leads.length === 0) {
+      return { 
+        success: true, 
+        leadsProcessed: 0, 
+        totalCommission: 0, 
+        processedLeads: []
+      };
+    }
+    
+    // Calculate commissions
+    let processedLeads = [];
+    let totalCommission = 0;
+    
+    if (typeof calculateLeadCommissions === 'function') {
+      const result = calculateLeadCommissions(leads);
+      processedLeads = result.processedLeads;
+      totalCommission = result.totalCommission;
+    } else {
+      // Fallback if calculateLeadCommissions doesn't exist
+      processedLeads = leads.map(lead => {
+        const amount = lead.amount || (lead.revenue ? lead.revenue * 0.05 : 0); // 5% default
+        return {
+          ...lead,
+          amount: amount
+        };
+      });
+      totalCommission = processedLeads.reduce((sum, lead) => sum + (lead.amount || 0), 0);
+    }
+    
+    console.log(`Calculated commission total: $${totalCommission} for ${processedLeads.length} leads`);
+    
+    // Clear existing lead data first
+    try {
+      clearLeadDataInInstallSection(techSheet);
+    } catch (clearError) {
+      console.error(`Warning: Error clearing existing lead data: ${clearError.message}`);
+      // Continue anyway
+    }
+    
+    // Prepare data for writing
+    const leadDataToWrite = processedLeads.map(lead => [
+      lead.customerName || lead.customer || '',  // Column E (5): Customer name
+      lead.businessUnit || lead.unit || '',      // Column F (6): Business unit 
+      lead.completionDate || '',                 // Column G (7): Completion date
+      lead.amount || 0,                          // Column H (8): Commission amount
+      lead.notes || 'Lead commission',           // Column I (9): Notes
+      'L-E-A-D'                                  // Column J (10): Lead identifier
+    ]);
+    
+    console.log(`Prepared ${leadDataToWrite.length} entries for writing`);
+    
+    // Find the insertion point - use the first empty row after the customer name header
+    const startRow = findFirstEmptyRow(techSheet);
+    console.log(`Found insertion point at row ${startRow}`);
+    
+    if (leadDataToWrite.length > 0) {
+      // Write all lead data at once in a batch operation
+      try {
+        techSheet.getRange(startRow, 5, leadDataToWrite.length, 6).setValues(leadDataToWrite);
+        console.log(`Successfully wrote ${leadDataToWrite.length} leads starting at row ${startRow}, columns E-J`);
+        
+        // Format cells
+        techSheet.getRange(startRow, 8, leadDataToWrite.length, 1).setNumberFormat('$#,##0.00'); // Column H - Amount
+        techSheet.getRange(startRow, 7, leadDataToWrite.length, 1).setNumberFormat('mm/dd/yyyy'); // Column G - Date
+        
+        // Verify the write was successful
+        const markerColumn = techSheet.getRange(startRow, 10, leadDataToWrite.length, 1).getValues();
+        let markersFound = 0;
+        for (let i = 0; i < markerColumn.length; i++) {
+          if (markerColumn[i][0] === 'L-E-A-D') {
+            markersFound++;
+          }
+        }
+        console.log(`Verification: Found ${markersFound}/${leadDataToWrite.length} 'L-E-A-D' markers after writing`);
+      } catch (writeError) {
+        console.error(`Error writing lead data: ${writeError.message}`);
+        console.error(`Stack: ${writeError.stack}`);
+        return { success: false, error: `Error writing lead data: ${writeError.message}` };
+      }
+    }
+    
+    // Update summary information
+    try {
+      updateLeadSummaryInfo(techSheet, processedLeads.length, totalCommission);
+      console.log(`Updated lead summary information: ${processedLeads.length} leads, $${totalCommission} total`);
+    } catch (summaryError) {
+      console.error(`Warning: Error updating summary: ${summaryError.message}`);
+      // Continue anyway
+    }
+    
+    return {
+      success: true,
+      leadsProcessed: processedLeads.length,
+      totalCommission: totalCommission,
+      processedLeads: processedLeads
+    };
+  } catch (error) {
+    console.error(`Error in processAndWriteLeadData: ${error.message}`);
+    console.error(`Stack: ${error.stack}`);
+    throw error;  // Re-throw to be handled by caller
   }
-  
-  return -1; // Not found
 } 

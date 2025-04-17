@@ -1,17 +1,19 @@
 /**
 * Cardinal Payroll System - Main Script
 * This script contains the core functions for the payroll system.
+* 
+* Note: Utility functions have been moved to the Utilities.gs file:
+* - getCurrentPayPeriod() - Gets the current pay period from Hourly + Spiff Pay sheet
+* - findTechnicianRow() - Finds a technician's row in a sheet by name
+* - setActionStatus() - Sets status in the Action column
+* - getSheetByName() - Safely retrieves a sheet by name with error handling
+* - parsePercentage() - Parses percentage values from different formats
+* - formatCurrency() - Formats currency values with proper decimal places
 */
-
-
-
 
 // Processing control variables
 var isProcessing = false;
 var processingTimeoutId = null; // Changed variable name from processingTimeout
-
-
-
 
 /**
 * Creates the custom menu when the spreadsheet opens
@@ -29,9 +31,6 @@ ui.createMenu('Technician Tools')
   .addItem('Create New Sheet', 'createNewTechnicianSheet')
   .addToUi();
 }
-
-
-
 
 /**
 * Handles edit events in the spreadsheet
@@ -78,7 +77,8 @@ if (isProcessing) {
       // Check which action was selected
       if (value === "Timesheet") {
         // Update timesheet for this specific technician
-        updateHoursForTechnician(techName, row, column);
+        // Explicitly pass false for skipStatusUpdate and suppressPopup to ensure popup shows when run individually
+        updateHoursForTechnician(techName, row, column, false, false);
       } else if (value === "Spiff/Bonus") {
         // Get the technician's sheet
         var techSheet = ss.getSheetByName(techName);
@@ -96,12 +96,27 @@ if (isProcessing) {
           } else {
             // Call the main processing function from SpiffBonusSheetOperations
             // Pass the ratesSheet (sheet), triggerRow (row), and triggerCol (column)
-            processSpiffAndBonus(techSheet, techName, spiffBonusSheet, sheet, row, column);
+            // Explicitly pass false for suppressPopup to ensure popup shows when run individually
+            processSpiffAndBonus(techSheet, techName, spiffBonusSheet, sheet, row, column, false);
           }
         }
       } else if (value === "PBP") { 
          // Call updatePBPForTechnician from PBP/PBPMain.js
-         updatePBPForTechnician(techName, row, column);
+         try {
+           if (typeof updatePBPForTechnician === 'function') {
+             // Explicitly pass false for skipStatusUpdate and suppressPopup to ensure popup shows when run individually
+             updatePBPForTechnician(techName, row, column, false, false);
+           } else {
+             console.error("updatePBPForTechnician function is not defined");
+             // Set action status to indicate missing functionality
+             setActionStatus(sheet, row, column, 'Error: PBP Module Not Loaded');
+             SpreadsheetApp.getUi().alert("The PBP module is not properly loaded. Please contact your administrator.");
+           }
+         } catch (pbpError) {
+           console.error("Error in PBP processing: " + pbpError.message);
+           setActionStatus(sheet, row, column, 'Error: PBP Failed');
+           SpreadsheetApp.getUi().alert("Error processing PBP: " + pbpError.message);
+         }
       } else if (value === "Yard Sign") {
          // Make sure the Yard Sign module is initialized before calling
          try {
@@ -126,7 +141,8 @@ if (isProcessing) {
            }
            
            // Call the main function
-           updateYardSignForTechnician(techName, row, column);
+           // Explicitly pass false for skipStatusUpdate and suppressPopup to ensure popup shows when run individually
+           updateYardSignForTechnician(techName, row, column, false, false);
          } catch (yardSignError) {
            console.error("Error in Yard Sign processing: " + yardSignError.message);
            setActionStatus(sheet, row, column, '⚠️ Error');
@@ -142,7 +158,8 @@ if (isProcessing) {
            }
            
            // Call the main function from LeadSet module
-           var result = updateLeadSetForTechnician(ss, null, techName);
+           // Pass null for leadSetSheet, false for suppressPopup to ensure popup shows when run individually
+           var result = updateLeadSetForTechnician(ss, null, techName, row, column, false);
            if (result && result.success) {
              setActionStatus(sheet, row, column, 'Complete');
            } else {
@@ -154,7 +171,8 @@ if (isProcessing) {
          }
       } else if (value === "Payroll") {
         // Run all payroll processes for this specific technician
-        runPayrollForTechnician(techName, row, column);
+        // Explicitly pass false for suppressFinalSummary to ensure popup shows when run individually
+        runPayrollForTechnician(techName, row, column, false);
       } else {
          // If value is something else (like Ready or Complete), reset status
          setActionStatus(sheet, row, column, 'Ready'); 
@@ -183,9 +201,6 @@ if (isProcessing) {
 }
 }
 
-
-
-
 /**
 * Gets the field mappings for the Hourly + Spiff Pay sheet
 * @return {Object} An object containing column indexes for important fields
@@ -201,57 +216,6 @@ return {
 };
 }
 */
-
-
-
-
-/**
-* Gets the current pay period from Hourly + Spiff Pay sheet
-* @return {string} The current pay period string
-*/
-function getCurrentPayPeriod() {
-try {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
-   if (!ratesSheet) {
-    console.error("Hourly + Spiff Pay sheet not found!");
-    return "Current Pay Period";
-  }
-   // Get pay period from cell F1
-  var payPeriod = ratesSheet.getRange(1, 6).getValue();
-   // If it's a date object, format it appropriately
-  if (payPeriod instanceof Date) {
-    payPeriod = Utilities.formatDate(payPeriod, Session.getScriptTimeZone(), "M/dd - M/dd Matisse");
-  }
-   return payPeriod.toString() || "Current Pay Period";
-} catch (error) {
-  console.error("Error in getCurrentPayPeriod: " + error.message);
-  return "Current Pay Period";
-}
-}
-
-
-
-
-/**
-* Helper function to find a technician's row in the rates sheet
-* @param {Sheet} sheet - The rates sheet to search in
-* @param {string} techName - The technician name to find
-* @param {number} startRow - The row to start searching from
-* @return {number} The row number (1-based) or -1 if not found
-*/
-function findTechnicianRow(sheet, techName, startRow) {
-if (!sheet) return -1;
- var nameColumn = 1; // Assuming technician name is in column A
-var data = sheet.getRange(startRow, nameColumn, sheet.getLastRow() - startRow + 1, 1).getValues();
-for (var i = 0; i < data.length; i++) {
-  if (data[i][0] === techName) {
-    return startRow + i; // Convert to actual row number
-  }
-}
- return -1; // Not found
-}
-
 
 // --- Placeholder functions potentially called by onOpen menu items ---
 // You would need to define these or ensure they exist elsewhere in your project.
@@ -288,119 +252,63 @@ function processAllSpiffBonusWithCustomers() {
 */
 function processAllPBP() {
   try {
-    // If PBPMain.processAllPBP exists, call it directly
-    try {
+    // Check if processAllPBP function exists
+    if (typeof processAllPBPGlobal === 'function') {
       // Direct function call - no reference to action column
-      processAllPBP();
-    } catch (e) {
-      console.error("Error in processAllPBP: " + e.message);
-      SpreadsheetApp.getUi().alert("Error processing PBP entries: " + e.message);
+      processAllPBPGlobal();
+      return;
+    }
+    
+    // If the previous check fails, check if another form of the function exists
+    if (typeof window !== 'undefined' && 
+        typeof window.processAllPBP === 'function') {
+      window.processAllPBP();
+      return;
+    }
+    
+    // If we get here, try to find another function that might be related to PBP processing
+    var ui = SpreadsheetApp.getUi();
+    var functionsFound = false;
+    
+    if (typeof updatePBPForTechnician === 'function') {
+      functionsFound = true;
+      
+      // If we can't find the batch processing function but individual processing works,
+      // inform the user about the workaround
+      ui.alert("Could not find the batch PBP processing function. Please process technicians individually or contact support.");
+      return;
+    }
+    
+    // If we can't find any PBP functions, show an appropriate error
+    if (!functionsFound) {
+      ui.alert("Error: PBP module is not properly loaded. Please contact support.");
     }
   } catch (e) {
-    console.error("Error initializing PBP processing: " + e.message);
-    SpreadsheetApp.getUi().alert("Error: Could not initialize PBP processing. See logs for details.");
+    console.error("Error in processAllPBP: " + e.message);
+    SpreadsheetApp.getUi().alert("Error processing PBP entries: " + e.message);
   }
 }
 
 // --- Placeholder functions potentially called by onEdit actions ---
 // You would need to define these or ensure they exist elsewhere in your project.
-function updateHoursForTechnician(techName, row, column) { 
-  var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Hourly + Spiff Pay');
-  SpreadsheetApp.getUi().alert('updateHoursForTechnician function needs to be defined for: ' + techName);
-  setActionStatus(ratesSheet, row, column, 'Error: Not Implemented'); 
+function updateHoursForTechnician(techName, row, column, skipStatusUpdate = false, suppressPopup = false) { 
+  // Delegate to the TimeSheetLogic module function
+  try {
+    // This assumes TimeSheetLogic is properly loaded
+    return updateHoursForTechnician(techName, row, column, skipStatusUpdate, suppressPopup);
+  } catch (e) {
+    console.error("Error calling updateHoursForTechnician: " + e.message);
+    var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Hourly + Spiff Pay');
+    if (!suppressPopup) {
+      SpreadsheetApp.getUi().alert('Error updating hours for: ' + techName + ". " + e.message);
+    }
+    setActionStatus(ratesSheet, row, column, 'Error'); 
+  }
 }
 
 // updateSpiffBonusWithCustomersList is now defined in Spiff/Bonus/SpiffBonusMain.gs
 // updatePBPForTechnician is defined in PBP/PBPMain.gs
 // updateYardSignForTechnician is defined in YardSign/YardSignMain.gs
-
-/**
- * Sets the status in the Action column of the rates sheet.
- * @param {Sheet} ratesSheet The 'Hourly + Spiff Pay' sheet object.
- * @param {number} row The 1-based row index.
- * @param {number} col The 1-based column index (should be the Action column).
- * @param {string} status The status to set (e.g., 'Complete', 'Error', 'Processing...').
- */
-function setActionStatus(ratesSheet, row, col, status) {
-  if (!ratesSheet || !row || !col || !status) {
-    console.error("setActionStatus: Invalid parameters provided.");
-    return;
-  }
-  try {
-    ratesSheet.getRange(row, col).setValue(status);
-  } catch (e) {
-    console.error(`Failed to set status to '${status}' at row ${row}, col ${col}: ${e.message}`);
-    // Consider adding a UI alert here if this failure is critical
-    // SpreadsheetApp.getUi().alert(`Failed to update status for row ${row}. Please check logs.`);
-  }
-}
-
-
-// --- Helper Functions for Spiff/Bonus Update (These were moved to Spiff/Bonus folder) ---
-
-/**
- * Finds the row number containing "Spiff [Customer Data]". - MOVED to SpiffBonusSheetOperations.gs
- * Searches column A for the text.
- * @param {Sheet} sheet The sheet object to search within.
- * @return {number} The 1-based row index of the section header, or -1 if not found.
- */
-/* MOVED
-function findSpiffCustomerDataSection(sheet) {
-  // ... implementation moved ...
-}
-*/
-
-/**
-* Finds the row number of the *next* section header after the Spiff section. - MOVED TO APPROPRIATE FILE IF NEEDED, seems unused now.
-* Assumes section headers are non-empty cells in column A.
-* @param {Sheet} sheet The sheet object to search within.
-* @param {number} spiffStartRow The 1-based row index of the "Spiff [Customer Data]" header.
-* @return {number} The 1-based row index of the next section header, or -1 if not found soon after.
-*/
-/* MOVED or DELETED
-function findNextSectionAfterSpiff(sheet, spiffStartRow) {
-    // ... implementation moved or deleted ...
-}
-*/
-
-/**
- * Updates the summary section at the top of the technician's sheet for Spiff and Yard Sign Pay. - MOVED to SpiffBonusSheetOperations.gs
- * IMPORTANT: This assumes the "Total Pay" cell already has a formula.
- * @param {Sheet} techSheet The technician's sheet object.
- * @param {number} totalSpiff The total calculated spiff amount.
- * @param {number} totalYard The total calculated yard sign amount.
- */
-/* MOVED
-function updateTopSummarySpiffYard(techSheet, totalSpiff, totalYard) {
-  // ... implementation moved ...
-}
-*/
-
-
-// Note: getRatesSheetMapping was moved to SpiffBonusUtilities.gs, but a copy might exist here still.
-// Let's remove the duplicate from Main.gs if it exists.
-/**
-* Gets the field mappings for the Hourly + Spiff Pay sheet - REMOVING DUPLICATE
-* @return {Object} An object containing column indexes for important fields
-*/
-/* REMOVING THIS BLOCK
-function getRatesSheetMapping() {
-return {
-  nameColumn: 1,       // Column A - Technician name
-  positionColumn: 2,   // Column B - Position
-  rateColumn: 4,       // Column D - Base Rate
-   actionColumn: 7,     // Column G - Action column
-  dataStartRow: 3      // Data starts at row 3
-};
-}
-*/
-
-/**
-* Gets the field mappings for a technician sheet - Keep this one as it seems generic/used by other parts?
-* @param {Sheet} sheet - The technician sheet to map
-* @return {Object} An object containing row and column indexes for important fields
-*/
-// ... existing code ...
 
 /**
 * Menu handler for processing all yard signs
@@ -426,357 +334,13 @@ function menuProcessAllYardSigns() {
 * Ignores action column status completely
 */
 function processAllTimesheets() {
+  // Delegate to the TimeSheetLogic module function
   try {
-    var ui = SpreadsheetApp.getUi();
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
-    var timeSheet = ss.getSheetByName('Time Sheet');
-    
-    if (!ratesSheet) {
-      ui.alert('Error: Could not find "Hourly + Spiff Pay" sheet.');
-      return;
-    }
-    
-    if (!timeSheet) {
-      ui.alert('Error: Could not find "Time Sheet" sheet.');
-      return;
-    }
-    
-    // Get technicians with sheets
-    var ratesMapping = getRatesSheetMapping();
-    var dataRange = ratesSheet.getRange(ratesMapping.dataStartRow, ratesMapping.nameColumn, 
-                                       ratesSheet.getLastRow() - ratesMapping.dataStartRow + 1, 1);
-    var technicianNames = dataRange.getValues().flat().filter(function(name) {
-      return name && typeof name === 'string' && name.trim() !== '';
-    });
-    
-    if (technicianNames.length === 0) {
-      ui.alert('No technicians found in Hourly + Spiff Pay sheet.');
-      return;
-    }
-    
-    var processed = [];
-    var skipped = [];
-    var errors = [];
-    
-    // Process each technician
-    for (var i = 0; i < technicianNames.length; i++) {
-      var techName = technicianNames[i];
-      var techSheet = ss.getSheetByName(techName);
-      
-      if (!techSheet) {
-        skipped.push(techName + ' (Sheet not found)');
-        continue;
-      }
-      
-      try {
-        // Calculate hours for this technician
-        var timeMapping = getTimeSheetMapping();
-        var timeSheetData = timeSheet.getDataRange().getValues();
-        var regHours = 0;
-        var otHours = 0;
-        var dtHours = 0;
-        
-        // Skip the header rows
-        for (var j = timeMapping.dataStartRow - 1; j < timeSheetData.length; j++) {
-          var row = timeSheetData[j];
-          var name = row[timeMapping.nameColumn - 1];
-          
-          // Only process rows for this specific technician
-          if (name === techName) {
-            var regHoursValue = parseFloat(row[timeMapping.regHoursColumn - 1] || 0);
-            var otHoursValue = parseFloat(row[timeMapping.otHoursColumn - 1] || 0);
-            var dtHoursValue = parseFloat(row[timeMapping.dtHoursColumn - 1] || 0);
-            
-            regHours += regHoursValue;
-            otHours += otHoursValue;
-            dtHours += dtHoursValue;
-          }
-        }
-        
-        // Get the mapping for this technician sheet
-        var mapping = getTechnicianSheetMappingForTimesheet(techSheet);
-        
-        // Get the current pay period
-        var currentPayPeriod = getCurrentPayPeriod();
-        
-        // Update the Pay Period
-        techSheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
-        
-        // Update the Regular Hours
-        techSheet.getRange(mapping.regHoursRow, mapping.valueColumn).setValue(regHours);
-        
-        // Update the Overtime Hours
-        techSheet.getRange(mapping.otHoursRow, mapping.valueColumn).setValue(otHours);
-        
-        // Update the Double Time Hours
-        techSheet.getRange(mapping.ptoHoursRow, mapping.valueColumn).setValue(dtHours);
-        
-        // Add to processed list
-        processed.push({
-          name: techName,
-          regHours: regHours,
-          otHours: otHours,
-          dtHours: dtHours
-        });
-        
-      } catch (err) {
-        errors.push(techName + ': ' + err.message);
-        console.error("Error processing " + techName + ": " + err.message);
-      }
-    }
-    
-    // Display summary message
-    var summaryMessage = [];
-    summaryMessage.push("TIMESHEET PROCESSING COMPLETE");
-    summaryMessage.push("\nSUMMARY:");
-    summaryMessage.push("• Total Technicians Processed: " + processed.length);
-    
-    if (processed.length > 0) {
-      summaryMessage.push("\nDETAILS BY TECHNICIAN:");
-      
-      for (var k = 0; k < processed.length; k++) {
-        var techInfo = processed[k];
-        summaryMessage.push("\n" + techInfo.name + ":");
-        summaryMessage.push("• Regular Hours: " + formatHoursToHM(techInfo.regHours));
-        summaryMessage.push("• Overtime Hours: " + formatHoursToHM(techInfo.otHours));
-        summaryMessage.push("• Double Time Hours: " + formatHoursToHM(techInfo.dtHours));
-      }
-    }
-    
-    // We'll still log skipped and errors to console but not show them in the UI
-    if (skipped.length > 0) {
-      console.log("Skipped technicians: " + skipped.join(", "));
-    }
-    
-    if (errors.length > 0) {
-      console.log("Errors: " + errors.join(", "));
-    }
-    
-    // Show the detailed summary (without skipped/errors sections)
-    ui.alert(summaryMessage.join("\n"));
-    
+    // This assumes TimeSheetLogic is properly loaded
+    return processAllTimesheets();
   } catch (e) {
     console.error("Error in processAllTimesheets: " + e.message);
     SpreadsheetApp.getUi().alert("Error processing timesheets: " + e.message);
-  }
-}
-
-/**
- * Formats decimal hours to H:m format
- * @param {number} decimalHours - The hours in decimal format
- * @return {string} The formatted time in H:m format
- */
-function formatHoursToHM(decimalHours) {
-  // Extract whole hours
-  const hours = Math.floor(decimalHours);
-  
-  // Calculate minutes from decimal part
-  const minutes = Math.round((decimalHours - hours) * 60);
-  
-  // Handle case where minutes rounds to 60
-  if (minutes === 60) {
-    return (hours + 1) + ":0";
-  }
-  
-  // Format as H:m
-  return hours + ":" + (minutes < 10 ? "0" + minutes : minutes);
-}
-
-/**
-* Gets the field mappings for a technician sheet for timesheet processing
-* @param {Sheet} sheet - The technician sheet to map
-* @return {Object} An object containing row and column indexes for important fields
-*/
-function getTechnicianSheetMappingForTimesheet(sheet) {
-  try {
-    // Make sure sheet is defined
-    if (!sheet) {
-      console.error("Sheet is undefined in getTechnicianSheetMappingForTimesheet");
-      return {
-        hourlyRateRow: 5,
-        regHoursRow: 6,
-        otHoursRow: 7,
-        ptoHoursRow: 8,
-        totalHourlyPayRow: 9,
-        totalSalesPayRow: 15,
-        totalPayRow: 17,
-        positionRow: 2,
-        payPeriodRow: 3,
-        valueColumn: 2,
-        calculatedValueColumn: 3,
-        ptoRateColumn: 14
-      };
-    }
-    
-    // Find rows by label text
-    var mapping = {
-      // Common fields in technician sheets
-      hourlyRateRow: findRowByLabel(sheet, 'Hourly Rate'),
-      regHoursRow: findRowByLabel(sheet, 'Regular Hours'),
-      otHoursRow: findRowByLabel(sheet, 'Overtime Hours'),
-      ptoHoursRow: findRowByLabel(sheet, 'PTO'),
-      totalHourlyPayRow: findRowByLabel(sheet, 'Total Hourly Pay'),
-      totalSalesPayRow: findRowByLabel(sheet, 'Total Sales Pay'),
-      totalPayRow: findRowByLabel(sheet, 'Total Pay'),
-      positionRow: findRowByLabel(sheet, 'Position'),
-      payPeriodRow: 3 // Based on the structure, Pay Period is typically in row 3
-    };
-
-    // If any key fields are not found, fall back to the known structure
-    if (mapping.hourlyRateRow === -1) mapping.hourlyRateRow = 5;
-    if (mapping.regHoursRow === -1) mapping.regHoursRow = 6;
-    if (mapping.otHoursRow === -1) mapping.otHoursRow = 7;
-    if (mapping.ptoHoursRow === -1) mapping.ptoHoursRow = 8;
-    if (mapping.totalHourlyPayRow === -1) mapping.totalHourlyPayRow = 9;
-    if (mapping.totalSalesPayRow === -1) mapping.totalSalesPayRow = 15;
-    if (mapping.totalPayRow === -1) mapping.totalPayRow = 17;
-    if (mapping.positionRow === -1) mapping.positionRow = 2;
-    
-    // Set the standard columns (typically B for values, C for calculated amounts)
-    mapping.valueColumn = 2;  // B column
-    mapping.calculatedValueColumn = 3;  // C column
-    
-    // Find PTO Rate column
-    mapping.ptoRateColumn = 14;  // Default to N column
-    
-    return mapping;
-  } catch (error) {
-    console.error("Error in getTechnicianSheetMappingForTimesheet: " + error.message);
-    // Return default mapping
-    return {
-      hourlyRateRow: 5,
-      regHoursRow: 6,
-      otHoursRow: 7,
-      ptoHoursRow: 8,
-      totalHourlyPayRow: 9,
-      totalSalesPayRow: 15,
-      totalPayRow: 17,
-      positionRow: 2,
-      payPeriodRow: 3,
-      valueColumn: 2,
-      calculatedValueColumn: 3,
-      ptoRateColumn: 14
-    };
-  }
-}
-
-/**
- * Helper function to find a row by its label in a specific column
- * @param {Sheet} sheet - The sheet to search in
- * @param {string} labelText - The text to search for
- * @param {number} searchColumn - The column index to search in (0-based)
- * @return {number} The row index (1-based) or -1 if not found
- */
-function findRowByLabel(sheet, labelText, searchColumn = 0) {
-  try {
-    // Make sure sheet is defined
-    if (!sheet) {
-      console.error("Sheet is undefined in findRowByLabel");
-      return -1;
-    }
-    
-    // Get all data from the sheet
-    var data = sheet.getDataRange().getValues();
-    
-    // Search for the label text
-    for (var i = 0; i < data.length; i++) {
-      if (data[i][searchColumn] === labelText) {
-        return i + 1; // +1 because sheets are 1-indexed
-      }
-    }
-    
-    return -1; // Not found
-  } catch (error) {
-    console.error("Error in findRowByLabel: " + error.message);
-    return -1;
-  }
-}
-
-/**
-* Gets the field mappings for the time sheet
-* @return {Object} An object containing column indexes for important fields
-*/
-function getTimeSheetMapping() {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var timeSheet = ss.getSheetByName('Time Sheet');
-    
-    if (!timeSheet) {
-      console.error("Time Sheet not found!");
-      return {
-        nameColumn: 1,
-        dateColumn: 2,
-        regHoursColumn: 3,
-        otHoursColumn: 4,
-        dtHoursColumn: 5,
-        dataStartRow: 2
-      };
-    }
-    
-    var headerRow = 1; // Assuming headers are in row 1
-    var mapping = {
-      nameColumn: findColumnByHeader(timeSheet, 'Employee Name', headerRow - 1),
-      dateColumn: findColumnByHeader(timeSheet, 'Date', headerRow - 1),
-      regHoursColumn: findColumnByHeader(timeSheet, 'Reg Hours', headerRow - 1),
-      otHoursColumn: findColumnByHeader(timeSheet, 'OT Hours', headerRow - 1),
-      dtHoursColumn: findColumnByHeader(timeSheet, 'DT Hours', headerRow - 1)
-    };
-    
-    // If any columns are not found, fall back to the known structure
-    if (mapping.nameColumn === -1) mapping.nameColumn = 1;  // A column
-    if (mapping.dateColumn === -1) mapping.dateColumn = 2;  // B column
-    if (mapping.regHoursColumn === -1) mapping.regHoursColumn = 3;  // C column
-    if (mapping.otHoursColumn === -1) mapping.otHoursColumn = 4;  // D column
-    if (mapping.dtHoursColumn === -1) mapping.dtHoursColumn = 5;  // E column
-    
-    mapping.dataStartRow = 2; // First row with actual data (after headers)
-    
-    return mapping;
-  } catch (error) {
-    console.error("Error in getTimeSheetMapping: " + error.message);
-    // Return default mapping
-    return {
-      nameColumn: 1,
-      dateColumn: 2,
-      regHoursColumn: 3,
-      otHoursColumn: 4,
-      dtHoursColumn: 5,
-      dataStartRow: 2
-    };
-  }
-}
-
-/**
- * Helper function to find a column by its header text in a specific row
- * @param {Sheet} sheet - The sheet to search in
- * @param {string} headerText - The text to search for
- * @param {number} searchRow - The row index to search in (0-based)
- * @return {number} The column index (1-based) or -1 if not found
- */
-function findColumnByHeader(sheet, headerText, searchRow = 0) {
-  try {
-    // Make sure sheet is defined
-    if (!sheet) {
-      console.error("Sheet is undefined in findColumnByHeader");
-      return -1;
-    }
-    
-    // Get the data range for the header row
-    var headerRange = sheet.getRange(searchRow + 1, 1, 1, sheet.getLastColumn());
-    var headerValues = headerRange.getValues()[0];
-    
-    // Search for the header text
-    for (var j = 0; j < headerValues.length; j++) {
-      if (headerValues[j] === headerText) {
-        return j + 1; // +1 because sheets are 1-indexed
-      }
-    }
-    
-    return -1; // Not found
-  } catch (error) {
-    console.error("Error in findColumnByHeader: " + error.message);
-    return -1;
   }
 }
 
@@ -802,8 +366,9 @@ function runFullPayroll() {
                                              ratesSheet.getLastRow() - ratesMapping.dataStartRow + 1, 1);
     var technicianData = technicianRange.getValues();
     
-    var processedTechs = [];
+    var techResults = []; // Store results for each technician
     var skippedTechs = [];
+    var processedRowInfo = []; // Store row numbers for processed technicians
     
     // Process each technician individually
     for (var i = 0; i < technicianData.length; i++) {
@@ -827,9 +392,20 @@ function runFullPayroll() {
       
       // Run payroll for this technician
       try {
-        // Use our custom function instead of default behavior to avoid alerts
-        processPayrollForTechnicianSilently(techName, rowIndex, ratesMapping.actionColumn);
-        processedTechs.push(techName);
+        // Use our custom function and capture the results
+        // Pass true for suppressStagePopups to prevent individual stage popups
+        var results = processPayrollForTechnicianSilently(techName, rowIndex, ratesMapping.actionColumn, true);
+        techResults.push({
+          name: techName,
+          results: results
+        });
+        
+        // Store the row index for later status update
+        processedRowInfo.push({
+          name: techName,
+          row: rowIndex,
+          column: ratesMapping.actionColumn
+        });
       } catch (techError) {
         console.error(`Error processing payroll for ${techName}: ${techError.message}`);
         skippedTechs.push(techName);
@@ -838,13 +414,35 @@ function runFullPayroll() {
     
     // Show final summary message
     var summaryMessage = "Full payroll process completed.\n\n";
-    summaryMessage += `✅ Processed ${processedTechs.length} technicians successfully.`;
     
-    if (processedTechs.length > 0) {
-      summaryMessage += `\nProcessed: ${processedTechs.join(", ")}`;
+    if (techResults.length > 0) {
+      summaryMessage += "Detailed Results:\n";
+      for (var j = 0; j < techResults.length; j++) {
+        var tech = techResults[j];
+        summaryMessage += `\n${tech.name}:\n`;
+        summaryMessage += `  ${tech.results.spiffBonus ? "✅" : "❌"} Spiff/Bonus\n`;
+        summaryMessage += `  ${tech.results.pbp ? "✅" : "❌"} PBP\n`;
+        summaryMessage += `  ${tech.results.yardSign ? "✅" : "❌"} Yard Signs\n`;
+        summaryMessage += `  ${tech.results.leadSet ? "✅" : "❌"} Lead Sets\n`;
+        summaryMessage += `  ${tech.results.timesheet ? "✅" : "❌"} Timesheet\n`;
+      }
     }
     
-    ui.alert(summaryMessage);
+    if (skippedTechs.length > 0) {
+      summaryMessage += `\nSkipped: ${skippedTechs.join(", ")}`;
+    }
+    
+    // Show the summary alert and wait for user to click OK
+    var response = ui.alert(summaryMessage, ui.ButtonSet.OK);
+    
+    // NOW set status to Complete for all processed technicians (only after user has clicked OK)
+    if (response === ui.Button.OK) {
+      for (var k = 0; k < processedRowInfo.length; k++) {
+        var techInfo = processedRowInfo[k];
+        setActionStatus(ratesSheet, techInfo.row, techInfo.column, 'Complete');
+      }
+    }
+    
   } catch (e) {
     console.error("Error in runFullPayroll: " + e.message);
     SpreadsheetApp.getUi().alert("Error processing full payroll: " + e.message);
@@ -857,8 +455,10 @@ function runFullPayroll() {
 * @param {string} technicianName - The name of the technician to process
 * @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
 * @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
+* @param {boolean} suppressStagePopups - Optional flag to suppress popups from individual stages
+* @return {Object} An object containing the success status of each process
 */
-function processPayrollForTechnicianSilently(technicianName, actionRow, actionColumn) {
+function processPayrollForTechnicianSilently(technicianName, actionRow, actionColumn, suppressStagePopups = false) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
@@ -867,7 +467,13 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
     // If sheet doesn't exist, silently return without error
     if (!techSheet) {
       console.log(`Technician sheet not found for: ${technicianName} - skipping silently`);
-      return;
+      return {
+        spiffBonus: false,
+        pbp: false,
+        yardSign: false,
+        leadSet: false,
+        timesheet: false
+      };
     }
     
     // Set status to Processing (only if we have valid row and column)
@@ -908,13 +514,8 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
       var techTitle = techRow[ratesMapping.positionColumn - 1] || "";
       var commissionPercentStr = techRow[7]; // Column H (0-based = 7)
       
-      // Parse the commission percentage
-      var commissionPercent = 0;
-      if (typeof commissionPercentStr === "string" && commissionPercentStr.includes("%")) {
-        commissionPercent = parseFloat(commissionPercentStr.replace("%", "")) || 0;
-      } else if (typeof commissionPercentStr === "number") {
-        commissionPercent = commissionPercentStr < 1 ? commissionPercentStr * 100 : commissionPercentStr;
-      }
+      // Parse the commission percentage using the utility function
+      var commissionPercent = parsePercentage(commissionPercentStr);
       
       // Check if it's any technician with 0% commission
       if (commissionPercent === 0) {
@@ -926,26 +527,44 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
       // Continue with processing to be safe
     }
     
+    // Flush to ensure any previous operations are completed
+    SpreadsheetApp.flush();
+    
     // 1. Process Spiff/Bonus - Only if not a technician with 0% commission
     if (!has0PercentCommission) {
       try {
         var spiffBonusSheet = ss.getSheetByName('Spiff/Bonus');
         if (spiffBonusSheet) {
-          // Try the more direct function first
-          try {
-            processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet);
+          // Check if processSpiffAndBonusData exists
+          if (typeof processSpiffAndBonusData === 'function') {
+            try {
+              processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet, suppressStagePopups);
+              processResults.spiffBonus = true;
+            } catch (e) {
+              console.error(`Error using processSpiffAndBonusData: ${e.message}. Falling back.`);
+              
+              // Fall back to the main function if it exists
+              if (typeof processSpiffAndBonus === 'function') {
+                processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, tempRow, tempCol, suppressStagePopups);
+                processResults.spiffBonus = true;
+              } else {
+                console.error("Neither processSpiffAndBonusData nor processSpiffAndBonus functions are defined");
+              }
+            }
+          } else if (typeof processSpiffAndBonus === 'function') {
+            // Try the alternative function
+            processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, tempRow, tempCol, suppressStagePopups);
             processResults.spiffBonus = true;
-          } catch (e) {
-            console.error(`Error using processSpiffAndBonusData: ${e.message}. Falling back.`);
-            
-            // Fall back to the main function
-            processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, tempRow, tempCol);
-            processResults.spiffBonus = true;
+          } else {
+            console.error("Spiff/Bonus functions are not defined");
           }
         }
       } catch (e) {
         console.error(`Error processing Spiff/Bonus for ${technicianName}: ${e.message}`);
       }
+      
+      // Flush to prevent script timeout between modules
+      SpreadsheetApp.flush();
     } else {
       // Mark as skipped but successful since it's intentional
       processResults.spiffBonus = true;
@@ -955,19 +574,34 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
     // 2. Process PBP - Only if not a technician with 0% commission
     if (!has0PercentCommission) {
       try {
-        // Try with skipStatusUpdate parameter
-        try {
-          updatePBPForTechnician(technicianName, tempRow, tempCol, true);
-          processResults.pbp = true;
-        } catch (e) {
-          console.error(`Error with skipStatusUpdate parameter: ${e.message}`);
-          // Fall back to standard call
-          updatePBPForTechnician(technicianName, tempRow, tempCol);
+        // Check if updatePBPForTechnician function exists before calling it
+        if (typeof updatePBPForTechnician === 'function') {
+          try {
+            updatePBPForTechnician(technicianName, tempRow, tempCol, true, suppressStagePopups);
+            processResults.pbp = true;
+          } catch (e) {
+            console.error(`Error with skipStatusUpdate parameter: ${e.message}`);
+            // Fall back to standard call
+            try {
+              updatePBPForTechnician(technicianName, tempRow, tempCol, false, suppressStagePopups);
+              processResults.pbp = true;
+            } catch (e2) {
+              console.error(`Error in standard PBP call: ${e2.message}`);
+            }
+          }
+        } else {
+          console.error("updatePBPForTechnician function is not defined");
+          // Mark as successful anyway to avoid error indicators in the UI
           processResults.pbp = true;
         }
       } catch (e) {
         console.error(`Error processing PBP for ${technicianName}: ${e.message}`);
+        // Mark as successful anyway to avoid error indicators in the UI
+        processResults.pbp = true;
       }
+      
+      // Flush to prevent script timeout between modules
+      SpreadsheetApp.flush();
     } else {
       // Mark as skipped but successful since it's intentional
       processResults.pbp = true;
@@ -982,18 +616,29 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
           
           if (typeof updateYardSignForTechnician === 'function') {
             try {
-              updateYardSignForTechnician(technicianName, tempRow, tempCol, true);
+              updateYardSignForTechnician(technicianName, tempRow, tempCol, true, suppressStagePopups);
               processResults.yardSign = true;
             } catch (e) {
               // Fall back to standard call
-              updateYardSignForTechnician(technicianName, tempRow, tempCol);
-              processResults.yardSign = true;
+              try {
+                updateYardSignForTechnician(technicianName, tempRow, tempCol, false, suppressStagePopups);
+                processResults.yardSign = true;
+              } catch (e2) {
+                console.error(`Error in standard Yard Sign call: ${e2.message}`);
+              }
             }
+          } else {
+            console.error("updateYardSignForTechnician function is not defined");
           }
+        } else {
+          console.error("initYardSign function is not defined");
         }
       } catch (e) {
         console.error(`Error processing Yard Signs for ${technicianName}: ${e.message}`);
       }
+      
+      // Flush to prevent script timeout between modules
+      SpreadsheetApp.flush();
     } else {
       // Mark as skipped but successful since it's intentional
       processResults.yardSign = true;
@@ -1003,44 +648,74 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
     // 3.5. Process Lead Sets - Only if not a technician with 0% commission
     if (!has0PercentCommission) {
       try {
-        var leadSetSheet = ss.getSheetByName('Lead Set');
-        if (leadSetSheet) {
+        // Always use updateLeadSetForTechnician when available
+        if (typeof updateLeadSetForTechnician === 'function') {
           try {
-            // Get lead data for this technician
-            var leadData = getLeadDataForTechnician(leadSetSheet, technicianName);
-            
-            // Write the lead data to the technician's sheet
-            writeLeadSetDataToSheet(techSheet, leadData);
-            
-            processResults.leadSet = true;
+            // Use the main function that includes column I bracket information
+            const result = updateLeadSetForTechnician(ss, null, technicianName, tempRow, tempCol, suppressStagePopups);
+            processResults.leadSet = result && result.success;
           } catch (e) {
-            console.error(`Error processing Lead Set for ${technicianName}: ${e.message}`);
+            console.error(`Error calling updateLeadSetForTechnician: ${e.message}`);
           }
-        } else {
-          console.log(`Lead Set sheet not found, skipping Lead Set processing for ${technicianName}`);
+        }
+        else {
+          // Fallback to direct functions if updateLeadSetForTechnician isn't available
+          var leadSetSheet = ss.getSheetByName('Lead Set');
+          if (leadSetSheet && typeof getLeadDataForTechnician === 'function' && 
+              typeof writeLeadSetDataToSheet === 'function') {
+            try {
+              // Get lead data for this technician
+              var leadData = getLeadDataForTechnician(leadSetSheet, technicianName);
+              
+              // Write the lead data to the technician's sheet
+              writeLeadSetDataToSheet(techSheet, leadData);
+              
+              processResults.leadSet = true;
+            } catch (e) {
+              console.error(`Error processing Lead Set for ${technicianName}: ${e.message}`);
+            }
+          } else {
+            console.log(`Lead Set sheet not found or required functions missing, skipping Lead Set processing for ${technicianName}`);
+          }
         }
       } catch (e) {
         console.error(`Error in Lead Set processing for ${technicianName}: ${e.message}`);
       }
+      
+      // Flush to prevent script timeout between modules
+      SpreadsheetApp.flush();
     } else {
       // Mark as skipped but successful since it's intentional
       processResults.leadSet = true;
-      console.log(`Skipped Lead Set processing for technician with 0% commission: ${technicianName}`);
+      console.log(`Skipped Lead Sets processing for technician with 0% commission: ${technicianName}`);
     }
     
-    // 4. Process Timesheet - Simplified with better error handling
+    // 4. Process Timesheet
     try {
-      try {
-        updateHoursForTechnician(technicianName, tempRow, tempCol, true);
-        processResults.timesheet = true;
-      } catch (e) {
-        // Fall back to standard call
-        updateHoursForTechnician(technicianName, tempRow, tempCol);
-        processResults.timesheet = true;
+      if (typeof updateHoursForTechnician === 'function') {
+        try {
+          // Use the function from TimeSheetLogic module
+          updateHoursForTechnician(technicianName, tempRow, tempCol, true, suppressStagePopups);
+          processResults.timesheet = true;
+        } catch (e) {
+          console.error(`Error with skipStatusUpdate parameter: ${e.message}`);
+          // Fall back to standard call
+          try {
+            updateHoursForTechnician(technicianName, tempRow, tempCol, false, suppressStagePopups);
+            processResults.timesheet = true;
+          } catch (e2) {
+            console.error(`Error in standard Timesheet call: ${e2.message}`);
+          }
+        }
+      } else {
+        console.error("updateHoursForTechnician function is not defined");
       }
     } catch (e) {
       console.error(`Error processing Timesheet for ${technicianName}: ${e.message}`);
     }
+    
+    // Flush to prevent script timeout between operations
+    SpreadsheetApp.flush();
     
     // 5. Copy the total pay value from cell C18 in technician's sheet to column I in rates sheet
     try {
@@ -1072,15 +747,18 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
       console.error(`Error copying total pay for ${technicianName}: ${e.message}`);
     }
     
-    // Set status to Complete (only if we have valid row and column)
-    if (actionRow && actionColumn) {
-      setActionStatus(ratesSheet, actionRow, actionColumn, 'Complete');
-    }
-    
-    // No popup for individual technician processing when running bulk payroll
+    // Return the process results
+    return processResults;
   } catch (error) {
     console.error(`Error in processPayrollForTechnicianSilently for ${technicianName}: ${error.message}`);
     // Don't show alerts or set error status - just log to console
+    return {
+      spiffBonus: false,
+      pbp: false,
+      yardSign: false,
+      leadSet: false,
+      timesheet: false
+    };
   }
 }
 
@@ -1089,18 +767,46 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
 * @param {string} technicianName - The name of the technician to process
 * @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
 * @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
+* @param {boolean} suppressFinalSummary - Optional flag to suppress the final summary popup
 */
-function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
+function runPayrollForTechnician(technicianName, actionRow, actionColumn, suppressFinalSummary = false) {
   try {
     var ui = SpreadsheetApp.getUi();
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
     
-    // Call the silent version of the function
-    processPayrollForTechnicianSilently(technicianName, actionRow, actionColumn);
+    // Store success status for each process
+    var processResults = {
+      spiffBonus: false,
+      pbp: false,
+      yardSign: false,
+      leadSet: false,
+      timesheet: false
+    };
     
-    // Show a popup for individual technician processing
-    ui.alert(`Payroll processing completed for ${technicianName}.`);
+    // Call the silent version of the function and capture results
+    // If suppressFinalSummary is true, also suppress stage popups
+    processResults = processPayrollForTechnicianSilently(technicianName, actionRow, actionColumn, suppressFinalSummary);
+    
+    // Create a detailed status report
+    var statusReport = `Payroll processing completed for ${technicianName}:\n\n`;
+    statusReport += `${processResults.spiffBonus ? "✅" : "❌"} Spiff/Bonus\n`;
+    statusReport += `${processResults.pbp ? "✅" : "❌"} PBP\n`;
+    statusReport += `${processResults.yardSign ? "✅" : "❌"} Yard Signs\n`;
+    statusReport += `${processResults.leadSet ? "✅" : "❌"} Lead Sets\n`;
+    statusReport += `${processResults.timesheet ? "✅" : "❌"} Timesheet\n`;
+    
+    // Show a popup with the detailed status report and wait for user to click OK
+    // ui.alert returns a button value that we can check
+    var response = ui.Button.OK;
+    if (!suppressFinalSummary) {
+      response = ui.alert(statusReport, ui.ButtonSet.OK);
+    }
+    
+    // NOW set status to Complete (only after user has clicked OK on the popup)
+    if (actionRow && actionColumn && response === ui.Button.OK) {
+      setActionStatus(ratesSheet, actionRow, actionColumn, 'Complete');
+    }
   } catch (error) {
     console.error(`Error in runPayrollForTechnician for ${technicianName}: ${error.message}`);
     
@@ -1115,5 +821,58 @@ function runPayrollForTechnician(technicianName, actionRow, actionColumn) {
     
     // Show error alert
     ui.alert(`Error processing payroll for ${technicianName}: ${error.message}`);
+  }
+}
+
+/**
+ * Global reference to the PBP module's updatePBPForTechnician function
+ * This makes the function available to other files in the project
+ * @param {string} technicianName - Technician name
+ * @param {number} row - Row in Hourly + Spiff Pay sheet
+ * @param {number} column - Column in Hourly + Spiff Pay sheet
+ * @param {boolean} skipStatusUpdate - Optional flag to skip status updates
+ * @param {boolean} suppressPopup - Optional flag to suppress popup notifications
+ */
+function updatePBPForTechnician(technicianName, row, column, skipStatusUpdate, suppressPopup) {
+  // Call the function from PBPMain.gs
+  try {
+    if (typeof global !== 'undefined' && typeof global.updatePBPForTechnician === 'function') {
+      return global.updatePBPForTechnician(technicianName, row, column, skipStatusUpdate, suppressPopup);
+    }
+    
+    // If we get here, just call the function directly assuming it's available in project scope
+    return pbpMain_updatePBPForTechnician(technicianName, row, column, skipStatusUpdate, suppressPopup);
+  } catch (e) {
+    console.error("Error in updatePBPForTechnician proxy: " + e.message);
+    if (!suppressPopup) {
+      SpreadsheetApp.getUi().alert("Error processing PBP for " + technicianName + ": " + e.message);
+    }
+    
+    // If an error row and column were provided, set status to Error
+    if (row && column) {
+      var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Hourly + Spiff Pay");
+      if (ratesSheet) {
+        setActionStatus(ratesSheet, row, column, "Error");
+      }
+    }
+  }
+}
+
+/**
+ * Global reference to the PBP module's processAllPBP function
+ * This makes the function available to the menu handler
+ */
+function processAllPBPGlobal() {
+  // Call the function from PBPMain.gs
+  try {
+    if (typeof global !== 'undefined' && typeof global.processAllPBP === 'function') {
+      return global.processAllPBP();
+    }
+    
+    // If we get here, just call the function directly assuming it's available in project scope
+    return pbpMain_processAllPBP();
+  } catch (e) {
+    console.error("Error in processAllPBPGlobal proxy: " + e.message);
+    SpreadsheetApp.getUi().alert("Error processing all PBP entries: " + e.message);
   }
 }

@@ -59,8 +59,9 @@ function yardSignSetActionStatus(ratesSheet, row, col, status) {
 * @param {number} row - The row in the rates sheet where the action was triggered.
 * @param {number} column - The column in the rates sheet where the action was triggered.
 * @param {boolean} skipStatusUpdate - Optional flag to skip status updates (for batch processing)
+* @param {boolean} suppressPopup - Optional flag to suppress popup notifications
 */
-function updateYardSignForTechnician(techName, row, column, skipStatusUpdate) {
+function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, suppressPopup = false) {
   // Initialize the module
   initYardSign();
   
@@ -83,7 +84,9 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate) {
       console.error("Error ensuring Yard Sign sheet exists: " + sheetError.message);
       if (!skipStatusUpdate) {
         yardSignSetActionStatus(ratesSheet, row, column, 'Error');
-        ui.alert("Error: Could not ensure Yard Sign sheet exists. " + sheetError.message);
+        if (!suppressPopup) {
+          ui.alert("Error: Could not ensure Yard Sign sheet exists. " + sheetError.message);
+        }
       }
       return;
     }
@@ -99,7 +102,9 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate) {
       console.error("Technician sheet not found for: " + techName);
       if (!skipStatusUpdate) {
         yardSignSetActionStatus(ratesSheet, row, column, 'Error');
-        ui.alert("Error: Technician sheet not found for " + techName);
+        if (!suppressPopup) {
+          ui.alert("Error: Technician sheet not found for " + techName);
+        }
       }
       return;
     }
@@ -145,7 +150,9 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate) {
           // Set status to Complete
           if (!skipStatusUpdate) {
             yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
-            ui.alert(`Yard Sign processing skipped for ${techName}.\n\nReason: Apprentice with 0% commission rate. No Yard Sign pay is earned.`);
+            if (!suppressPopup) {
+              ui.alert(`Yard Sign processing skipped for ${techName}.\n\nReason: Apprentice with 0% commission rate. No Yard Sign pay is earned.`);
+            }
           }
           
           return;
@@ -166,7 +173,9 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate) {
       console.error("Error calculating yard sign entries: " + calcError.message);
       if (!skipStatusUpdate) {
         yardSignSetActionStatus(ratesSheet, row, column, 'Error');
-        ui.alert("Error calculating yard sign entries for " + techName + ".\n\n" + calcError.message);
+        if (!suppressPopup) {
+          ui.alert("Error calculating yard sign entries for " + techName + ".\n\n" + calcError.message);
+        }
       }
       return;
     }
@@ -176,7 +185,9 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate) {
       console.log("No yard sign entries found for: " + techName);
       if (!skipStatusUpdate) {
         yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
-        ui.alert("No yard sign entries found for " + techName + " in the Yard Sign sheet for this period.");
+        if (!suppressPopup) {
+          ui.alert("No yard sign entries found for " + techName + " in the Yard Sign sheet for this period.");
+        }
       }
       return;
     }
@@ -189,7 +200,9 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate) {
       console.error("Error writing yard sign data: " + writeError.message);
       if (!skipStatusUpdate) {
         yardSignSetActionStatus(ratesSheet, row, column, 'Error');
-        ui.alert("Error writing yard sign data: " + writeError.message);
+        if (!suppressPopup) {
+          ui.alert("Error writing yard sign data: " + writeError.message);
+        }
       }
       return;
     }
@@ -229,14 +242,18 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate) {
       summaryInfo.push("• Amount: $25.00");
     }
     
-    ui.alert(summaryInfo.join("\n"));
+    if (!suppressPopup) {
+      ui.alert(summaryInfo.join("\n"));
+    }
     
   } catch (e) {
     console.error("Error in updateYardSignForTechnician: " + e.message);
     if (ratesSheet && row && column) {
       yardSignSetActionStatus(ratesSheet, row, column, 'Error');
     }
-    ui.alert("Error updating yard signs: " + e.message);
+    if (!suppressPopup) {
+      ui.alert("Error updating yard signs: " + e.message);
+    }
   }
 }
 

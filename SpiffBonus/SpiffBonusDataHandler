@@ -182,9 +182,10 @@ function writeSpiffDataWithPreservation(sheet, newSpiffData, customerNameColInde
  * @param {Sheet} techSheet The technician's sheet object.
  * @param {string} technicianName The name of the technician being processed.
  * @param {Sheet} spiffBonusSheet The 'Spiff/Bonus' sheet object.
+ * @param {boolean} suppressPopup Optional flag to suppress popups, defaults to false.
  * @return {Object} Result object with entryCount and totalAmount properties.
  */
-function processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet) {
+function processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet, suppressPopup = false) {
   try {
     console.log(`Starting Spiff/Bonus data processing for: ${technicianName}`);
     

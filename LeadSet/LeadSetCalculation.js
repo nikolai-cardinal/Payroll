@@ -241,7 +241,7 @@ function writeLeadEntriesFallback(techSheet, leadEntries) {
  */
 function updateLeadSummaryFallback(techSheet, leadCount, totalPayment) {
   techSheet.getRange(14, 2).setValue(leadCount);
-  const totalCell = techSheet.getRange(13, 3);
+  const totalCell = techSheet.getRange(14, 3);
   totalCell.setValue(totalPayment);
   totalCell.setNumberFormat('$#,##0.00');
 }
@@ -272,6 +272,7 @@ function calculateLeadCommission(revenue) {
   
   return {
     amount: roundedAmount,
-    percentage: percentage
+    percentage: percentage,
+    description: `${percentage}% commission on ${revenue.toLocaleString('en-US', {style: 'currency', currency: 'USD'})}`
   };
 } 

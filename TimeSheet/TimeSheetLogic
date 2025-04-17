@@ -1,6 +1,6 @@
 /**
- * Cardinal Payroll System - Timesheet Actions
- * This script handles updating technician hours from the Time Sheet.
+ * Cardinal Payroll System - Timesheet Logic
+ * This script handles all timesheet-related functionality
  */
 
 /**
@@ -84,6 +84,7 @@ function getTimeSheetMapping() {
         dateColumn: 2,
         regHoursColumn: 3,
         otHoursColumn: 4,
+        dtHoursColumn: 5,
         dataStartRow: 2
       };
     }
@@ -93,7 +94,8 @@ function getTimeSheetMapping() {
       nameColumn: findColumnByHeaderForTimesheet(timeSheet, 'Employee Name', headerRow - 1),
       dateColumn: findColumnByHeaderForTimesheet(timeSheet, 'Date', headerRow - 1),
       regHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'Reg Hours', headerRow - 1),
-      otHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'OT Hours', headerRow - 1)
+      otHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'OT Hours', headerRow - 1),
+      dtHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'DT Hours', headerRow - 1)
     };
     
     // If any columns are not found, fall back to the known structure
@@ -101,6 +103,7 @@ function getTimeSheetMapping() {
     if (mapping.dateColumn === -1) mapping.dateColumn = 2;  // B column
     if (mapping.regHoursColumn === -1) mapping.regHoursColumn = 3;  // C column
     if (mapping.otHoursColumn === -1) mapping.otHoursColumn = 4;  // D column
+    if (mapping.dtHoursColumn === -1) mapping.dtHoursColumn = 5;  // E column
     
     mapping.dataStartRow = 2; // First row with actual data (after headers)
     
@@ -113,6 +116,7 @@ function getTimeSheetMapping() {
       dateColumn: 2,
       regHoursColumn: 3,
       otHoursColumn: 4,
+      dtHoursColumn: 5,
       dataStartRow: 2
     };
   }
@@ -251,8 +255,10 @@ function formatHoursToHM(decimalHours) {
  * @param {string} technicianName - The name of the technician to update
  * @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
  * @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
+ * @param {boolean} skipStatusUpdate - Optional flag to skip updating status (for batch processing)
+ * @param {boolean} suppressPopup - Optional flag to suppress popup notifications
  */
-function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
+function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipStatusUpdate, suppressPopup = false) {
   console.log("Starting updateHoursForTechnician for: " + technicianName);
   
   try {
@@ -261,10 +267,12 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
     var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
     
     if (!timeSheetTab) {
-      SpreadsheetApp.getUi().alert('Time Sheet tab not found!');
+      if (!skipStatusUpdate && !suppressPopup) {
+        SpreadsheetApp.getUi().alert('Time Sheet tab not found!');
+      }
       
       // Reset the action dropdown
-      if (ratesSheet && actionRow && actionColumn) {
+      if (ratesSheet && actionRow && actionColumn && !skipStatusUpdate) {
         ratesSheet.getRange(actionRow, actionColumn).setValue("Ready");
       }
       return;
@@ -278,10 +286,12 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
     
     // Check that the time sheet has data
     if (timeSheetData.length < timeMapping.dataStartRow) {
-      SpreadsheetApp.getUi().alert('Time Sheet data is not in the expected format!');
+      if (!skipStatusUpdate && !suppressPopup) {
+        SpreadsheetApp.getUi().alert('Time Sheet data is not in the expected format!');
+      }
       
       // Reset the action dropdown
-      if (ratesSheet && actionRow && actionColumn) {
+      if (ratesSheet && actionRow && actionColumn && !skipStatusUpdate) {
         ratesSheet.getRange(actionRow, actionColumn).setValue("Ready");
       }
       return;
@@ -293,6 +303,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
     // Calculate hours for the specific technician
     var regHours = 0;
     var otHours = 0;
+    var dtHours = 0;
     
     // Skip the header rows
     for (var i = timeMapping.dataStartRow - 1; i < timeSheetData.length; i++) {
@@ -303,15 +314,17 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
       if (name === technicianName) {
         var regHoursValue = parseFloat(row[timeMapping.regHoursColumn - 1] || 0);
         var otHoursValue = parseFloat(row[timeMapping.otHoursColumn - 1] || 0);
+        var dtHoursValue = parseFloat(row[timeMapping.dtHoursColumn - 1] || 0);
         
-        console.log("Found hours for " + name + ": Reg=" + regHoursValue + ", OT=" + otHoursValue);
+        console.log("Found hours for " + name + ": Reg=" + regHoursValue + ", OT=" + otHoursValue + ", DT=" + dtHoursValue);
         
         regHours += regHoursValue;
         otHours += otHoursValue;
+        dtHours += dtHoursValue;
       }
     }
     
-    console.log("Total hours for " + technicianName + ": Reg=" + regHours + ", OT=" + otHours);
+    console.log("Total hours for " + technicianName + ": Reg=" + regHours + ", OT=" + otHours + ", DT=" + dtHours);
     
     // Try to find the technician's sheet
     var techSheet;
@@ -322,10 +335,12 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
     }
     
     if (!techSheet) {
-      SpreadsheetApp.getUi().alert('Could not find a sheet for technician: ' + technicianName);
+      if (!skipStatusUpdate && !suppressPopup) {
+        SpreadsheetApp.getUi().alert('Could not find a sheet for technician: ' + technicianName);
+      }
       
       // Reset the action dropdown
-      if (ratesSheet && actionRow && actionColumn) {
+      if (ratesSheet && actionRow && actionColumn && !skipStatusUpdate) {
         ratesSheet.getRange(actionRow, actionColumn).setValue("Ready");
       }
       return;
@@ -342,6 +357,9 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
     
     // Update the Overtime Hours
     techSheet.getRange(mapping.otHoursRow, mapping.valueColumn).setValue(otHours);
+    
+    // Update the Double Time Hours (using PTO row as double time)
+    techSheet.getRange(mapping.ptoHoursRow, mapping.valueColumn).setValue(dtHours);
     
     // Wait a moment for calculations to update
     SpreadsheetApp.flush();
@@ -375,15 +393,18 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
     }
     
     // Change the action dropdown to "Complete"
-    if (ratesSheet && actionRow && actionColumn) {
+    if (ratesSheet && actionRow && actionColumn && !skipStatusUpdate) {
       ratesSheet.getRange(actionRow, actionColumn).setValue("Complete");
     }
     
-    SpreadsheetApp.getUi().alert(
-      `Hours and Pay Period updated for ${technicianName}.\n` +
-      `Regular Hours: ${formatHoursToHM(regHours)}\n` +
-      `Overtime Hours: ${formatHoursToHM(otHours)}`
-    );
+    if (!skipStatusUpdate && !suppressPopup) {
+      SpreadsheetApp.getUi().alert(
+        `Hours and Pay Period updated for ${technicianName}.\n` +
+        `Regular Hours: ${formatHoursToHM(regHours)}\n` +
+        `Overtime Hours: ${formatHoursToHM(otHours)}\n` +
+        `Double Time Hours: ${formatHoursToHM(dtHours)}`
+      );
+    }
     
     console.log("Successfully updated hours for " + technicianName);
     
@@ -392,7 +413,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
     
     // If there was an error, reset the action dropdown
     try {
-      if (actionRow && actionColumn) {
+      if (actionRow && actionColumn && !skipStatusUpdate) {
         var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Hourly + Spiff Pay');
         if (ratesSheet) {
           ratesSheet.getRange(actionRow, actionColumn).setValue("Ready");
@@ -402,6 +423,140 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn) {
       console.error("Error resetting dropdown: " + e.message);
     }
     
-    SpreadsheetApp.getUi().alert("Error updating timesheet: " + error.message);
+    if (!skipStatusUpdate && !suppressPopup) {
+      SpreadsheetApp.getUi().alert("Error updating timesheet: " + error.message);
+    }
   }
 }
+
+/**
+ * Menu handler for processing all technician timesheets
+ * Ignores action column status completely
+ */
+function processAllTimesheets() {
+  try {
+    var ui = SpreadsheetApp.getUi();
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var timeSheet = ss.getSheetByName('Time Sheet');
+    
+    if (!ratesSheet) {
+      ui.alert('Error: Could not find "Hourly + Spiff Pay" sheet.');
+      return;
+    }
+    
+    if (!timeSheet) {
+      ui.alert('Error: Could not find "Time Sheet" sheet.');
+      return;
+    }
+    
+    // Get technicians with sheets
+    var ratesMapping = getRatesSheetMapping();
+    var dataRange = ratesSheet.getRange(ratesMapping.dataStartRow, ratesMapping.nameColumn, 
+                                       ratesSheet.getLastRow() - ratesMapping.dataStartRow + 1, 1);
+    var technicianNames = dataRange.getValues().flat().filter(function(name) {
+      return name && typeof name === 'string' && name.trim() !== '';
+    });
+    
+    if (technicianNames.length === 0) {
+      ui.alert('No technicians found in Hourly + Spiff Pay sheet.');
+      return;
+    }
+    
+    var processed = [];
+    var skipped = [];
+    var errors = [];
+    
+    // Process each technician
+    for (var i = 0; i < technicianNames.length; i++) {
+      var techName = technicianNames[i];
+      var techSheet = ss.getSheetByName(techName);
+      
+      if (!techSheet) {
+        skipped.push(techName + ' (Sheet not found)');
+        continue;
+      }
+      
+      try {
+        // Use updateHoursForTechnician with skipStatusUpdate flag
+        updateHoursForTechnician(techName, null, null, true);
+        
+        // Get the updated hours from the technician's sheet to show in summary
+        var mapping = getTechnicianSheetMappingForTimesheet(techSheet);
+        var regHours = techSheet.getRange(mapping.regHoursRow, mapping.valueColumn).getValue() || 0;
+        var otHours = techSheet.getRange(mapping.otHoursRow, mapping.valueColumn).getValue() || 0;
+        var dtHours = techSheet.getRange(mapping.ptoHoursRow, mapping.valueColumn).getValue() || 0;
+        
+        // Add to processed list
+        processed.push({
+          name: techName,
+          regHours: regHours,
+          otHours: otHours,
+          dtHours: dtHours
+        });
+        
+      } catch (err) {
+        errors.push(techName + ': ' + err.message);
+        console.error("Error processing " + techName + ": " + err.message);
+      }
+    }
+    
+    // Display summary message
+    var summaryMessage = [];
+    summaryMessage.push("TIMESHEET PROCESSING COMPLETE");
+    summaryMessage.push("\nSUMMARY:");
+    summaryMessage.push("• Total Technicians Processed: " + processed.length);
+    
+    if (processed.length > 0) {
+      summaryMessage.push("\nDETAILS BY TECHNICIAN:");
+      
+      for (var k = 0; k < processed.length; k++) {
+        var techInfo = processed[k];
+        summaryMessage.push("\n" + techInfo.name + ":");
+        summaryMessage.push("• Regular Hours: " + formatHoursToHM(techInfo.regHours));
+        summaryMessage.push("• Overtime Hours: " + formatHoursToHM(techInfo.otHours));
+        summaryMessage.push("• Double Time Hours: " + formatHoursToHM(techInfo.dtHours));
+      }
+    }
+    
+    // We'll still log skipped and errors to console but not show them in the UI
+    if (skipped.length > 0) {
+      console.log("Skipped technicians: " + skipped.join(", "));
+    }
+    
+    if (errors.length > 0) {
+      console.log("Errors: " + errors.join(", "));
+    }
+    
+    // Show the detailed summary (without skipped/errors sections)
+    ui.alert(summaryMessage.join("\n"));
+    
+  } catch (e) {
+    console.error("Error in processAllTimesheets: " + e.message);
+    SpreadsheetApp.getUi().alert("Error processing timesheets: " + e.message);
+  }
+}
+
+// Helper function to get rates sheet mapping
+// Declared here to avoid dependency issues but might call the external function
+function getRatesSheetMapping() {
+  // Try to use the function from SpiffBonusUtilities first
+  try {
+    // This assumes SpiffBonusUtilities.gs is loaded
+    if (typeof SpiffBonusUtilities !== 'undefined' && 
+        typeof SpiffBonusUtilities.getRatesSheetMapping === 'function') {
+      return SpiffBonusUtilities.getRatesSheetMapping();
+    }
+  } catch (e) {
+    console.error("Error calling SpiffBonusUtilities.getRatesSheetMapping: " + e.message);
+  }
+  
+  // Fallback to a local definition
+  return {
+    nameColumn: 1,       // Column A - Technician name
+    positionColumn: 2,   // Column B - Position
+    rateColumn: 4,       // Column D - Base Rate
+    actionColumn: 7,     // Column G - Action column
+    dataStartRow: 3      // Data starts at row 3
+  };
+} 
