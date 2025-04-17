@@ -24,7 +24,7 @@
  *    - 4% for $30,000+
  * 4. Post the result in the technician's tab:
  *    - Update column E with customer name
- *    - Look for "lead" in column J and delete any existing entries
+ *    - Look for "L-E-A-D" in column J and delete any existing entries
  *    - Enter a report with:
  *      * Customer name (column E)
  *      * Business unit (column F)
@@ -55,6 +55,34 @@
  * 2. Replace existing entries rather than adding new rows
  * 3. Maintain proper formatting for currency and dates
  * 4. Handle errors gracefully with appropriate user feedback
+ */
+
+/**
+ * ENHANCED DATA HANDLING IMPLEMENTATION:
+ * The system uses a robust approach for deleting old data and adding new data:
+ * 
+ * 1. Intelligent Section Detection:
+ *    - Locates the "Install Customer Data" section using findInstallCustomerDataSection()
+ *    - Identifies section boundaries by finding the next section header with findNextSectionAfterInstall()
+ *    - Ensures changes are made only within the correct spreadsheet section
+ * 
+ * 2. Selective Data Clearing:
+ *    - Uses clearLeadDataInInstallSection() to only clear rows marked with "L-E-A-D" in column J
+ *    - Only clears columns E-J (5-10), preserving columns A-D
+ *    - Ensures data from other features remains untouched
+ * 
+ * 3. Smart Data Writing:
+ *    - smartWriteLeadDataToSheet() reuses existing rows when possible
+ *    - Updates existing rows first before looking for empty rows
+ *    - Clears excess rows if fewer new entries than existing rows
+ *    - Uses batch operations to minimize API calls
+ *    - Maintains proper formatting for dates and currency values
+ * 
+ * 4. Robust Error Handling:
+ *    - Includes validation checks before operations
+ *    - Logs detailed error information
+ *    - Handles edge cases gracefully (e.g., when no leads found)
+ *    - Preserves data integrity with transaction-like approach
  */
 
 /**

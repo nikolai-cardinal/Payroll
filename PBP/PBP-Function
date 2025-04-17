@@ -205,16 +205,38 @@
 
 /**
  * TECHNICIAN-SPECIFIC PROCESSING:
- * (Inferred - activities managed primarily by PBPMain and PBPSheetOperations)
- *
- * 1. Data Filtering: The process starts by isolating performance data relevant only to the specific technician being processed.
- * 2. Calculation Application: PBPCalculation applies the performance rules specifically using the filtered data for that technician.
- * 3. Sheet Interaction (PBPSheetOperations):
- *    - Identifies the correct target sheet for the technician.
- *    - Locates the designated PBP section within that sheet.
- *    - Clears previous PBP calculation results from that section.
- *    - Writes newly calculated, detailed PBP entries (e.g., per job or metric) into the section.
- *    - Updates the PBP summary row(s) specific to that technician's sheet.
- * 4. Handling Existing Data: Employs clear-and-write logic (via PBPSheetOperations) to ensure previous PBP calculations are removed before new ones are added, preventing data duplication or staleness.
- * 5. Formatting: Applies consistent formatting (dates, currency, notes, metric units) to the data written to the technician's sheet via PBPSheetOperations.
+ * The process of updating a technician's sheet with new PBP data happens through two key functions:
+ * 
+ * 1. Data Preparation and Filtering:
+ *    - The process starts by isolating performance data relevant only to the specific technician.
+ *    - PBPCalculation applies performance rules to this filtered data, generating a list of PBP entries.
+ * 
+ * 2. Sheet Clearing and Update Process (PBPSheetOperations.gs):
+ *    - Two main functions handle the data replacement process:
+ *      a) clearInstallDataSection(): Intelligently clears existing PBP entries
+ *         - Locates the "Install Customer Data" section using findInstallCustomerDataSection()
+ *         - Identifies the boundary by finding the next section header with findNextSectionAfterInstall()
+ *         - Uses findExistingPbpRows() to locate only rows containing "PBP" in column J
+ *         - Selectively clears only columns E-J (5-10) where Type="PBP", preserving all other data
+ * 
+ *      b) writePbpDataToSheet(): Handles writing new PBP data in a smart, efficient way
+ *         - Updates the top summary section with the total PBP amount
+ *         - Identifies existing PBP rows using findExistingPbpRows()
+ *         - Reuses existing rows first before looking for empty rows
+ *         - Updates existing rows where possible to minimize sheet disruption
+ *         - Clears excess rows if fewer new entries than existing rows
+ *         - Uses writeRemainingPbpEntries() to add entries when needed
+ * 
+ * 3. Smart Data Management:
+ *    - The system employs an "update in place" strategy that minimizes disruption to the sheet
+ *    - Only rows marked with "PBP" in column J are ever modified
+ *    - The process maintains proper formatting (date formats, currency formats)
+ *    - Technician names are automatically extracted from sheet names
+ *    - Split team information is intelligently formatted to exclude the current technician
+ *    - Apprentice status is clearly marked in the notes when applicable
+ *    - Error Handling:
+ *    - The process includes extensive validation and error trapping
+ *    - If no PBP entries are found, the system clears existing entries and sets the total to zero
+ *    - If sections can't be found, the system logs detailed information but doesn't throw errors
+ *    - All operations use console logging for debugging and tracking
  */ 
