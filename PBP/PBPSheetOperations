@@ -33,37 +33,23 @@ function writePbpDataToSheet(techSheet, allPbpEntries, totalTechnicianShare) {
     var dateObj = tryParseDate(entry.completionDate);
     var displayDate = dateObj ? Utilities.formatDate(dateObj, tz, "MM/dd/yyyy") : (entry.completionDate || "");
     
-    // Get technician name from the sheet name
-    var technicianName = techSheet.getName();
-    
-    // Format notes with just percentage and split team details (excluding current technician)
-    var percentageText = "(" + entry.splitPercentage.toFixed(1) + "%)";
-    
-    // Add apprentice information if applicable
-    if (entry.isApprentice) {
-      percentageText += " [Apprentice]";
-    }
-    
-    // Filter split team to exclude the current technician
-    var splitTeamText = "";
-    if (entry.splitDetails && entry.splitDetails.length > 0) {
-      // Create an array of team members excluding the current technician
-      var filteredTeam = [];
-      for (var i = 0; i < entry.splitDetails.length; i++) {
-        var member = entry.splitDetails[i];
-        // Only include if it doesn't contain the technician name
-        if (!member.includes(technicianName)) {
-          filteredTeam.push(member);
-        }
-      }
-      
-      // Only add split team text if there are other team members
-      if (filteredTeam.length > 0) {
-        splitTeamText = "\nSplit Team: " + filteredTeam.join(", ");
+    // --- Enhanced Notes Column --- 
+    var notesParts = [];
+    // Start with the tech's role and percentage for this job
+    notesParts.push(`${entry.roleForJob} (${entry.splitPercentage.toFixed(1)}%)`);
+
+    // Add the detailed team breakdown if available
+    if (entry.teamDetails) {
+      // Check if it was a solo job - the teamDetails will only contain the current tech
+      var teamMembers = entry.teamDetails.split(', ');
+      if (teamMembers.length > 1) {
+        notesParts.push(`Team: ${entry.teamDetails}`);
+      } else {
+        // Optional: Add specific text for solo jobs, or leave it out
+        // notesParts.push("Solo Job"); 
       }
     }
-    
-    var notesText = percentageText + splitTeamText;
+    var notesText = notesParts.join(' - '); // Join parts with a separator
     
     dataToWrite.push([
       entry.customerName || "",      // Column E: Customer Name

@@ -345,6 +345,47 @@ function processAllTimesheets() {
 }
 
 /**
+* Helper function to update cell C17 in a technician's sheet with the value from Column D of the Service sheet.
+* @param {Sheet} techSheet The technician's sheet object.
+* @param {string} techName The technician's name.
+*/
+function updateC17FromServiceSheet(techSheet, techName) {
+  console.log(`Attempting to update C17 for ${techName} from Service sheet.`);
+  if (!techSheet || !techName) {
+    console.error("updateC17FromServiceSheet: Missing techSheet or techName.");
+    return;
+  }
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var serviceSheet = ss.getSheetByName('Service');
+    if (!serviceSheet) {
+      console.warn(`Service sheet named 'Service' not found. Skipping update for ${techName}.`);
+    } else {
+      var serviceData = serviceSheet.getRange("A1:D" + serviceSheet.getLastRow()).getValues();
+      var foundTechInService = false;
+      var techNameLower = techName.trim().toLowerCase();
+
+      for (var serviceRow = 1; serviceRow < serviceData.length; serviceRow++) {
+        var nameInService = serviceData[serviceRow][0];
+        if (nameInService && nameInService.toString().trim().toLowerCase() === techNameLower) {
+          var valueToUpdate = serviceData[serviceRow][3];
+          console.log(`Found ${techName} in Service sheet row ${serviceRow + 1}. Value in Col D: ${valueToUpdate} (Type: ${typeof valueToUpdate})`);
+          techSheet.getRange(17, 3).setValue(valueToUpdate);
+          console.log(`Successfully updated C17 for ${techName} with value: ${valueToUpdate}`);
+          foundTechInService = true;
+          break;
+        }
+      }
+      if (!foundTechInService) {
+        console.warn(`Technician '${techName}' (case-insensitive) not found in Column A of Service sheet.`);
+      }
+    }
+  } catch (serviceError) {
+    console.error(`Error during Service sheet update for ${techName}: ${serviceError.message} Stack: ${serviceError.stack}`);
+  }
+}
+
+/**
 * Runs all payroll functions in sequence (Spiff/Bonus, PBP, Yard Signs, Timesheet)
 */
 function runFullPayroll() {
@@ -361,18 +402,24 @@ function runFullPayroll() {
     ui.alert("Starting full payroll process. This will run payroll for all technicians with existing sheets.");
     
     // Get the list of technicians from the rates sheet
-    var ratesMapping = getRatesSheetMapping();
+    var ratesMapping = getRatesSheetMapping(); // Make sure this mapping includes positionColumn (usually 2)
+    if (!ratesMapping || !ratesMapping.positionColumn) {
+       console.error("Rates mapping is missing or does not contain 'positionColumn'. Cannot filter skipped techs by department.");
+       ui.alert("Error: System configuration problem. Cannot determine technician departments.");
+       return;
+    }
     var technicianRange = ratesSheet.getRange(ratesMapping.dataStartRow, ratesMapping.nameColumn, 
                                              ratesSheet.getLastRow() - ratesMapping.dataStartRow + 1, 1);
     var technicianData = technicianRange.getValues();
     
     var techResults = []; // Store results for each technician
-    var skippedTechs = [];
+    var skippedTechs = []; // Initialize list for skipped 'Service' technicians
     var processedRowInfo = []; // Store row numbers for processed technicians
     
     // Process each technician individually
     for (var i = 0; i < technicianData.length; i++) {
       var techName = technicianData[i][0];
+      var rowIndex = ratesMapping.dataStartRow + i; // Calculate current row index
       
       // Skip empty rows
       if (!techName || techName.toString().trim() === "") {
@@ -382,14 +429,35 @@ function runFullPayroll() {
       // Check if technician sheet exists before processing
       var techSheet = ss.getSheetByName(techName);
       if (!techSheet) {
-        console.log(`Skipping ${techName} - sheet does not exist`);
-        skippedTechs.push(`${techName} (no sheet)`);
-        continue; // Skip to next technician
+        console.log(`Technician sheet not found for: ${techName}. Checking department.`);
+        // Get the Department value from Column B for this technician's row
+        var deptValue = ""; 
+        try {
+          // Get value from the positionColumn defined in ratesMapping
+          deptValue = ratesSheet.getRange(rowIndex, ratesMapping.positionColumn).getValue().toString().trim();
+          console.log(`Dept for ${techName} (row ${rowIndex}): '${deptValue}'`);
+        } catch (e) {
+          console.error(`Error getting department for ${techName} at row ${rowIndex}: ${e.message}`);
+          // Continue without adding to skipped list if dept cannot be read
+        }
+
+        // Only add to skipped list if Dept contains 'Service' (case-insensitive)
+        if (deptValue.toLowerCase().includes('service')) {
+          console.log(`${techName} is in 'Service' dept and has no sheet. Adding to skipped list.`);
+          skippedTechs.push(`${techName} (no sheet)`); 
+        } else {
+           console.log(`${techName} does not have 'Service' in dept ('${deptValue}') or sheet exists. Not adding to specific skipped list.`);
+        }
+        continue; // Skip to next technician regardless of department
       }
       
+      // --- Update C17 from Service Tab --- 
+      updateC17FromServiceSheet(techSheet, techName); // Call the new helper function
+      // --- End Update C17 ---
+
       // Find the row number for this technician
-      var rowIndex = ratesMapping.dataStartRow + i;
-      
+      // var rowIndex = ratesMapping.dataStartRow + i; // Already calculated above
+
       // Run payroll for this technician
       try {
         // Use our custom function and capture the results
@@ -408,7 +476,7 @@ function runFullPayroll() {
         });
       } catch (techError) {
         console.error(`Error processing payroll for ${techName}: ${techError.message}`);
-        skippedTechs.push(techName);
+        // Don't add to skippedTechs here as it's an error during processing, not a missing sheet
       }
     }
     
@@ -426,10 +494,15 @@ function runFullPayroll() {
         summaryMessage += `  ${tech.results.leadSet ? "✅" : "❌"} Lead Sets\n`;
         summaryMessage += `  ${tech.results.timesheet ? "✅" : "❌"} Timesheet\n`;
       }
+    } else {
+      summaryMessage += "No technicians with sheets were processed.\n"; // Added message if no results
     }
     
+    // Only add the "Skipped" section if there are technicians in the filtered list
     if (skippedTechs.length > 0) {
-      summaryMessage += `\nSkipped: ${skippedTechs.join(", ")}`;
+      summaryMessage += `\n\nSkipped (No Sheet & Dept='Service'): ${skippedTechs.join(", ")}`;
+    } else {
+      summaryMessage += "\n\nNo technicians from the 'Service' department were skipped due to missing sheets."; // Added clarification
     }
     
     // Show the summary alert and wait for user to click OK
@@ -439,13 +512,22 @@ function runFullPayroll() {
     if (response === ui.Button.OK) {
       for (var k = 0; k < processedRowInfo.length; k++) {
         var techInfo = processedRowInfo[k];
-        setActionStatus(ratesSheet, techInfo.row, techInfo.column, 'Complete');
+        // Check if ratesSheet is still valid before setting status
+        if (ratesSheet) {
+           setActionStatus(ratesSheet, techInfo.row, techInfo.column, 'Complete');
+        }
       }
     }
     
   } catch (e) {
-    console.error("Error in runFullPayroll: " + e.message);
-    SpreadsheetApp.getUi().alert("Error processing full payroll: " + e.message);
+    console.error("Error in runFullPayroll: " + e.message + " Stack: " + e.stack); // Added stack trace
+    // Check if ui object is available before calling alert
+    if (typeof ui !== 'undefined' && ui) {
+      ui.alert("Error processing full payroll: " + e.message);
+    } else {
+      // Fallback if ui isn't defined (e.g., error occurred very early)
+      SpreadsheetApp.getUi().alert("Error processing full payroll: " + e.message);
+    }
   }
 }
 
@@ -476,6 +558,10 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
       };
     }
     
+    // --- Update C17 from Service Tab --- 
+    updateC17FromServiceSheet(techSheet, technicianName); // Call the new helper function
+    // --- End Update C17 ---
+    
     // Set status to Processing (only if we have valid row and column)
     if (actionRow && actionColumn) {
       setActionStatus(ratesSheet, actionRow, actionColumn, 'Processing...');
@@ -501,193 +587,131 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
       tempCol = ratesMapping.actionColumn;
     }
     
-    // Check if technician has 0% commission
-    var has0PercentCommission = false;
-    try {
-      // First, initialize ratesMapping if not already done
-      if (!ratesMapping) {
-        ratesMapping = getRatesSheetMapping();
-      }
-      
-      // Get the technician's row data
-      var techRow = ratesSheet.getRange(tempRow, 1, 1, 10).getValues()[0];
-      var techTitle = techRow[ratesMapping.positionColumn - 1] || "";
-      var commissionPercentStr = techRow[7]; // Column H (0-based = 7)
-      
-      // Parse the commission percentage using the utility function
-      var commissionPercent = parsePercentage(commissionPercentStr);
-      
-      // Check if it's any technician with 0% commission
-      if (commissionPercent === 0) {
-        has0PercentCommission = true;
-        console.log(`Detected technician with 0% commission rate: ${technicianName}. Skipping PBP and Spiff/Bonus processing.`);
-      }
-    } catch (e) {
-      console.error(`Error checking commission status: ${e.message}`);
-      // Continue with processing to be safe
-    }
-    
     // Flush to ensure any previous operations are completed
     SpreadsheetApp.flush();
     
-    // 1. Process Spiff/Bonus - Only if not a technician with 0% commission
-    if (!has0PercentCommission) {
-      try {
-        var spiffBonusSheet = ss.getSheetByName('Spiff/Bonus');
-        if (spiffBonusSheet) {
-          // Check if processSpiffAndBonusData exists
-          if (typeof processSpiffAndBonusData === 'function') {
-            try {
-              processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet, suppressStagePopups);
-              processResults.spiffBonus = true;
-            } catch (e) {
-              console.error(`Error using processSpiffAndBonusData: ${e.message}. Falling back.`);
-              
-              // Fall back to the main function if it exists
-              if (typeof processSpiffAndBonus === 'function') {
-                processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, tempRow, tempCol, suppressStagePopups);
-                processResults.spiffBonus = true;
-              } else {
-                console.error("Neither processSpiffAndBonusData nor processSpiffAndBonus functions are defined");
-              }
-            }
-          } else if (typeof processSpiffAndBonus === 'function') {
-            // Try the alternative function
-            processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, tempRow, tempCol, suppressStagePopups);
+    // 1. Process Spiff/Bonus - Skip logic is now handled internally by the Spiff/Bonus module if needed based on Class 1
+    try {
+      var spiffBonusSheet = ss.getSheetByName('Spiff/Bonus');
+      if (spiffBonusSheet) {
+        // Check if processSpiffAndBonusData exists
+        if (typeof processSpiffAndBonusData === 'function') {
+          try {
+            processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet, suppressStagePopups);
             processResults.spiffBonus = true;
-          } else {
-            console.error("Spiff/Bonus functions are not defined");
+          } catch (e) {
+            console.error(`Error using processSpiffAndBonusData: ${e.message}. Falling back.`);
+            
+            // Fall back to the main function if it exists
+            if (typeof processSpiffAndBonus === 'function') {
+              processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, tempRow, tempCol, suppressStagePopups);
+              processResults.spiffBonus = true;
+            } else {
+              console.error("Neither processSpiffAndBonusData nor processSpiffAndBonus functions are defined");
+            }
           }
+        } else if (typeof processSpiffAndBonus === 'function') {
+          // Try the alternative function
+          processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, tempRow, tempCol, suppressStagePopups);
+          processResults.spiffBonus = true;
+        } else {
+          console.error("Spiff/Bonus functions are not defined");
         }
-      } catch (e) {
-        console.error(`Error processing Spiff/Bonus for ${technicianName}: ${e.message}`);
       }
-      
-      // Flush to prevent script timeout between modules
-      SpreadsheetApp.flush();
-    } else {
-      // Mark as skipped but successful since it's intentional
-      processResults.spiffBonus = true;
-      console.log(`Skipped Spiff/Bonus processing for technician with 0% commission: ${technicianName}`);
+    } catch (e) {
+      console.error(`Error processing Spiff/Bonus for ${technicianName}: ${e.message}`);
     }
     
-    // 2. Process PBP - Only if not a technician with 0% commission
-    if (!has0PercentCommission) {
-      try {
-        // Check if updatePBPForTechnician function exists before calling it
-        if (typeof updatePBPForTechnician === 'function') {
-          try {
-            updatePBPForTechnician(technicianName, tempRow, tempCol, true, suppressStagePopups);
-            processResults.pbp = true;
-          } catch (e) {
-            console.error(`Error with skipStatusUpdate parameter: ${e.message}`);
-            // Fall back to standard call
-            try {
-              updatePBPForTechnician(technicianName, tempRow, tempCol, false, suppressStagePopups);
-              processResults.pbp = true;
-            } catch (e2) {
-              console.error(`Error in standard PBP call: ${e2.message}`);
-            }
-          }
-        } else {
-          console.error("updatePBPForTechnician function is not defined");
-          // Mark as successful anyway to avoid error indicators in the UI
+    // 2. Process PBP - Skip logic for Class 1 is handled within updatePBPForTechnician
+    try {
+      // Check if updatePBPForTechnician function exists before calling it
+      if (typeof updatePBPForTechnician === 'function') {
+        try {
+          updatePBPForTechnician(technicianName, tempRow, tempCol, true, suppressStagePopups);
           processResults.pbp = true;
+        } catch (e) {
+          console.error(`Error with skipStatusUpdate parameter: ${e.message}`);
+          // Fall back to standard call
+          try {
+            updatePBPForTechnician(technicianName, tempRow, tempCol, false, suppressStagePopups);
+            processResults.pbp = true;
+          } catch (e2) {
+            console.error(`Error in standard PBP call: ${e2.message}`);
+          }
         }
-      } catch (e) {
-        console.error(`Error processing PBP for ${technicianName}: ${e.message}`);
+      } else {
+        console.error("updatePBPForTechnician function is not defined");
         // Mark as successful anyway to avoid error indicators in the UI
         processResults.pbp = true;
       }
-      
-      // Flush to prevent script timeout between modules
-      SpreadsheetApp.flush();
-    } else {
-      // Mark as skipped but successful since it's intentional
+    } catch (e) {
+      console.error(`Error processing PBP for ${technicianName}: ${e.message}`);
+      // Mark as successful anyway to avoid error indicators in the UI
       processResults.pbp = true;
-      console.log(`Skipped PBP processing for technician with 0% commission: ${technicianName}`);
     }
     
-    // 3. Process Yard Signs - Only if not a technician with 0% commission
-    if (!has0PercentCommission) {
-      try {
-        if (typeof initYardSign === 'function') {
-          initYardSign();
-          
-          if (typeof updateYardSignForTechnician === 'function') {
+    // 3. Process Yard Signs - Skip logic for Class 1 should be handled within its module if needed
+    try {
+      if (typeof initYardSign === 'function') {
+        initYardSign();
+        
+        if (typeof updateYardSignForTechnician === 'function') {
+          try {
+            updateYardSignForTechnician(technicianName, tempRow, tempCol, true, suppressStagePopups);
+            processResults.yardSign = true;
+          } catch (e) {
+            // Fall back to standard call
             try {
-              updateYardSignForTechnician(technicianName, tempRow, tempCol, true, suppressStagePopups);
+              updateYardSignForTechnician(technicianName, tempRow, tempCol, false, suppressStagePopups);
               processResults.yardSign = true;
-            } catch (e) {
-              // Fall back to standard call
-              try {
-                updateYardSignForTechnician(technicianName, tempRow, tempCol, false, suppressStagePopups);
-                processResults.yardSign = true;
-              } catch (e2) {
-                console.error(`Error in standard Yard Sign call: ${e2.message}`);
-              }
+            } catch (e2) {
+              console.error(`Error in standard Yard Sign call: ${e2.message}`);
             }
-          } else {
-            console.error("updateYardSignForTechnician function is not defined");
           }
         } else {
-          console.error("initYardSign function is not defined");
+          console.error("updateYardSignForTechnician function is not defined");
         }
-      } catch (e) {
-        console.error(`Error processing Yard Signs for ${technicianName}: ${e.message}`);
+      } else {
+        console.error("initYardSign function is not defined");
       }
-      
-      // Flush to prevent script timeout between modules
-      SpreadsheetApp.flush();
-    } else {
-      // Mark as skipped but successful since it's intentional
-      processResults.yardSign = true;
-      console.log(`Skipped Yard Signs processing for technician with 0% commission: ${technicianName}`);
+    } catch (e) {
+      console.error(`Error processing Yard Signs for ${technicianName}: ${e.message}`);
     }
     
-    // 3.5. Process Lead Sets - Only if not a technician with 0% commission
-    if (!has0PercentCommission) {
-      try {
-        // Always use updateLeadSetForTechnician when available
-        if (typeof updateLeadSetForTechnician === 'function') {
-          try {
-            // Use the main function that includes column I bracket information
-            const result = updateLeadSetForTechnician(ss, null, technicianName, tempRow, tempCol, suppressStagePopups);
-            processResults.leadSet = result && result.success;
-          } catch (e) {
-            console.error(`Error calling updateLeadSetForTechnician: ${e.message}`);
-          }
+    // 3.5. Process Lead Sets - Skip logic for Class 1 should be handled within its module if needed
+    try {
+      // Always use updateLeadSetForTechnician when available
+      if (typeof updateLeadSetForTechnician === 'function') {
+        try {
+          // Use the main function that includes column I bracket information
+          const result = updateLeadSetForTechnician(ss, null, technicianName, tempRow, tempCol, suppressStagePopups);
+          processResults.leadSet = result && result.success;
+        } catch (e) {
+          console.error(`Error calling updateLeadSetForTechnician: ${e.message}`);
         }
-        else {
-          // Fallback to direct functions if updateLeadSetForTechnician isn't available
-          var leadSetSheet = ss.getSheetByName('Lead Set');
-          if (leadSetSheet && typeof getLeadDataForTechnician === 'function' && 
-              typeof writeLeadSetDataToSheet === 'function') {
-            try {
-              // Get lead data for this technician
-              var leadData = getLeadDataForTechnician(leadSetSheet, technicianName);
-              
-              // Write the lead data to the technician's sheet
-              writeLeadSetDataToSheet(techSheet, leadData);
-              
-              processResults.leadSet = true;
-            } catch (e) {
-              console.error(`Error processing Lead Set for ${technicianName}: ${e.message}`);
-            }
-          } else {
-            console.log(`Lead Set sheet not found or required functions missing, skipping Lead Set processing for ${technicianName}`);
-          }
-        }
-      } catch (e) {
-        console.error(`Error in Lead Set processing for ${technicianName}: ${e.message}`);
       }
-      
-      // Flush to prevent script timeout between modules
-      SpreadsheetApp.flush();
-    } else {
-      // Mark as skipped but successful since it's intentional
-      processResults.leadSet = true;
-      console.log(`Skipped Lead Sets processing for technician with 0% commission: ${technicianName}`);
+      else {
+        // Fallback to direct functions if updateLeadSetForTechnician isn't available
+        var leadSetSheet = ss.getSheetByName('Lead Set');
+        if (leadSetSheet && typeof getLeadDataForTechnician === 'function' && 
+            typeof writeLeadSetDataToSheet === 'function') {
+          try {
+            // Get lead data for this technician
+            var leadData = getLeadDataForTechnician(leadSetSheet, technicianName);
+            
+            // Write the lead data to the technician's sheet
+            writeLeadSetDataToSheet(techSheet, leadData);
+            
+            processResults.leadSet = true;
+          } catch (e) {
+            console.error(`Error processing Lead Set for ${technicianName}: ${e.message}`);
+          }
+        } else {
+          console.log(`Lead Set sheet not found or required functions missing, skipping Lead Set processing for ${technicianName}`);
+        }
+      }
+    } catch (e) {
+      console.error(`Error in Lead Set processing for ${technicianName}: ${e.message}`);
     }
     
     // 4. Process Timesheet

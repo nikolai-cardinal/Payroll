@@ -37,39 +37,24 @@ function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn,
       setActionStatus(ratesSheet, actionRow, actionColumn, "Processing...");
     }
     
-    // --- Check if the technician is an apprentice with 0% commission rate ---
-    var isApprenticeWith0Percent = false;
+    // --- NEW: Check if the technician is Class 1 and skip if so ---
     try {
-      // Find the technician's row in the rates sheet
-      var technicianRow = -1;
-      var ratesData = ratesSheet.getDataRange().getValues();
-      
-      for (var i = 1; i < ratesData.length; i++) { // Skip header row
-        var row = ratesData[i];
-        var name = row[0]; // Column A - Technician name
-        
-        if (name && name.toString().trim().toLowerCase() === technicianName.toLowerCase()) {
-          technicianRow = i;
+      // Find the technician's row in the rates sheet (re-find or use cached data if available)
+      var technicianRowData = null;
+      var ratesDataForCheck = ratesSheet.getDataRange().getValues(); // Consider caching this if run often
+      for (var i = 1; i < ratesDataForCheck.length; i++) {
+        if (ratesDataForCheck[i][0] && ratesDataForCheck[i][0].toString().trim().toLowerCase() === technicianName.toLowerCase()) {
+          technicianRowData = ratesDataForCheck[i];
           break;
         }
       }
-      
-      if (technicianRow >= 0) {
-        var title = ratesData[technicianRow][2]; // Column C - Position
-        var commissionPercentStr = ratesData[technicianRow][7]; // Column H - Commission %
-        
-        // Parse the commission percentage
-        var commissionPercent = 0;
-        if (typeof commissionPercentStr === "string" && commissionPercentStr.includes("%")) {
-          commissionPercent = parseFloat(commissionPercentStr.replace("%", "")) || 0;
-        } else if (typeof commissionPercentStr === "number") {
-          commissionPercent = commissionPercentStr < 1 ? commissionPercentStr * 100 : commissionPercentStr;
-        }
-        
-        // Check if it's an apprentice with 0% commission
-        if (title && title.toString().includes("Apprentice") && commissionPercent === 0) {
-          isApprenticeWith0Percent = true;
-          console.log(`Skipping PBP processing for apprentice with 0% commission: ${technicianName}`);
+
+      if (technicianRowData) {
+        var title = technicianRowData[2]; // Column C - Position
+        var techInfo = getTechnicianClassAndRole(title); // Call from PBPCalculation
+
+        if (techInfo.class === 1) {
+          console.log(`Skipping PBP processing for Class 1 technician: ${technicianName}`);
           
           // Update summary to 0 and clear section
           updateTopSummaryInstallPay(techSheet, 0, 0);
@@ -82,16 +67,20 @@ function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn,
           
           // Show popup with info about skipping
           if (!skipStatusUpdate && !suppressPopup) {
-            ui.alert(`PBP processing skipped for ${technicianName}.\n\nReason: Apprentice with 0% commission rate. No PBP is earned.`);
+            ui.alert(`PBP processing skipped for ${technicianName}.
+
+Reason: Class 1 technicians are not eligible for PBP.`);
           }
-          
-          return;
+          return; // Exit the function early
         }
+      } else {
+         console.warn(`Could not find technician ${technicianName} in rates sheet for Class 1 check.`);
       }
     } catch (e) {
-      console.error(`Error checking apprentice status: ${e.message}`);
-      // Continue with processing to be safe
+      console.error(`Error checking Class 1 status: ${e.message}`);
+      // Continue with processing to be safe, but log the error
     }
+    // --- End NEW Class 1 Check ---
 
     // Get Data for lookups - Fetch ONCE for efficiency
     var spiffBonusData = spiffBonusSheet.getDataRange().getValues();
@@ -156,13 +145,13 @@ function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn,
      summaryInfo.push("• Job Total PBP: $" + entry.totalPbp.toFixed(2));
      summaryInfo.push("• Tech Role (Job): " + entry.roleForJob + " (" + entry.splitPercentage.toFixed(1) + "%)");
      summaryInfo.push("• Calculated Tech Share: $" + entry.technicianShare.toFixed(2));
-     
-     if (entry.splitDetails && entry.splitDetails.length > 1) {
-       summaryInfo.push("• Split Team: " + entry.splitDetails.join(", "));
-     } else if (entry.splitDetails && entry.splitDetails.length === 1) {
-        summaryInfo.push("• Split Team: " + entry.splitDetails[0] + " (100%)");
+
+     // Replace the old split logic with the new teamDetails string
+     if (entry.teamDetails) {
+       summaryInfo.push("• Team Split Details: " + entry.teamDetails);
      } else {
-        summaryInfo.push("• Split Team: N/A (No split applicable)");
+       // Fallback if teamDetails is somehow missing (shouldn't happen with current PBPCalculation)
+       summaryInfo.push("• Split Team: Details unavailable");
      }
     }
     if (!suppressPopup) {
@@ -333,52 +322,38 @@ function updatePBPForTechnicianAll(technicianName) {
       throw new Error("Required sheet not found: " + missingSheet);
     }
     
-    // --- Check if the technician is an apprentice with 0% commission rate ---
-    var isApprenticeWith0Percent = false;
+    // --- NEW: Check if the technician is Class 1 and skip if so ---
     try {
-      // Find the technician's row in the rates sheet
-      var technicianRow = -1;
-      var ratesData = ratesSheet.getDataRange().getValues();
-      
-      for (var i = 1; i < ratesData.length; i++) { // Skip header row
-        var row = ratesData[i];
-        var name = row[0]; // Column A - Technician name
-        
-        if (name && name.toString().trim().toLowerCase() === technicianName.toLowerCase()) {
-          technicianRow = i;
+      // Find the technician's row in the rates sheet (re-find or use cached data if available)
+      var technicianRowData = null;
+      var ratesDataForCheck = ratesSheet.getDataRange().getValues(); // Consider caching this if run often
+      for (var i = 1; i < ratesDataForCheck.length; i++) {
+        if (ratesDataForCheck[i][0] && ratesDataForCheck[i][0].toString().trim().toLowerCase() === technicianName.toLowerCase()) {
+          technicianRowData = ratesDataForCheck[i];
           break;
         }
       }
-      
-      if (technicianRow >= 0) {
-        var title = ratesData[technicianRow][2]; // Column C - Position
-        var commissionPercentStr = ratesData[technicianRow][7]; // Column H - Commission %
-        
-        // Parse the commission percentage
-        var commissionPercent = 0;
-        if (typeof commissionPercentStr === "string" && commissionPercentStr.includes("%")) {
-          commissionPercent = parseFloat(commissionPercentStr.replace("%", "")) || 0;
-        } else if (typeof commissionPercentStr === "number") {
-          commissionPercent = commissionPercentStr < 1 ? commissionPercentStr * 100 : commissionPercentStr;
-        }
-        
-        // Check if it's an apprentice with 0% commission
-        if (title && title.toString().includes("Apprentice") && commissionPercent === 0) {
-          isApprenticeWith0Percent = true;
-          console.log(`Skipping PBP processing for apprentice with 0% commission: ${technicianName}`);
-          
+
+      if (technicianRowData) {
+        var title = technicianRowData[2]; // Column C - Position
+        var techInfo = getTechnicianClassAndRole(title); // Call from PBPCalculation
+
+        if (techInfo.class === 1) {
+          console.log(`Skipping PBP processing for Class 1 technician: ${technicianName}`);
           // Update summary to 0 and clear section
           updateTopSummaryInstallPay(techSheet, 0, 0);
           clearInstallDataSection(techSheet);
-          
           // No alert needed for batch processing
-          return { entryCount: 0, totalAmount: 0 };
+          return { entryCount: 0, totalAmount: 0 }; // Exit early for Class 1
         }
+      } else {
+        console.warn(`Could not find technician ${technicianName} in rates sheet for Class 1 check (batch mode).`);
       }
     } catch (e) {
-      console.error(`Error checking apprentice status: ${e.message}`);
-      // Continue with processing to be safe
+      console.error(`Error checking Class 1 status (batch mode): ${e.message}`);
+      // Continue with processing to be safe, but log the error
     }
+    // --- End NEW Class 1 Check ---
 
     // Get Data for lookups - Fetch ONCE for efficiency
     var spiffBonusData = spiffBonusSheet.getDataRange().getValues();
