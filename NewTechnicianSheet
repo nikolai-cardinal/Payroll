@@ -66,7 +66,7 @@ function createNewTechnicianSheet() {
       techRate = ratesData[i][ratesMapping.rateColumn - 1];
       var department = ratesData[i][1]; // Column B (0-based index 1) contains the department
       var businessUnit = ratesData[i][2]; // Column C (0-based index 2) contains the business unit
-      departmentAndBusinessUnit = department + " / " + businessUnit; // Combine B and C
+      departmentAndBusinessUnit = department + " / " + businessUnit; // Combine B and C with format 'B / C'
       break;
     }
   }
@@ -81,7 +81,7 @@ function createNewTechnicianSheet() {
   newSheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
   
   if (techFound) {
-    // Set combined department and business unit in the merged cell starting at A3
+    // Set combined department and business unit in cell A3
     newSheet.getRange(mapping.positionRow, 1).setValue(departmentAndBusinessUnit);
     // Update the hourly rate in the new location (cell C4)
     newSheet.getRange(mapping.hourlyRateRow, mapping.rateValueColumn).setValue(techRate);

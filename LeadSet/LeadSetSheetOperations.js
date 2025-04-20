@@ -323,14 +323,45 @@ function clearExistingLeadEntries(techSheet, rowIndexes) {
  * @param {Number} total - The total lead payment amount.
  */
 function updateTopSummaryLeadSet(techSheet, count, total) {
-  // Update row 14, column B with lead count
-  techSheet.getRange(14, 2).setValue(count);
-  
-  // Update row 14, column C with commission information
-  const totalCell = techSheet.getRange(14, 3);
-  totalCell.setValue(total);
-  formatLeadSetCells(totalCell);
-  console.log(`DEBUG: Finished updateTopSummaryLeadSet for ${techSheet.getName()}`);
+  try {
+    // Get the active spreadsheet
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    // Find the Lead Set sheet
+    const leadSetSheet = findLeadSetSheet(ss);
+    
+    if (!leadSetSheet) {
+      console.error("Lead Set sheet not found, using count as fallback for B14");
+      techSheet.getRange(14, 2).setValue(count);
+    } else {
+      // Get lead data for this technician to calculate total job revenue
+      const leadData = getLeadDataForTechnician(leadSetSheet, techSheet.getName());
+      
+      // Calculate total job revenue (sum of all revenue values)
+      let totalJobRevenue = 0;
+      if (leadData && leadData.length > 0) {
+        totalJobRevenue = leadData.reduce((sum, lead) => {
+          const revenue = typeof lead.revenue === 'number' ? lead.revenue : 0;
+          return sum + revenue;
+        }, 0);
+      }
+      
+      // Update row 14, column B with Jobs Total Revenue
+      techSheet.getRange(14, 2).setValue(totalJobRevenue);
+      techSheet.getRange(14, 2).setNumberFormat("$#,##0.00");
+    }
+    
+    // Update row 14, column C with commission information (as before)
+    const totalCell = techSheet.getRange(14, 3);
+    totalCell.setValue(total);
+    formatLeadSetCells(totalCell);
+    
+    console.log(`DEBUG: Finished updateTopSummaryLeadSet for ${techSheet.getName()}, Jobs Total Revenue: ${techSheet.getRange(14, 2).getValue()}`);
+  } catch (error) {
+    console.error(`Error in updateTopSummaryLeadSet: ${error.message}`);
+    // Fallback to old behavior in case of error
+    techSheet.getRange(14, 2).setValue(count);
+    techSheet.getRange(14, 3).setValue(total);
+  }
 }
 
 /**
