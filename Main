@@ -749,10 +749,22 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
       console.error(`Error processing Timesheet for ${technicianName}: ${e.message}`);
     }
     
+    // 5. Pull KPI data from external sheet
+    try {
+      if (typeof updateTechnicianKPI === 'function') {
+        updateTechnicianKPI(technicianName);
+        console.log(`KPI data updated for ${technicianName}`);
+      } else {
+        console.log(`updateTechnicianKPI function not found, skipping KPI data pull for ${technicianName}`);
+      }
+    } catch (e) {
+      console.error(`Error pulling KPI data for ${technicianName}: ${e.message}`);
+    }
+    
     // Flush to prevent script timeout between operations
     SpreadsheetApp.flush();
     
-    // 5. Copy the total pay value from cell C18 in technician's sheet to column I in rates sheet
+    // 6. Copy the total pay value from cell C18 in technician's sheet to column I in rates sheet
     try {
       // Get the total pay value from the technician's sheet (cell C18)
       var totalPayValue = techSheet.getRange("C18").getValue();

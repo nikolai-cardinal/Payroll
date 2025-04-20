@@ -1,0 +1,206 @@
+/**
+ * Call-By-Call_% - Technician KPI Data Pull
+ * 
+ * This script handles pulling technician KPI percentage data from an external Google Sheet
+ * and writing it to each technician's individual tab during payroll processing.
+ */
+
+/**
+ * Pulls technician KPI percentage from external "Data" sheet for the active tech.
+ * @param {string} techName The technician's exact display name.
+ * @return {number} Average percentage or 0 if no data found.
+ */
+function pullTechnicianKPI(techName) {
+  try {
+    // Open external sheet in read-only mode - no changes are made to the external data
+    const extSS = SpreadsheetApp.openById('1wRbNnKsiD2xEs6CFFFKOuFQnTxQUt8jvcJsowoDfssg');
+    const dataSh = extSS.getSheetByName('Data');
+    
+    // This creates a local copy of the data and doesn't modify the original sheet
+    const data = dataSh.getDataRange().getValues();
+    
+    // 1. Get pay period range from active payroll file
+    const payrollSS = SpreadsheetApp.getActiveSpreadsheet();
+    const periodStr = payrollSS.getSheetByName('Hourly + Spiff Pay')
+                         .getRange('F1').getDisplayValue(); // ex "3/22 - 3/30"
+    
+    const { start, end } = parseDateRange(periodStr);
+    
+    console.log(`Date range: ${start.toDateString()} to ${end.toDateString()}`);
+    
+    // 2. Set column indexes (zero-based)
+    const DATE_COL = 13; // column N
+    const PCT_COL = 15;  // column P
+    const TECH_COL = 0;  // column A - technician names are in column A
+    
+    // 3. Calculate average percentage for the technician in the date range
+    // All operations below are performed on the local copy, not on the original sheet
+    let sum = 0, count = 0;
+    let matchedRows = [];
+    let skippedZeros = 0;
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const rowDate = new Date(row[DATE_COL]);
+      
+      // Skip rows with invalid dates
+      if (isNaN(rowDate.getTime())) continue;
+      
+      if (rowDate >= start && rowDate <= end && row[TECH_COL] === techName) {
+        // Convert percentage value to a proper decimal value (0.XX)
+        // This only affects our local copy for calculation purposes
+        const rawValue = row[PCT_COL];
+        let pct = parsePercentage(rawValue);
+        
+        matchedRows.push({
+          date: rowDate.toDateString(),
+          rawValue: rawValue,
+          parsedValue: pct
+        });
+        
+        // Only include non-zero, valid percentages in the average
+        if (!isNaN(pct) && pct > 0) { 
+          sum += pct; 
+          count++; 
+        } else if (!isNaN(pct) && pct === 0) {
+          skippedZeros++;
+        }
+      }
+    }
+    
+    // Log the matched rows for debugging
+    console.log(`Found ${matchedRows.length} matching rows for ${techName} in date range`);
+    console.log(`Skipped ${skippedZeros} rows with zero values`);
+    if (matchedRows.length > 0) {
+      console.log("Sample values:", JSON.stringify(matchedRows.slice(0, 3)));
+    }
+    
+    // 4. Calculate average and write to technician sheet
+    const avg = count ? sum / count : 0;
+    console.log(`Sum: ${sum}, Count: ${count}, Average: ${avg}`);
+    
+    // The only write operation happens here - to the technician's sheet in the active spreadsheet
+    // No changes are made to the external sheet
+    const techSh = payrollSS.getSheetByName(techName);
+    if (techSh) {
+      techSh.getRange('B15').setValue(avg);
+      console.log(`Updated KPI percentage for ${techName}: ${avg}`);
+      
+      // Check if KPI percentage is above 90% (0.9 in decimal form)
+      // If so, add $100 bonus in cell C15
+      if (avg > 0.9) {
+        techSh.getRange('C15').setValue(100);
+        console.log(`Added $100 bonus in C15 for ${techName} (${avg * 100}% > 90%)`);
+      } else {
+        // Clear any previous bonus if percentage dropped below threshold
+        techSh.getRange('C15').setValue(0);
+        console.log(`No bonus applied for ${techName} (${avg * 100}% < 90%)`);
+      }
+    } else {
+      console.warn(`Technician sheet not found for ${techName}`);
+    }
+    
+    return avg;
+  } catch (error) {
+    console.error(`Error in pullTechnicianKPI: ${error.message}`);
+    return 0;
+  }
+}
+
+/**
+ * Parses percentage values from different formats.
+ * @param {any} value The percentage value to parse
+ * @return {number} The percentage as a decimal (0.XX)
+ */
+function parsePercentage(value) {
+  // Handle null or undefined values
+  if (value === null || value === undefined) return 0;
+  
+  // If it's already a number
+  if (typeof value === 'number') {
+    // If the number is > 1, assume it's a percentage and divide by 100
+    if (value > 1) return value / 100;
+    return value; 
+  }
+  
+  // If it's a string, handle various formats
+  if (typeof value === 'string') {
+    // Remove any % sign and whitespace
+    value = value.replace('%', '').trim();
+    // Parse as a float
+    const parsed = parseFloat(value);
+    
+    if (!isNaN(parsed)) {
+      // If the number is > 1, assume it's a percentage and divide by 100
+      if (parsed > 1) return parsed / 100;
+      return parsed;
+    }
+  }
+  
+  // Cannot parse, return NaN
+  return NaN;
+}
+
+/**
+ * Parses date range string (e.g. "3/22 - 3/30") into start and end Date objects.
+ * @param {string} rangeStr The date range string.
+ * @return {Object} Object containing start and end Date objects.
+ */
+function parseDateRange(rangeStr) {
+  try {
+    const [startStr, endStr] = rangeStr.split('-').map(p => p.trim());
+    const year = new Date().getFullYear();
+    
+    // Create Date objects and normalize times
+    const start = new Date(`${startStr}/${year}`);
+    const end = new Date(`${endStr}/${year}`);
+    
+    // Set times to beginning/end of day for safe comparisons
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    
+    return { start, end };
+  } catch (error) {
+    console.error(`Error parsing date range: ${error.message}`);
+    // Return current date as fallback
+    const today = new Date();
+    return { start: today, end: today };
+  }
+}
+
+/**
+ * Finds the index of the technician column in the header row.
+ * This function is no longer used since we're directly using column A (index 0).
+ * @param {Array} headerRow The header row from the data sheet.
+ * @return {number} The column index or -1 if not found.
+ */
+function findTechnicianColumn(headerRow) {
+  for (let i = 0; i < headerRow.length; i++) {
+    const headerText = headerRow[i].toString().trim().toLowerCase();
+    if (headerText === 'technician') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Hook function to integrate with the payroll system.
+ * This is the main function that will be called during payroll processing.
+ * @param {string} techName The technician's name.
+ * @return {number} The calculated average percentage.
+ */
+function updateTechnicianKPI(techName) {
+  if (!techName) {
+    console.error("No technician name provided to updateTechnicianKPI");
+    return 0;
+  }
+  
+  try {
+    console.log(`Running KPI data pull for ${techName}`);
+    return pullTechnicianKPI(techName);
+  } catch (error) {
+    console.error(`Error in updateTechnicianKPI: ${error.message}`);
+    return 0;
+  }
+} 
