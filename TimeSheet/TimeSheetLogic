@@ -342,9 +342,6 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
     // Get the mapping for this technician sheet
     var mapping = getTechnicianSheetMappingForTimesheet(techSheet);
     
-    // Update the Pay Period
-    techSheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
-    
     // Update the Regular Hours
     techSheet.getRange(mapping.regHoursRow, mapping.valueColumn).setValue(regHours);
     
