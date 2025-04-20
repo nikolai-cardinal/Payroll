@@ -11,6 +11,8 @@
 * - formatCurrency() - Formats currency values with proper decimal places
 */
 
+const HOURLY_SPIFF_SHEET_NAME = 'Hourly + Spiff Pay';
+
 // Processing control variables
 var isProcessing = false;
 var processingTimeoutId = null; // Changed variable name from processingTimeout
@@ -63,7 +65,7 @@ if (isProcessing) {
   var ratesMapping = getRatesSheetMapping();
 
   // Check if this is the Hourly + Spiff Pay sheet and the Action column
-  if (sheetName === 'Hourly + Spiff Pay' && column === ratesMapping.actionColumn) {
+  if (sheetName === HOURLY_SPIFF_SHEET_NAME && column === ratesMapping.actionColumn) {
     // Only process rows after the header
     if (row >= ratesMapping.dataStartRow) {
       // Get the technician name from column A
@@ -298,7 +300,7 @@ function updateHoursForTechnician(techName, row, column, skipStatusUpdate = fals
     return updateHoursForTechnician(techName, row, column, skipStatusUpdate, suppressPopup);
   } catch (e) {
     console.error("Error calling updateHoursForTechnician: " + e.message);
-    var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Hourly + Spiff Pay');
+    var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOURLY_SPIFF_SHEET_NAME);
     if (!suppressPopup) {
       SpreadsheetApp.getUi().alert('Error updating hours for: ' + techName + ". " + e.message);
     }
@@ -361,17 +363,26 @@ function updateC17FromServiceSheet(techSheet, techName) {
     if (!serviceSheet) {
       console.warn(`Service sheet named 'Service' not found. Skipping update for ${techName}.`);
     } else {
-      var serviceData = serviceSheet.getRange("A1:D" + serviceSheet.getLastRow()).getValues();
+      var serviceData = serviceSheet.getRange("A1:E" + serviceSheet.getLastRow()).getValues();
       var foundTechInService = false;
       var techNameLower = techName.trim().toLowerCase();
 
       for (var serviceRow = 1; serviceRow < serviceData.length; serviceRow++) {
         var nameInService = serviceData[serviceRow][0];
         if (nameInService && nameInService.toString().trim().toLowerCase() === techNameLower) {
-          var valueToUpdate = serviceData[serviceRow][3];
-          console.log(`Found ${techName} in Service sheet row ${serviceRow + 1}. Value in Col D: ${valueToUpdate} (Type: ${typeof valueToUpdate})`);
-          techSheet.getRange(17, 3).setValue(valueToUpdate);
-          console.log(`Successfully updated C17 for ${techName} with value: ${valueToUpdate}`);
+          var totalSalesValue = serviceData[serviceRow][3];
+          var completedRevenueValue = serviceData[serviceRow][4];
+          console.log(`Found ${techName} in Service sheet row ${serviceRow + 1}. Value in Col D: ${totalSalesValue}, Col E: ${completedRevenueValue}`);
+          
+          // Update C17 with Total Sales (Column D)
+          techSheet.getRange(17, 3).setValue(totalSalesValue);
+          
+          // Update C16 with Completed Revenue (Column E)
+          techSheet.getRange(16, 3).setValue(completedRevenueValue);
+          
+          console.log(`Successfully updated C17 for ${techName} with Total Sales: ${totalSalesValue}`);
+          console.log(`Successfully updated C16 for ${techName} with Completed Revenue: ${completedRevenueValue}`);
+          
           foundTechInService = true;
           break;
         }
@@ -392,7 +403,7 @@ function runFullPayroll() {
   try {
     var ui = SpreadsheetApp.getUi();
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var ratesSheet = ss.getSheetByName(HOURLY_SPIFF_SHEET_NAME);
     
     if (!ratesSheet) {
       ui.alert("Error: Hourly + Spiff Pay sheet not found.");
@@ -543,7 +554,7 @@ function runFullPayroll() {
 function processPayrollForTechnicianSilently(technicianName, actionRow, actionColumn, suppressStagePopups = false) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var ratesSheet = ss.getSheetByName(HOURLY_SPIFF_SHEET_NAME);
     var techSheet = ss.getSheetByName(technicianName);
     
     // If sheet doesn't exist, silently return without error
@@ -692,7 +703,7 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
       }
       else {
         // Fallback to direct functions if updateLeadSetForTechnician isn't available
-        var leadSetSheet = ss.getSheetByName('Lead Set');
+        var leadSetSheet = ss.getSheetByName(LEAD_SHEET_NAME);
         if (leadSetSheet && typeof getLeadDataForTechnician === 'function' && 
             typeof writeLeadSetDataToSheet === 'function') {
           try {
@@ -797,7 +808,7 @@ function runPayrollForTechnician(technicianName, actionRow, actionColumn, suppre
   try {
     var ui = SpreadsheetApp.getUi();
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var ratesSheet = ss.getSheetByName(HOURLY_SPIFF_SHEET_NAME);
     
     // Store success status for each process
     var processResults = {
@@ -874,7 +885,7 @@ function updatePBPForTechnician(technicianName, row, column, skipStatusUpdate, s
     
     // If an error row and column were provided, set status to Error
     if (row && column) {
-      var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Hourly + Spiff Pay");
+      var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOURLY_SPIFF_SHEET_NAME);
       if (ratesSheet) {
         setActionStatus(ratesSheet, row, column, "Error");
       }

@@ -31,7 +31,7 @@ function setActionStatus(ratesSheet, row, col, status) {
 function getCurrentPayPeriod() {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var ratesSheet = ss.getSheetByName(HOURLY_SPIFF_SHEET_NAME);
     
     if (!ratesSheet) {
       console.error("Hourly + Spiff Pay sheet not found!");

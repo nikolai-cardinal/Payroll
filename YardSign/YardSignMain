@@ -95,7 +95,7 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
           var techSheetCheck = ss.getSheetByName(techName);
           if (techSheetCheck) {
             // Update summary to 0 and clear any existing yard sign entries
-            updateTopSummaryYardSignPay(techSheetCheck, 0, 0);
+            updateTopSummaryYardSign(techSheetCheck, 0, 0);
             clearExistingYardSignEntries(techSheetCheck);
           } else {
              console.warn(`Technician sheet for ${techName} not found. Cannot clear previous entries or update summary.`);
@@ -194,7 +194,7 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
           console.log(`Skipping Yard Sign processing for apprentice with 0% commission: ${techName}`);
           
           // Update summary to 0 and clear any existing yard sign entries
-          updateTopSummaryYardSignPay(techSheet, 0, 0);
+          updateTopSummaryYardSign(techSheet, 0, 0);
           clearExistingYardSignEntries(techSheet);
           
           // Set status to Complete (or a specific status if preferred)
@@ -235,7 +235,7 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
     if (!result || !result.entries || result.entries.length === 0) {
       console.log("No yard sign entries found for: " + techName);
       // Update summary to 0 and clear any existing yard sign entries if none found
-      updateTopSummaryYardSignPay(techSheet, 0, 0);
+      updateTopSummaryYardSign(techSheet, 0, 0);
       clearExistingYardSignEntries(techSheet);
       if (!skipStatusUpdate) {
         yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
@@ -373,7 +373,7 @@ function processAllYardSigns() {
         if (techSheetCheck) {
             try {
               // Clear previous entries and set summary to 0
-              updateTopSummaryYardSignPay(techSheetCheck, 0, 0);
+              updateTopSummaryYardSign(techSheetCheck, 0, 0);
               clearExistingYardSignEntries(techSheetCheck);
             } catch (clearError) {
                console.error(`Error clearing data for skipped Class 1 tech ${techName}: ${clearError.message}`);

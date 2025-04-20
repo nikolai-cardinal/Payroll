@@ -330,6 +330,7 @@ function updateTopSummaryLeadSet(techSheet, count, total) {
   const totalCell = techSheet.getRange(14, 3);
   totalCell.setValue(total);
   formatLeadSetCells(totalCell);
+  console.log(`DEBUG: Finished updateTopSummaryLeadSet for ${techSheet.getName()}`);
 }
 
 /**
@@ -440,53 +441,83 @@ function formatLeadSetCells(range) {
 function findFirstEmptyRow(techSheet) {
   try {
     console.log(`DEBUG: Finding first empty row in ${techSheet.getName()}`);
-    
-    // First, try to find the header row
+
+    // Dynamically find the header row for the commission data (Columns E-J)
     const headerRow = findCustomerNameHeaderRow(techSheet);
-    console.log(`DEBUG: Found Customer Name header at row ${headerRow}`);
-    
-    if (headerRow > 0) {
-      // Start looking from the row after the header
-      const startSearchRow = headerRow + 1;
-      
-      // Get data from a reasonable range below the header (30 rows max)
-      const maxRows = 30;
-      const lastRow = Math.min(techSheet.getLastRow(), headerRow + maxRows);
-      const rowsToCheck = lastRow - startSearchRow + 1;
-      
-      if (rowsToCheck > 0) {
-        console.log(`DEBUG: Checking ${rowsToCheck} rows from row ${startSearchRow} to ${lastRow}`);
-        
-        // Get all data in columns E-J
-        const data = techSheet.getRange(startSearchRow, 5, rowsToCheck, 6).getValues();
-        
-        // Look for the first completely empty row
-        for (let i = 0; i < data.length; i++) {
-          const row = data[i];
-          const rowIsEmpty = row.every(cell => !cell || cell === '');
-          
-          if (rowIsEmpty) {
-            const emptyRow = startSearchRow + i;
-            console.log(`DEBUG: Found empty row at ${emptyRow}`);
-            return emptyRow;
-          }
+    if (headerRow === -1) {
+      console.error(`ERROR: Could not find 'Customer Name' header in column E of sheet ${techSheet.getName()}. Cannot determine where to write data.`);
+      return 7; // Fallback to a default row if header not found
+    }
+    const searchStartRow = headerRow + 1; // Start searching *after* the header row
+    console.log(`DEBUG: Found commission header at row ${headerRow}, starting search for empty row at ${searchStartRow}`);
+
+    // First check if we have any L-E-A-D markers to find last occupied row
+    // This ensures we don't overwrite existing entries if we're just adding more
+    const leadRows = findExistingLeadSetRows(techSheet);
+    if (leadRows.length > 0) {
+      // Filter lead rows to only include those at or after the searchStartRow
+      const relevantLeadRows = leadRows.filter(row => row >= searchStartRow);
+      if (relevantLeadRows.length > 0) {
+        const lastLeadRow = Math.max(...relevantLeadRows);
+        const nextRow = lastLeadRow + 1;
+        console.log(`DEBUG: Found L-E-A-D entries, last relevant entry at row ${lastLeadRow}, using next row ${nextRow}`);
+        return nextRow;
+      } else {
+        // If existing leads are *before* the header (unlikely, but possible), start after header
+        console.log(`DEBUG: Found L-E-A-D entries, but all are before the search start row ${searchStartRow}. Using search start row.`);
+        // Fall through to the next check, starting at searchStartRow
+      }
+    }
+
+    // If no relevant lead entries found, look for *any* data in columns E-J starting from searchStartRow
+    const lastRow = techSheet.getLastRow();
+    // Ensure we don't try to read negative rows if lastRow < searchStartRow
+    const rowsToCheck = Math.max(0, lastRow - searchStartRow + 1); 
+
+    if (rowsToCheck > 0) {
+      console.log(`DEBUG: No relevant lead entries found. Checking ${rowsToCheck} rows for any data from row ${searchStartRow} to ${lastRow} in columns E-J`);
+
+      // Get all data in columns E-J for the search range
+      const data = techSheet.getRange(searchStartRow, 5, rowsToCheck, 6).getValues();
+
+      // Find the last row with any data in columns E-J within the searched range
+      let lastDataRowIndex = -1; // Index relative to the 'data' array
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        // More robust check for any content
+        const hasData = row.some(cell => {
+          return cell !== null && cell !== undefined && cell !== '' &&
+                 !(typeof cell === 'string' && cell.trim() === '');
+        });
+
+        if (hasData) {
+          // console.log(`DEBUG: Found data at relative index ${i} (actual row ${searchStartRow + i}), contents: [${row.join(' | ')}]`);
+          lastDataRowIndex = i;
         }
       }
-      
-      // If we didn't find an empty row, return the next row after the data
-      const nextRow = lastRow + 1;
-      console.log(`DEBUG: No empty row found, using next row after data: ${nextRow}`);
-      return nextRow;
-    } else {
-      // Fallback: If we couldn't find the header row, start from row 5
-      console.log(`DEBUG: Could not find header row, defaulting to row 5`);
-      return 5;
+
+      // Return the row immediately after the last data row found in the range
+      if (lastDataRowIndex !== -1) {
+        const actualLastDataRow = searchStartRow + lastDataRowIndex;
+        const nextRow = actualLastDataRow + 1;
+        console.log(`DEBUG: Found last data row at ${actualLastDataRow}, using next row: ${nextRow}`);
+        return nextRow;
+      }
+
+      // If no data was found in the range, use the starting search row
+      console.log(`DEBUG: No data found in columns E-J from row ${searchStartRow} onwards, using starting row: ${searchStartRow}`);
+      return searchStartRow;
     }
+
+    // If no rows to check (e.g., sheet is empty after header), use the starting search row
+    console.log(`DEBUG: No rows to check after header (lastRow=${lastRow}, searchStartRow=${searchStartRow}), using starting row: ${searchStartRow}`);
+    return searchStartRow;
+
   } catch (error) {
     console.error(`ERROR in findFirstEmptyRow: ${error.message}`);
     console.error(`Stack: ${error.stack}`);
     // Default to a safe row if there's an error
-    return 5;
+    return 7; // Fallback to row 7 in case of unexpected error
   }
 }
 
@@ -833,7 +864,17 @@ function clearRowsInBatch(sheet, rowNumbers) {
   for (let i = 0; i < rowNumbers.length; i += batchSize) {
     const batch = rowNumbers.slice(i, i + batchSize);
     batch.forEach(row => {
-      sheet.getRange(row, 5, 1, 6).clearContent(); // Clear columns E-J (5-10)
+      // Ensure the row number is valid before attempting to clear
+      if (row > 0 && row <= sheet.getMaxRows()) { 
+        try {
+          sheet.getRange(row, 5, 1, 6).clearContent(); // Clear columns E-J (5-10)
+        } catch (e) {
+          Logger.log(`Error clearing content in row ${row}, columns E-J of sheet ${sheet.getName()}: ${e.message}`);
+          // Optionally, add more robust error handling or logging
+        }
+      } else {
+        Logger.log(`Skipping invalid row number ${row} for clearing content in sheet ${sheet.getName()}`);
+      }
     });
   }
 }
@@ -1036,6 +1077,15 @@ function writeRemainingLeadEntries(sheet, entries) {
 function processAndWriteLeadData(leadSetSheet, techSheet, technicianName) {
   try {
     console.log(`Processing lead data for ${technicianName}`);
+
+    // Clear ALL existing L-E-A-D entries first
+    try {
+      console.log(`Clearing all existing L-E-A-D entries for ${technicianName}`);
+      clearExistingLeadEntries(techSheet); // Use the general clearing function
+    } catch (clearError) {
+      // Log a warning but continue if clearing fails for some reason
+      console.error(`Warning: Error clearing existing L-E-A-D entries: ${clearError.message}. Proceeding anyway.`);
+    }
     
     // Validate Lead Set sheet
     if (typeof validateLeadSetSheet === 'function') {
@@ -1082,14 +1132,6 @@ function processAndWriteLeadData(leadSetSheet, techSheet, technicianName) {
     }
     
     console.log(`Calculated commission total: $${totalCommission} for ${processedLeads.length} leads`);
-    
-    // Clear existing lead data first
-    try {
-      clearLeadDataInInstallSection(techSheet);
-    } catch (clearError) {
-      console.error(`Warning: Error clearing existing lead data: ${clearError.message}`);
-      // Continue anyway
-    }
     
     // Prepare data for writing
     const leadDataToWrite = processedLeads.map(lead => [

@@ -388,6 +388,7 @@ function localCalculateLeadCommission(revenue) {
  * @param {Boolean} suppressPopup - Optional flag to suppress popup notifications, defaults to false.
  */
 function displayLeadResults(technicianName, processedLeads, totalCommission, suppressPopup = false) {
+  console.log(`DEBUG: Entered displayLeadResults for ${technicianName}. suppressPopup = ${suppressPopup}`);
   const ui = SpreadsheetApp.getUi();
   
   // Create customer names string with notes
@@ -406,6 +407,7 @@ function displayLeadResults(technicianName, processedLeads, totalCommission, sup
     });
   }
   
+  console.log(`DEBUG: Just before checking suppressPopup. Value = ${suppressPopup}`);
   if (!suppressPopup) {
     ui.alert(
       'Lead processing complete',

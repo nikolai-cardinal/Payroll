@@ -305,4 +305,42 @@ function findCustomerNameHeaderRow(sheet) {
   }
   
   return -1; // Not found
+}
+
+/**
+ * Updates the summary section for Yard Signs on the technician's sheet.
+ * Assumes count is in B12 and amount is in C12.
+ * 
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} techSheet The technician's individual sheet object.
+ * @param {number} yardSignCount The number of yard sign entries.
+ * @param {number} totalAmount The total dollar amount for yard signs.
+ */
+function updateTopSummaryYardSign(techSheet, yardSignCount, totalAmount) {
+  if (!techSheet) {
+    console.error("updateTopSummaryYardSign: techSheet parameter is invalid or null.");
+    // Consider throwing an error if this is unexpected
+    // throw new Error("updateTopSummaryYardSign requires a valid sheet object.");
+    return; 
+  }
+  try {
+    // --- Target Cells --- 
+    // Based on patterns in SpiffBonus (B11/C11) and LeadSet (B14/C13)
+    const countCellA1 = "B12";
+    const amountCellA1 = "C12";
+    // --- End Target Cells ---
+
+    const countCell = techSheet.getRange(countCellA1);
+    const amountCell = techSheet.getRange(amountCellA1);
+
+    countCell.setValue(yardSignCount);
+    amountCell.setValue(totalAmount).setNumberFormat('$#,##0.00'); // Apply currency format
+
+    console.log(`Updated Yard Sign summary for sheet: ${techSheet.getName()}. Count: ${yardSignCount}, Amount: ${totalAmount.toFixed(2)}`);
+
+  } catch (e) {
+    // Log detailed error including sheet name
+    console.error(`Error updating Yard Sign summary (cells ${countCellA1}/${amountCellA1}) for sheet '${techSheet.getName()}': ${e.message}`, e.stack);
+    // Optionally re-throw or display a UI alert if critical
+    // SpreadsheetApp.getUi().alert(`Failed to update Yard Sign summary for ${techSheet.getName()}: ${e.message}`);
+  }
 } 
