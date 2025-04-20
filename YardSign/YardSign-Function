@@ -36,21 +36,26 @@
  *    2. The Yard Sign sheet is validated or created with ensureYardSignSheetExists()
  *    3. Required columns are checked (Customer Name, Job #, Business Unit, Completion Date, Jobs Total, Tags, Assigned Technicians)
  * B. For Single Technician (updateYardSignForTechnician):
- *    1. Sets Action status to "Processing..."
- *    2. Gets the Yard Sign sheet and validates it
- *    3. Gets the technician's sheet
- *    4. Calls calculateYardSignEntries() to find and calculate entries for this technician
- *    5. Writes data to technician's sheet with writeYardSignDataToSheet()
- *    6. Updates status to "Complete" or "Error"
- *    7. Displays a summary popup with details about the processed yard signs
+ *    1. Checks the technician's class in the 'Hourly + Spiff Pay' sheet (Column C). If 'Class 1', skips processing, clears data, sets status to 'Skipped (Class 1)', and exits.
+ *    2. Sets Action status to "Processing..." (if not skipped)
+ *    3. Gets the Yard Sign sheet and validates it
+ *    4. Gets the technician's sheet
+ *    5. Checks if the technician is an Apprentice with 0% commission. If so, skips processing, clears data, sets status, and exits.
+ *    6. Calls calculateYardSignEntries() to find and calculate entries for this technician (if not skipped).
+ *    7. If entries are found, writes data to technician's sheet with writeYardSignDataToSheet(). If no entries found, clears data and sets status.
+ *    8. Updates status to "Complete" or "Error" (or relevant "Skipped" status).
+ *    9. Displays a summary popup (if not suppressed) with details about the processed yard signs.
  * 
  * C. For All Technicians (processAllYardSigns):
  *    1. Shows confirmation dialog
  *    2. Validates Yard Sign sheet
  *    3. Shows processing dialog
- *    4. Calls processAllYardSignsUtility() which loops through all technicians
- *    5. For each technician, performs similar steps as in single technician process
- *    6. Shows a comprehensive completion message with details on all processed yard signs
+ *    4. Loops through all technicians listed in 'Hourly + Spiff Pay'.
+ *    5. For each technician:
+ *        a. Checks Class in 'Hourly + Spiff Pay'. If 'Class 1', logs skip, clears data, and proceeds to the next tech.
+ *        b. Checks if technician sheet exists. If not, logs skip and proceeds.
+ *        c. Calls updateYardSignForTechnician() with suppressPopup=true (which includes Apprentice check and calculations).
+ *    6. Shows a comprehensive completion message detailing processed, skipped (Class 1, No Sheet, Errors), and error counts.
  */
 
 /**
@@ -88,18 +93,23 @@
  *    - Job #: Identification number for the yard sign job
  *    - Business Unit: The business unit for the installation
  *    - Completion Date: When it was installed
- *    - Jobs Total: Payment amount for the installation
- *    - Tags: Additional tags or notes for the installation
+ *    - Jobs Total: Original value for the job (Note: This column is NOT used for technician payment calculation).
+ *    - Tags: Additional tags or notes for the installation (Used for payment calculation).
  *    - Assigned Technicians: Who installed the yard sign
  * 
- * 2. When processed:
- *    - The system finds all yard signs assigned to each technician
- *    - Applies fixed payment of $25.00 per yard sign
- *    - Updates the technician's sheet with:
- *      a. Individual yard sign entries (Customer, Business Unit, Completion Date, Fixed $25 amount, "ST - Yard Sign Tag" note)
- *      b. Yard Sign Spiff in the summary section (row 12) with a fixed $25 per yard sign
+ * 2. Hourly + Spiff Pay sheet (Column C) determines the technician's Class.
  * 
- * 3. Existing yard sign entries are updated or removed as needed
+ * 3. When processed:
+ *    - The system first checks the technician's Class in 'Hourly + Spiff Pay'. If 'Class 1', the process is skipped for that technician.
+ *    - For eligible technicians (Class 2+), the system finds all yard signs assigned to them in the 'Yard Sign' sheet (matching technician name in Column H).
+ *    - Checks the 'Tags' column (Column G) in the *same row* for each assigned yard sign to determine the payment amount:
+ *      - If the tag 'Yard Sign w/ Pic' is found (case-insensitive), a payment of $25.00 is calculated.
+ *      - Otherwise, a payment of $10.00 is calculated.
+ *    - Updates the eligible technician's sheet with:
+ *      a. Individual yard sign entries (Customer, Business Unit, Completion Date, Calculated $10/$25 amount, "ST - Yard Sign Tag" note)
+ *      b. Yard Sign Spiff in the summary section (row 12) with the *total* calculated amount (sum of individual $10/$25 payments)
+ * 
+ * 4. Existing yard sign entries in the technician's sheet are updated or removed as needed. If a technician becomes Class 1 or has no entries, existing data is cleared.
  */
 
 /**
@@ -121,7 +131,11 @@
  * - Empty rows and missing data are handled gracefully with defaults
  * - The module maintains existing entries and only updates what's changed
  * - Invalid entries (missing data, etc.) are skipped automatically
- * - A fixed payment of $25.00 is applied for each yard sign
+ * - Technicians designated as 'Class 1' in the 'Hourly + Spiff Pay' sheet (Column C) are excluded from Yard Sign calculations and payments.
+ * - Technicians designated as 'Apprentice' with 0% commission in 'Hourly + Spiff Pay' are also skipped.
+ * - A variable payment is applied for each yard sign:
+ *    - $25.00 if the 'Tags' column (G) contains 'Yard Sign w/ Pic' (case-insensitive).
+ *    - $10.00 otherwise.
  * - Detailed summary popups display processing results
  */
 
@@ -156,11 +170,11 @@
  *      c. Writes each entry to the sheet starting at the identified row
  *      d. Applies proper formatting (date format, currency format)
  *    - For technicians like Jonathan Fuentes:
- *      a. Each entry includes customer name, business unit, completion date, fixed $25 amount
+ *      a. Each entry includes customer name, business unit, completion date, calculated amount ($10 or $25)
  *      b. Sets the note field (column I) to "ST - Yard Sign Tag"
  *      c. Sets the type field (column J) to "Yard Sign"
  *      d. Formats the date in column G as MM/dd/yyyy
- *      e. Formats the amount in column H as currency ($25.00)
+ *      e. Formats the amount in column H as currency ($10.00 or $25.00)
  * 
  * 4. Data Validation and Error Handling:
  *    - Validates all required fields before processing

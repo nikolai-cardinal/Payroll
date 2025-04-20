@@ -57,14 +57,16 @@ function createNewTechnicianSheet() {
   var techFound = false;
   var techPosition = '';
   var techRate = 0;
-  var businessUnit = ''; // Added variable to store business unit
+  var departmentAndBusinessUnit = ''; // Variable to store combined value
   
   for (var i = ratesMapping.dataStartRow - 1; i < ratesData.length; i++) {
     if (ratesData[i][ratesMapping.nameColumn - 1] === techName) {
       techFound = true;
       techPosition = ratesData[i][ratesMapping.positionColumn - 1];
       techRate = ratesData[i][ratesMapping.rateColumn - 1];
-      businessUnit = ratesData[i][2]; // Column C (0-based index 2) contains the business unit
+      var department = ratesData[i][1]; // Column B (0-based index 1) contains the department
+      var businessUnit = ratesData[i][2]; // Column C (0-based index 2) contains the business unit
+      departmentAndBusinessUnit = department + " / " + businessUnit; // Combine B and C
       break;
     }
   }
@@ -79,8 +81,8 @@ function createNewTechnicianSheet() {
   newSheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
   
   if (techFound) {
-    // Set business unit instead of duplicating pay period in position row
-    newSheet.getRange(mapping.positionRow, 1).setValue(businessUnit);
+    // Set combined department and business unit in the merged cell starting at A3
+    newSheet.getRange(mapping.positionRow, 1).setValue(departmentAndBusinessUnit);
     // Update the hourly rate in the new location (cell C4)
     newSheet.getRange(mapping.hourlyRateRow, mapping.rateValueColumn).setValue(techRate);
     ui.alert('Technician sheet created with data from Hourly + Spiff Pay.');

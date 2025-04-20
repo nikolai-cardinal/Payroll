@@ -80,9 +80,16 @@ function calculateYardSignEntries(technicianName, yardSignSheet) {
       return { entries: [], totalAmount: 0 };
     }
     
-    if (colIndices.jobsTotal === -1) {
-      console.error("Could not find Jobs Total column in Yard Sign sheet - this is required");
+    // Check if the 'Tags' column was found, as it's now needed for calculation
+    if (colIndices.tags === -1) {
+      console.error("Could not find Tags column in Yard Sign sheet - this is required for the new payment logic");
       return { entries: [], totalAmount: 0 };
+    }
+    
+    if (colIndices.jobsTotal === -1) {
+      // Although Jobs Total isn't directly used for the *new* calculation, keep the check
+      // as it might be relevant contextually or for future features.
+      console.warn("Jobs Total column not found in Yard Sign sheet.");
     }
     
     // Other columns can have default values if missing
@@ -101,21 +108,33 @@ function calculateYardSignEntries(technicianName, yardSignSheet) {
     // Find entries for this technician
     var entries = [];
     var totalAmount = 0;
-    var countYardSigns = 0;
+    var countYardSigns = 0; // Keep this count if needed elsewhere, though totalAmount is now variable
     
     for (var i = 1; i < data.length; i++) { // Skip header row
       var row = data[i];
       
-      // Skip if row is too short or missing technician data
-      if (row.length <= colIndices.assignedTech - 1 || !row[colIndices.assignedTech - 1]) continue;
+      // Ensure row has data for both assigned tech and tags columns
+      if (row.length < Math.max(colIndices.assignedTech, colIndices.tags) || 
+          !row[colIndices.assignedTech - 1]) {
+          continue; // Skip row if essential data is missing or too short
+      }
       
       var rowTechName = row[colIndices.assignedTech - 1]; // Convert to 0-based
       
       // Check if this row is for our technician (case insensitive)
       if (rowTechName.toString().trim().toLowerCase().includes(technicianName.toLowerCase())) {
-        // We always use a fixed amount of $25 per yard sign
-        var amount = 25;
-        countYardSigns++;
+        // Get the tags for this row
+        var tags = row[colIndices.tags - 1] ? row[colIndices.tags - 1].toString().toLowerCase() : "";
+        
+        // Determine amount based on tags
+        var amount;
+        if (tags.includes("yard sign w/ pic")) {
+          amount = 25;
+        } else {
+          amount = 10;
+        }
+        
+        countYardSigns++; // Increment count for logging/summary purposes
         
         var entry = {
           customerName: colIndices.customerName > 0 && row.length > colIndices.customerName - 1 ? 
@@ -124,7 +143,7 @@ function calculateYardSignEntries(technicianName, yardSignSheet) {
                   (row[colIndices.jobNumber - 1] || "Job # not specified") : "Job # not specified",
           installDate: colIndices.completionDate > 0 && row.length > colIndices.completionDate - 1 ? 
                      row[colIndices.completionDate - 1] : new Date().toLocaleDateString(),
-          amount: amount,
+          amount: amount, // Use the calculated amount
           businessUnit: colIndices.businessUnit > 0 && row.length > colIndices.businessUnit - 1 ? 
                      row[colIndices.businessUnit - 1] || "" : ""
         };

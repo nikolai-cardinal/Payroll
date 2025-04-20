@@ -8,8 +8,8 @@
 /**
 * Writes the calculated Yard Sign data to the technician's sheet.
 * @param {Sheet} techSheet - The specific technician's sheet object.
-* @param {Array<object>} allYardSignEntries - Array of calculated Yard Sign entry objects.
-* @param {number} totalYardSignAmount - The total calculated Yard Sign amount for the tech.
+* @param {Array<object>} allYardSignEntries - Array of calculated Yard Sign entry objects, each containing customerName, businessUnit, installDate, amount, etc.
+* @param {number} totalYardSignAmount - The total calculated Yard Sign amount for the tech (sum of individual entry amounts).
 */
 function writeYardSignDataToSheet(techSheet, allYardSignEntries, totalYardSignAmount) {
   if (!techSheet || !allYardSignEntries) {
@@ -37,7 +37,7 @@ function writeYardSignDataToSheet(techSheet, allYardSignEntries, totalYardSignAm
       entry.customerName || "",      // Column E: Customer Name
       entry.businessUnit || "",      // Column F: Business Unit (from Yard Sign tab column C)
       displayDate,                   // Column G: Completion Date
-      25,                            // Column H: Fixed $25 amount
+      entry.amount,                  // Column H: Use the calculated amount from the entry
       "ST - Yard Sign Tag",          // Column I: Note
       "Yard Sign"                    // Column J: Type
     ]);
@@ -209,9 +209,9 @@ function writeRemainingYardSignEntries(sheet, entries) {
 }
 
 /**
-* Updates the top summary section ('Yard Sign Spiff') with count and fixed $25 amount.
+* Updates the top summary section ('Yard Sign Spiff') with count and total amount.
 * @param {Sheet} sheet - The technician sheet to update.
-* @param {number} amount - The total Yard Sign amount (not used, we use fixed $25).
+* @param {number} amount - The total calculated Yard Sign amount.
 * @param {number} count - The number of Yard Sign entries.
 */
 function updateTopSummaryYardSignPay(sheet, amount, count) {
@@ -220,8 +220,8 @@ function updateTopSummaryYardSignPay(sheet, amount, count) {
   var yardSignPayRow = 12;
   try {
      sheet.getRange(yardSignPayRow, 2).setValue(count); // Count in Col B (B12)
-     sheet.getRange(yardSignPayRow, 3).setValue(25).setNumberFormat("$#,##0.00"); // Hard-coded $25 in Col C (C12)
-     console.log("Updated Yard Sign Spiff in B12/C12 with count: " + count + ", amount: $25.00");
+     sheet.getRange(yardSignPayRow, 3).setValue(amount).setNumberFormat("$#,##0.00"); // Use the passed total amount in Col C (C12)
+     console.log("Updated Yard Sign Spiff in B12/C12 with count: " + count + ", total amount: $" + amount.toFixed(2));
   } catch (e) { 
      console.error("Error updating top summary yard sign pay for " + sheet.getName() + ": " + e); 
      
@@ -235,8 +235,8 @@ function updateTopSummaryYardSignPay(sheet, amount, count) {
            yardSignPayRow = row + 1;
            try {
              sheet.getRange(yardSignPayRow, 2).setValue(count); // Count in Col B
-             sheet.getRange(yardSignPayRow, 3).setValue(25).setNumberFormat("$#,##0.00"); // Hard-coded $25 in Col C
-             console.log("Fallback: Updated Yard Sign Spiff in row " + yardSignPayRow);
+             sheet.getRange(yardSignPayRow, 3).setValue(amount).setNumberFormat("$#,##0.00"); // Use the passed total amount in Col C
+             console.log("Fallback: Updated Yard Sign Spiff in row " + yardSignPayRow + " with count: " + count + ", total amount: $" + amount.toFixed(2));
            } catch (err) { 
              console.error("Fallback also failed to update top summary: " + err); 
            }

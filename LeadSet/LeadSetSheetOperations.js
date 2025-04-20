@@ -316,7 +316,7 @@ function clearExistingLeadEntries(techSheet, rowIndexes) {
 }
 
 /**
- * Updates the lead summary information in rows 13-14 of a technician's sheet.
+ * Updates the lead summary information in rows 14-15 of a technician's sheet.
  * 
  * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
  * @param {Number} count - The number of leads.
@@ -326,7 +326,7 @@ function updateTopSummaryLeadSet(techSheet, count, total) {
   // Update row 14, column B with lead count
   techSheet.getRange(14, 2).setValue(count);
   
-  // Update row 14, column C with commission information instead of row 13
+  // Update row 14, column C with commission information
   const totalCell = techSheet.getRange(14, 3);
   totalCell.setValue(total);
   formatLeadSetCells(totalCell);
@@ -1049,7 +1049,7 @@ function processAndWriteLeadData(leadSetSheet, techSheet, technicianName) {
     }
     
     // Extract and process leads
-    const leads = extractLeadsFromSheet(leadSetSheet, technicianName);
+    const leads = getLeadDataForTechnician(leadSetSheet, technicianName);
     console.log(`Extracted ${leads.length} leads for ${technicianName}`);
     
     if (leads.length === 0) {
@@ -1135,10 +1135,10 @@ function processAndWriteLeadData(leadSetSheet, techSheet, technicianName) {
     
     // Update summary information
     try {
-      updateLeadSummaryInfo(techSheet, processedLeads.length, totalCommission);
-      console.log(`Updated lead summary information: ${processedLeads.length} leads, $${totalCommission} total`);
+      updateTopSummaryLeadSet(techSheet, processedLeads.length, totalCommission);
+      console.log(`Updated lead summary information (Top): ${processedLeads.length} leads, $${totalCommission} total`);
     } catch (summaryError) {
-      console.error(`Warning: Error updating summary: ${summaryError.message}`);
+      console.error(`Warning: Error updating top summary: ${summaryError.message}`);
       // Continue anyway
     }
     

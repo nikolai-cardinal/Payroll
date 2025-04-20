@@ -84,7 +84,6 @@ function getTimeSheetMapping() {
         dateColumn: 2,
         regHoursColumn: 3,
         otHoursColumn: 4,
-        dtHoursColumn: 5,
         dataStartRow: 2
       };
     }
@@ -94,8 +93,7 @@ function getTimeSheetMapping() {
       nameColumn: findColumnByHeaderForTimesheet(timeSheet, 'Employee Name', headerRow - 1),
       dateColumn: findColumnByHeaderForTimesheet(timeSheet, 'Date', headerRow - 1),
       regHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'Reg Hours', headerRow - 1),
-      otHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'OT Hours', headerRow - 1),
-      dtHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'DT Hours', headerRow - 1)
+      otHoursColumn: findColumnByHeaderForTimesheet(timeSheet, 'OT Hours', headerRow - 1)
     };
     
     // If any columns are not found, fall back to the known structure
@@ -103,7 +101,6 @@ function getTimeSheetMapping() {
     if (mapping.dateColumn === -1) mapping.dateColumn = 2;  // B column
     if (mapping.regHoursColumn === -1) mapping.regHoursColumn = 3;  // C column
     if (mapping.otHoursColumn === -1) mapping.otHoursColumn = 4;  // D column
-    if (mapping.dtHoursColumn === -1) mapping.dtHoursColumn = 5;  // E column
     
     mapping.dataStartRow = 2; // First row with actual data (after headers)
     
@@ -116,7 +113,6 @@ function getTimeSheetMapping() {
       dateColumn: 2,
       regHoursColumn: 3,
       otHoursColumn: 4,
-      dtHoursColumn: 5,
       dataStartRow: 2
     };
   }
@@ -303,7 +299,6 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
     // Calculate hours for the specific technician
     var regHours = 0;
     var otHours = 0;
-    var dtHours = 0;
     
     // Skip the header rows
     for (var i = timeMapping.dataStartRow - 1; i < timeSheetData.length; i++) {
@@ -314,17 +309,15 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
       if (name === technicianName) {
         var regHoursValue = parseFloat(row[timeMapping.regHoursColumn - 1] || 0);
         var otHoursValue = parseFloat(row[timeMapping.otHoursColumn - 1] || 0);
-        var dtHoursValue = parseFloat(row[timeMapping.dtHoursColumn - 1] || 0);
         
-        console.log("Found hours for " + name + ": Reg=" + regHoursValue + ", OT=" + otHoursValue + ", DT=" + dtHoursValue);
+        console.log("Found hours for " + name + ": Reg=" + regHoursValue + ", OT=" + otHoursValue);
         
         regHours += regHoursValue;
         otHours += otHoursValue;
-        dtHours += dtHoursValue;
       }
     }
     
-    console.log("Total hours for " + technicianName + ": Reg=" + regHours + ", OT=" + otHours + ", DT=" + dtHours);
+    console.log("Total hours for " + technicianName + ": Reg=" + regHours + ", OT=" + otHours);
     
     // Try to find the technician's sheet
     var techSheet;
@@ -357,9 +350,6 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
     
     // Update the Overtime Hours
     techSheet.getRange(mapping.otHoursRow, mapping.valueColumn).setValue(otHours);
-    
-    // Update the Double Time Hours (using PTO row as double time)
-    techSheet.getRange(mapping.ptoHoursRow, mapping.valueColumn).setValue(dtHours);
     
     // Wait a moment for calculations to update
     SpreadsheetApp.flush();
@@ -401,8 +391,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
       SpreadsheetApp.getUi().alert(
         `Hours and Pay Period updated for ${technicianName}.\n` +
         `Regular Hours: ${formatHoursToHM(regHours)}\n` +
-        `Overtime Hours: ${formatHoursToHM(otHours)}\n` +
-        `Double Time Hours: ${formatHoursToHM(dtHours)}`
+        `Overtime Hours: ${formatHoursToHM(otHours)}`
       );
     }
     
@@ -485,14 +474,12 @@ function processAllTimesheets() {
         var mapping = getTechnicianSheetMappingForTimesheet(techSheet);
         var regHours = techSheet.getRange(mapping.regHoursRow, mapping.valueColumn).getValue() || 0;
         var otHours = techSheet.getRange(mapping.otHoursRow, mapping.valueColumn).getValue() || 0;
-        var dtHours = techSheet.getRange(mapping.ptoHoursRow, mapping.valueColumn).getValue() || 0;
         
         // Add to processed list
         processed.push({
           name: techName,
           regHours: regHours,
-          otHours: otHours,
-          dtHours: dtHours
+          otHours: otHours
         });
         
       } catch (err) {
@@ -515,7 +502,6 @@ function processAllTimesheets() {
         summaryMessage.push("\n" + techInfo.name + ":");
         summaryMessage.push("• Regular Hours: " + formatHoursToHM(techInfo.regHours));
         summaryMessage.push("• Overtime Hours: " + formatHoursToHM(techInfo.otHours));
-        summaryMessage.push("• Double Time Hours: " + formatHoursToHM(techInfo.dtHours));
       }
     }
     

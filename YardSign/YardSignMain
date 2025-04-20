@@ -71,6 +71,55 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
   var summaryInfo = []; // Array to collect detailed information for the popup
   
   try {
+    // --- Add check for Class 1 technician ---
+    var techClass = '';
+    var technicianRowInRates = -1; // Store row index found
+    try {
+      // Find the technician's row and get class from Column C (index 3)
+      var ratesData = ratesSheet.getRange(3, 1, ratesSheet.getLastRow() - 2, 3).getValues(); // Get Name (A), Dept (B), Class (C) from row 3 onwards
+      for (var i = 0; i < ratesData.length; i++) {
+        if (ratesData[i][0] && ratesData[i][0].toString().trim().toLowerCase() === techName.toLowerCase()) {
+          technicianRowInRates = i + 3; // Actual row number (1-based)
+          techClass = ratesData[i][2] ? ratesData[i][2].toString().trim() : ''; // Get Class from Col C
+          break;
+        }
+      }
+
+      console.log(`Checked class for ${techName} at row ${technicianRowInRates}: Found '${techClass}'`);
+
+      // If Class 1, skip processing
+      if (techClass.toLowerCase() === 'class 1') {
+          console.log(`Skipping Yard Sign processing for Class 1 technician: ${techName}`);
+          
+          // Ensure Technician sheet exists before trying to clear/update
+          var techSheetCheck = ss.getSheetByName(techName);
+          if (techSheetCheck) {
+            // Update summary to 0 and clear any existing yard sign entries
+            updateTopSummaryYardSignPay(techSheetCheck, 0, 0);
+            clearExistingYardSignEntries(techSheetCheck);
+          } else {
+             console.warn(`Technician sheet for ${techName} not found. Cannot clear previous entries or update summary.`);
+          }
+          
+          // Set status to indicate skipping
+          if (!skipStatusUpdate) {
+            // Use a specific status for clarity, or 'Complete' if preferred
+            yardSignSetActionStatus(ratesSheet, row, column, 'Skipped (Class 1)'); 
+            if (!suppressPopup) {
+              ui.alert(`Yard Sign processing skipped for ${techName}.\n\nReason: Technician is Class 1.`);
+            }
+          }
+          
+          return; // Exit the function
+      }
+    } catch (classCheckError) {
+        console.error(`Error checking technician class for ${techName}: ${classCheckError.message}. Proceeding with calculation.`);
+        // Optionally add error status here if the check fails critically
+        // if (!skipStatusUpdate) yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+        // return;
+    }
+    // --- End Class 1 check ---
+
     // First, set status to "Processing..." using our local function
     if (!skipStatusUpdate) {
       yardSignSetActionStatus(ratesSheet, row, column, 'Processing...');
@@ -110,25 +159,26 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
     }
     
     // --- Check if the technician is an apprentice with 0% commission rate ---
+    // Note: This check remains after the Class 1 check. If a tech is Class 1 AND Apprentice 0%, they are skipped by Class 1 rule first.
     var isApprenticeWith0Percent = false;
     try {
       // Find the technician's row in the rates sheet
       var technicianRow = -1;
-      var ratesData = ratesSheet.getDataRange().getValues();
+      var ratesDataApprenticeCheck = ratesSheet.getDataRange().getValues(); // Re-fetch needed data including commission
       
-      for (var i = 1; i < ratesData.length; i++) { // Skip header row
-        var rowData = ratesData[i];
+      for (var i = 1; i < ratesDataApprenticeCheck.length; i++) { // Skip header row
+        var rowData = ratesDataApprenticeCheck[i];
         var name = rowData[0]; // Column A - Technician name
         
         if (name && name.toString().trim().toLowerCase() === techName.toLowerCase()) {
-          technicianRow = i;
+          technicianRow = i; // This is the index within the data array
           break;
         }
       }
       
       if (technicianRow >= 0) {
-        var title = ratesData[technicianRow][2]; // Column C - Position
-        var commissionPercentStr = ratesData[technicianRow][7]; // Column H - Commission %
+        var title = ratesDataApprenticeCheck[technicianRow][2]; // Column C - Position/Class
+        var commissionPercentStr = ratesDataApprenticeCheck[technicianRow][7]; // Column H - Commission %
         
         // Parse the commission percentage
         var commissionPercent = 0;
@@ -139,7 +189,7 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
         }
         
         // Check if it's an apprentice with 0% commission
-        if (title && title.toString().includes("Apprentice") && commissionPercent === 0) {
+        if (title && title.toString().toLowerCase().includes("apprentice") && commissionPercent === 0) {
           isApprenticeWith0Percent = true;
           console.log(`Skipping Yard Sign processing for apprentice with 0% commission: ${techName}`);
           
@@ -147,15 +197,16 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
           updateTopSummaryYardSignPay(techSheet, 0, 0);
           clearExistingYardSignEntries(techSheet);
           
-          // Set status to Complete
+          // Set status to Complete (or a specific status if preferred)
           if (!skipStatusUpdate) {
-            yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
+             // Changed status message for clarity
+            yardSignSetActionStatus(ratesSheet, row, column, 'Skipped (Apprentice 0%)');
             if (!suppressPopup) {
               ui.alert(`Yard Sign processing skipped for ${techName}.\n\nReason: Apprentice with 0% commission rate. No Yard Sign pay is earned.`);
             }
           }
           
-          return;
+          return; // Exit the function
         }
       }
     } catch (e) {
@@ -180,16 +231,19 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
       return;
     }
     
-    // If no entries found, show message
+    // If no entries found, show message and clear data
     if (!result || !result.entries || result.entries.length === 0) {
       console.log("No yard sign entries found for: " + techName);
+      // Update summary to 0 and clear any existing yard sign entries if none found
+      updateTopSummaryYardSignPay(techSheet, 0, 0);
+      clearExistingYardSignEntries(techSheet);
       if (!skipStatusUpdate) {
         yardSignSetActionStatus(ratesSheet, row, column, 'Complete');
         if (!suppressPopup) {
           ui.alert("No yard sign entries found for " + techName + " in the Yard Sign sheet for this period.");
         }
       }
-      return;
+      return; // Exit if no entries
     }
     
     // Write data to technician sheet
@@ -218,8 +272,8 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
     // --- Prepare and Show Summary Popup ---
     summaryInfo.push("Yard Sign Update for: " + techName);
     summaryInfo.push("Total Yard Signs: " + result.entries.length);
-    summaryInfo.push("Fixed Amount per Yard Sign: $25.00");
-    summaryInfo.push("Total Amount: $" + (result.entries.length * 25).toFixed(2));
+    // Assuming a fixed rate calculation happens elsewhere or is implied
+    summaryInfo.push("Total Amount: $" + result.totalAmount.toFixed(2)); 
     
     summaryInfo.push("\nYARD SIGN DETAILS:");
     
@@ -237,9 +291,9 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
       }
       
       summaryInfo.push("• Date: " + dateDisplay);
-      summaryInfo.push("• Job #: " + entry.location);
+      summaryInfo.push("• Job #: " + entry.location); // Assuming location maps to Job #
       summaryInfo.push("• Business Unit: " + (entry.businessUnit || "N/A"));
-      summaryInfo.push("• Amount: $25.00");
+      summaryInfo.push("• Amount: $" + entry.amount.toFixed(2)); // Use actual amount from entry
     }
     
     if (!suppressPopup) {
@@ -247,12 +301,16 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
     }
     
   } catch (e) {
-    console.error("Error in updateYardSignForTechnician: " + e.message);
-    if (ratesSheet && row && column) {
-      yardSignSetActionStatus(ratesSheet, row, column, 'Error');
-    }
-    if (!suppressPopup) {
-      ui.alert("Error updating yard signs: " + e.message);
+    console.error("Error in updateYardSignForTechnician for " + techName + ": " + e.message + " Stack: " + e.stack);
+    if (!skipStatusUpdate) {
+      try {
+        yardSignSetActionStatus(ratesSheet, row, column, 'Error');
+      } catch (statusError) {
+        console.error("Failed to set error status after main try-catch failure.");
+      }
+      if (!suppressPopup) {
+         ui.alert("An unexpected error occurred during Yard Sign processing for " + techName + ": " + e.message);
+      }
     }
   }
 }
@@ -262,80 +320,122 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
 * No approval required, no "Sheet not found" errors
 */
 function processAllYardSigns() {
-  // Initialize the module
-  initYardSign();
-  
-  try {
-    var ui = SpreadsheetApp.getUi();
-    
-    // Make sure the Yard Sign sheet exists and has the proper structure
-    try {
-      var yardSignSheet = ensureYardSignSheetExists();
-      console.log("Confirmed Yard Sign sheet exists with proper structure");
-    } catch (sheetError) {
-      console.error("Error with Yard Sign sheet: " + sheetError.message);
-      ui.alert("Could not ensure Yard Sign sheet exists with proper structure. Error: " + sheetError.message);
-      return;
-    }
-    
-    // Call the utility function directly with the improved version that skips missing sheets
-    var processResult = processAllYardSignsUtility(function(status) {
-      console.log(status); // Log status updates
-    });
-    
-    // Prepare detailed summary
-    var summaryMessage = [];
-    
-    summaryMessage.push("YARD SIGN PROCESSING COMPLETE");
-    
-    if (processResult.success) {
-      summaryMessage.push("\nSUMMARY:");
-      
-      // Extract information from the processResult
-      var processed = processResult.processed || [];
-      var totalCount = processResult.totalCount || 0;
-      var totalAmount = totalCount * 25; // Fixed $25 per yard sign
-      
-      summaryMessage.push("• Total Technicians Processed: " + processed.length);
-      summaryMessage.push("• Total Yard Signs Processed: " + totalCount);
-      summaryMessage.push("• Total Amount: $" + totalAmount.toFixed(2));
-      
-      // If we have technician-specific details
-      if (processed.length > 0) {
-        summaryMessage.push("\nDETAILS BY TECHNICIAN:");
-        
-        for (var i = 0; i < processed.length; i++) {
-          var techInfo = processed[i];
-          var techAmount = techInfo.count * 25; // Fixed $25 per yard sign
-          
-          summaryMessage.push("\n" + techInfo.name + ":");
-          summaryMessage.push("• Yard Signs: " + techInfo.count);
-          summaryMessage.push("• Amount: $" + techAmount.toFixed(2));
-        }
-      }
-      
-      // Only show errors if we have some (and only real errors, not "Sheet not found")
-      if (processResult.errors && processResult.errors.length > 0) {
-        var realErrors = processResult.errors.filter(function(err) {
-          return !err.includes("Sheet not found");
-        });
-        
-        if (realErrors.length > 0) {
-          summaryMessage.push("\nERRORS:");
-          for (var j = 0; j < realErrors.length; j++) {
-            summaryMessage.push("• " + realErrors[j]);
-          }
-        }
-      }
-      
-      // Show the complete detailed summary
-      ui.alert(summaryMessage.join("\n"));
-    } else {
-      // Just show the error message
-      ui.alert(processResult.message);
-    }
-  } catch (e) {
-    console.error("Error in processAllYardSigns: " + e.message);
-    SpreadsheetApp.getUi().alert("Error: " + e.message);
+  initYardSign(); // Ensure initialization
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+  var ui = SpreadsheetApp.getUi();
+  var processedCount = 0;
+  var skippedCount = 0;
+  var errorCount = 0;
+  var skippedTechs = []; // Store names of skipped technicians
+
+  if (!ratesSheet) {
+    ui.alert('Error: Hourly + Spiff Pay sheet not found.');
+    return;
   }
+
+  // Get technician names and classes from the rates sheet (Columns A and C)
+  // Assuming data starts from row 3
+  var startRow = 3; 
+  var lastRow = ratesSheet.getLastRow();
+  if (lastRow < startRow) {
+    ui.alert("No technician data found in 'Hourly + Spiff Pay' sheet (starting row 3).");
+    return;
+  }
+  // Get columns A (Name), B (Dept - maybe needed later?), C (Class)
+  var range = ratesSheet.getRange(startRow, 1, lastRow - startRow + 1, 3); 
+  var data = range.getValues();
+
+  // Use a sidebar or toast for progress instead of modal dialog if possible
+  // ui.showSidebar(...) or SpreadsheetApp.getActiveSpreadsheet().toast(...)
+  // For simplicity, using modal dialog as before:
+  ui.showModalDialog(HtmlService.createHtmlOutput('<p>Processing all Yard Signs... Please wait.</p>'), 'Processing');
+
+  for (var i = 0; i < data.length; i++) {
+    var techName = data[i][0];
+    // Get Class from Column C (index 2 in the zero-based data array)
+    var techClass = data[i][2] ? data[i][2].toString().trim() : ''; 
+    var currentRow = startRow + i; // Actual row number for logging
+
+    // Skip empty rows
+    if (!techName || techName.toString().trim() === '') {
+      continue;
+    }
+
+    // Check if technician is Class 1
+    if (techClass.toLowerCase() === 'class 1') {
+        console.log(`Skipping Yard Sign processing for Class 1 technician: ${techName} (Row ${currentRow})`);
+        skippedCount++;
+        skippedTechs.push(`${techName} (Class 1)`);
+        
+        // Ensure tech sheet exists before clearing/updating
+        var techSheetCheck = ss.getSheetByName(techName);
+        if (techSheetCheck) {
+            try {
+              // Clear previous entries and set summary to 0
+              updateTopSummaryYardSignPay(techSheetCheck, 0, 0);
+              clearExistingYardSignEntries(techSheetCheck);
+            } catch (clearError) {
+               console.error(`Error clearing data for skipped Class 1 tech ${techName}: ${clearError.message}`);
+               // Don't increment error count here, just log it.
+            }
+        } else {
+            console.warn(`Technician sheet for skipped Class 1 tech ${techName} not found. Cannot clear previous entries.`);
+        }
+        continue; // Move to the next technician
+    }
+
+    // Check if technician sheet exists before processing (redundant check if updateYardSign handles it, but safe)
+    var techSheet = ss.getSheetByName(techName);
+    if (!techSheet) {
+      console.warn(`Skipping Yard Sign for ${techName}: Technician sheet not found.`);
+      skippedCount++;
+      skippedTechs.push(`${techName} (No Sheet)`);
+      continue; // Skip to next technician
+    }
+
+    try {
+      // Call the individual processing function
+      // Pass null for row/column as they aren't relevant for status updates here
+      // Pass true for skipStatusUpdate and suppressPopup
+      console.log(`Processing Yard Signs for: ${techName} (Row ${currentRow})`);
+      // The called function will now handle apprentice checks internally as well
+      updateYardSignForTechnician(techName, null, null, true, true); 
+      processedCount++;
+    } catch (e) {
+      console.error(`Error processing Yard Signs for ${techName}: ${e.message}`);
+      errorCount++;
+      // Optionally: Log error without stopping the loop for other techs
+      skippedTechs.push(`${techName} (Error: ${e.message.substring(0, 50)})`); // Add to skipped list with error note
+    }
+    
+    // Add a small delay and flush to prevent timeouts on large lists
+    Utilities.sleep(50); // Reduced delay slightly
+    SpreadsheetApp.flush(); 
+  }
+  
+  // Close the modal dialog - usually happens automatically
+  // Example: DriveApp.getApp().close(); // Incorrect, just letting script end handle it.
+
+  // Display summary message
+  var summaryMessage = `Yard Sign Processing Complete.\n\n` +
+                       `Processed: ${processedCount}\n` +
+                       `Skipped: ${skippedCount}\n` +
+                       `Errors: ${errorCount}`;
+                       
+  if (skippedTechs.length > 0) {
+     // Limit the number of names shown in the alert if the list is very long
+     const maxSkippedToShow = 15;
+     let skippedDisplayList = skippedTechs;
+     if (skippedTechs.length > maxSkippedToShow) {
+        skippedDisplayList = skippedTechs.slice(0, maxSkippedToShow);
+        skippedDisplayList.push(`... and ${skippedTechs.length - maxSkippedToShow} more`);
+     }
+     // Correctly format the skipped list joining
+     summaryMessage += "\n\nSkipped/Error Technicians:\n - "; // Add separator
+     summaryMessage += skippedDisplayList.join('\n - '); // Join the list items
+     summaryMessage += "\n(Check Logs for full details if list is long)"; // Add final note
+  }
+
+  ui.alert(summaryMessage);
 } 

@@ -6,20 +6,22 @@
  * Validates the Lead Set sheet has all required columns.
  * 
  * @param {SpreadsheetApp.Sheet} sheet - The Lead Set sheet to validate.
- * @return {Boolean} True if the sheet is valid, false otherwise.
+ * @return {Object} An object with 'valid' (Boolean) and 'reason' (String) properties.
  */
 function validateLeadSetSheet(sheet) {
   if (!sheet) {
-    console.error("Lead Set sheet is null or undefined");
-    return false;
+    const reason = "Lead Set sheet is null or undefined";
+    console.error(reason);
+    return { valid: false, reason: reason };
   }
   
   try {
     const data = sheet.getDataRange().getValues();
     
     if (data.length === 0) {
-      console.error("Lead Set sheet is empty");
-      return false;
+      const reason = "Lead Set sheet is empty";
+      console.error(reason);
+      return { valid: false, reason: reason };
     }
     
     // Log the headers for debugging
@@ -27,8 +29,9 @@ function validateLeadSetSheet(sheet) {
     
     // Make sure we have at least 7 columns (up to column G)
     if (data[0].length < 7) {
-      console.error(`Lead Set sheet has ${data[0].length} columns, but at least 7 are required`);
-      return false;
+      const reason = `Lead Set sheet has ${data[0].length} columns, but at least 7 are required`;
+      console.error(reason);
+      return { valid: false, reason: reason };
     }
     
     // Check for essential columns
@@ -47,15 +50,17 @@ function validateLeadSetSheet(sheet) {
     }
     
     if (missingColumns.length > 0) {
-      console.error(`Lead Set sheet missing required columns: ${missingColumns.join(', ')}`);
-      return false;
+      const reason = `Lead Set sheet missing required columns: ${missingColumns.join(', ')}`;
+      console.error(reason);
+      return { valid: false, reason: reason };
     }
     
     console.log(`DEBUG: Lead Set sheet validation successful`);
-    return true;
+    return { valid: true, reason: "Sheet is valid" };
   } catch (error) {
-    console.error(`Error validating Lead Set sheet: ${error.message}`);
-    return false;
+    const reason = `Error validating Lead Set sheet: ${error.message}`;
+    console.error(reason);
+    return { valid: false, reason: reason };
   }
 }
 

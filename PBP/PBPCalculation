@@ -44,15 +44,15 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
    var crossSaleGroup = row[9]; // Column J
 
    // --- Initial Check: Is this a PBP row involving the current tech? ---
-   var pbpOrYardMatch = crossSaleGroup ? crossSaleGroup.toString().match(/(?:pbp|yard)\s*(\d+(\.\d+)?)/i) : null;
-   var entryPbpAmount = (pbpOrYardMatch && pbpOrYardMatch[1]) ? parseFloat(pbpOrYardMatch[1]) : 0;
-   console.log(` -> Row ${i+1}: Cross Sale Group='${crossSaleGroup}', Parsed PBP/Yard Amount=${entryPbpAmount}`);
+   var pbpMatch = crossSaleGroup ? crossSaleGroup.toString().match(/pbp\s*(\d+(\.\d+)?)/i) : null; // Only match "pbp"
+   var entryPbpAmount = (pbpMatch && pbpMatch[1]) ? parseFloat(pbpMatch[1]) : 0;
+   console.log(` -> Row ${i+1}: Cross Sale Group='${crossSaleGroup}', Parsed PBP Amount=${entryPbpAmount}`); // Updated log message
 
    if (entryPbpAmount <= 0) {
-     console.log(` -> Row ${i+1}: Skipping (Not PBP/Yard or zero amount).`);
-     continue; // Skip if not PBP/Yard or zero amount
+     console.log(` -> Row ${i+1}: Skipping (Not PBP or zero amount).`); // Updated log message
+     continue; // Skip if not PBP or zero amount
    }
-   console.log(` -> Row ${i+1}: PBP/Yard Amount OK.`);
+   console.log(` -> Row ${i+1}: PBP Amount OK.`); // Updated log message
 
    // --- Identify Involved Technicians for this job ---
    var primaryTechnicianName = primaryTechnicianRaw ? primaryTechnicianRaw.toString().trim() : null;
