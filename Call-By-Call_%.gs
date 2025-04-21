@@ -142,7 +142,7 @@ function parsePercentage(value) {
 }
 
 /**
- * Parses date range string (e.g. "3/22 - 3/30") into start and end Date objects.
+ * Parses date range string (e.g. "3/22 - 3/30" or "04_13_25 - 04_19_25") into start and end Date objects.
  * @param {string} rangeStr The date range string.
  * @return {Object} Object containing start and end Date objects.
  */
@@ -151,14 +151,31 @@ function parseDateRange(rangeStr) {
     const [startStr, endStr] = rangeStr.split('-').map(p => p.trim());
     const year = new Date().getFullYear();
     
-    // Create Date objects and normalize times
-    const start = new Date(`${startStr}/${year}`);
-    const end = new Date(`${endStr}/${year}`);
+    // Parse date strings to handle multiple formats
+    let start, end;
+    
+    // Format detection and parsing
+    if (startStr.includes('_') && endStr.includes('_')) {
+      // Handle underscore format: "MM_DD_YY"
+      start = parseUnderscoreDate(startStr, year);
+      end = parseUnderscoreDate(endStr, year);
+    } else {
+      // Handle slash format: "M/DD"
+      start = new Date(`${startStr}/${year}`);
+      end = new Date(`${endStr}/${year}`);
+    }
+    
+    // Verify we have valid dates
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      console.error(`Failed to parse dates: startStr="${startStr}", endStr="${endStr}"`);
+      throw new Error("Invalid date format");
+    }
     
     // Set times to beginning/end of day for safe comparisons
     start.setHours(0, 0, 0, 0);
     end.setHours(23, 59, 59, 999);
     
+    console.log(`Parsed date range: ${start.toDateString()} to ${end.toDateString()}`);
     return { start, end };
   } catch (error) {
     console.error(`Error parsing date range: ${error.message}`);
@@ -166,6 +183,34 @@ function parseDateRange(rangeStr) {
     const today = new Date();
     return { start: today, end: today };
   }
+}
+
+/**
+ * Parses a date string with underscores (MM_DD_YY) into a Date object.
+ * @param {string} dateStr The date string in MM_DD_YY format.
+ * @param {number} fullYear The full 4-digit year.
+ * @return {Date} The parsed Date object.
+ */
+function parseUnderscoreDate(dateStr, fullYear) {
+  // Split the components
+  const parts = dateStr.split('_');
+  if (parts.length < 3) {
+    throw new Error(`Invalid underscore date format: ${dateStr}`);
+  }
+  
+  const month = parseInt(parts[0], 10) - 1; // JavaScript months are 0-based
+  const day = parseInt(parts[1], 10);
+  
+  // Handle 2-digit year vs 4-digit year
+  let year;
+  if (parts[2].length === 2) {
+    // If we have a 2-digit year like "25", we need to convert to full year
+    year = 2000 + parseInt(parts[2], 10);
+  } else {
+    year = parseInt(parts[2], 10);
+  }
+  
+  return new Date(year, month, day);
 }
 
 /**

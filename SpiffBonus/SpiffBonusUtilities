@@ -208,4 +208,52 @@ function resetActionDropdown(ratesSheet, row, col) {
     console.error(`Failed to reset action dropdown for row ${row}, col ${col}: ${e.message}`);
     // SpreadsheetApp.getUi().alert("Failed to reset status dropdown for row " + row);
   }
+}
+
+/**
+* Checks if a technician is Class 1 by examining column C in the Hourly + Spiff Pay sheet.
+* @param {string} technicianName - The name of the technician to check
+* @param {Sheet} [ratesSheet] - Optional. The Hourly + Spiff Pay sheet. If not provided, it will be fetched.
+* @return {boolean} True if the technician is Class 1, false otherwise
+*/
+function isTechnicianClass1(technicianName, ratesSheet) {
+  if (!technicianName) return false;
+  
+  try {
+    // Get the rates sheet if not provided
+    if (!ratesSheet) {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+      if (!ratesSheet) {
+        console.error("isTechnicianClass1: Hourly + Spiff Pay sheet not found");
+        return false;
+      }
+    }
+    
+    // Get mapping to find technician row
+    var ratesMapping = getRatesSheetMapping();
+    
+    // Find the technician row
+    var techRow = findTechnicianRow(ratesSheet, technicianName, ratesMapping.dataStartRow);
+    if (techRow <= 0) {
+      console.warn(`isTechnicianClass1: Could not find row for technician ${technicianName}`);
+      return false;
+    }
+    
+    // Get the value in column C (position/class column)
+    // Column C is index 3
+    var positionValue = ratesSheet.getRange(techRow, 3).getValue();
+    
+    // Check if it contains "Class 1" (case insensitive)
+    if (positionValue && typeof positionValue === 'string' && 
+        positionValue.toString().toLowerCase().includes('class 1')) {
+      console.log(`Technician ${technicianName} is Class 1 - will skip Spiff/Bonus processing`);
+      return true;
+    }
+    
+    return false;
+  } catch (e) {
+    console.error(`Error in isTechnicianClass1 for ${technicianName}: ${e.message}`);
+    return false; // Default to not Class 1 in case of error
+  }
 } 

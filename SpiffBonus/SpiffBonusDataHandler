@@ -178,6 +178,7 @@ function writeSpiffDataWithPreservation(sheet, newSpiffData, customerNameColInde
 /**
  * Processes spiff and bonus data for a technician.
  * Extracts data from spiffBonusSheet for the specified technician and updates their sheet.
+ * Skips processing for Class 1 technicians.
  * 
  * @param {Sheet} techSheet The technician's sheet object.
  * @param {string} technicianName The name of the technician being processed.
@@ -188,6 +189,26 @@ function writeSpiffDataWithPreservation(sheet, newSpiffData, customerNameColInde
 function processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet, suppressPopup = false) {
   try {
     console.log(`Starting Spiff/Bonus data processing for: ${technicianName}`);
+    
+    // Check if technician is Class 1 and skip if so
+    if (typeof isTechnicianClass1 === 'function') {
+      // Don't pass ratesSheet here - let isTechnicianClass1 get it when needed
+      if (isTechnicianClass1(technicianName)) {
+        console.log(`Skipping Spiff/Bonus processing for Class 1 technician: ${technicianName}`);
+        
+        if (!suppressPopup) {
+          SpreadsheetApp.getUi().alert(`Skipped Spiff/Bonus processing for ${technicianName} (Class 1 technician)`);
+        }
+        
+        // Return empty success result
+        return {
+          entryCount: 0,
+          totalAmount: 0,
+          skipped: true,
+          reason: "Class 1 technician"
+        };
+      }
+    }
     
     // Get Header Map
     var headerMap = getSpiffBonusHeaderMap(spiffBonusSheet);

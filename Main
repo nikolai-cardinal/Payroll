@@ -499,10 +499,44 @@ function runFullPayroll() {
       for (var j = 0; j < techResults.length; j++) {
         var tech = techResults[j];
         summaryMessage += `\n${tech.name}:\n`;
-        summaryMessage += `  ${tech.results.spiffBonus ? "✅" : "❌"} Spiff/Bonus\n`;
-        summaryMessage += `  ${tech.results.pbp ? "✅" : "❌"} PBP\n`;
-        summaryMessage += `  ${tech.results.yardSign ? "✅" : "❌"} Yard Signs\n`;
+        
+        // Check if technician is Class 1
+        var isClass1 = false;
+        try {
+          var technicianRow = findTechnicianRow(ratesSheet, tech.name, 3); // Assuming data starts at row 3
+          if (technicianRow > 0) {
+            var positionTitle = ratesSheet.getRange(technicianRow, 3).getValue().toString().toLowerCase(); // Column C
+            isClass1 = positionTitle.includes("class 1");
+          }
+        } catch (e) {
+          console.error(`Error checking Class 1 status: ${e.message}`);
+        }
+        
+        // Spiff/Bonus: Class 1 technicians are not eligible
+        if (isClass1) {
+          summaryMessage += `  ⚠️ Skipped (Not Eligible) Spiff/Bonus\n`;
+        } else {
+          summaryMessage += `  ${tech.results.spiffBonus ? "✅" : "❌"} Spiff/Bonus\n`;
+        }
+        
+        // PBP: Class 1 technicians are not eligible
+        if (isClass1) {
+          summaryMessage += `  ⚠️ Skipped (Not Eligible) PBP\n`;
+        } else {
+          summaryMessage += `  ${tech.results.pbp ? "✅" : "❌"} PBP\n`;
+        }
+        
+        // Yard Signs: Class 1 technicians are not eligible
+        if (isClass1) {
+          summaryMessage += `  ⚠️ Skipped (Not Eligible) Yard Signs\n`;
+        } else {
+          summaryMessage += `  ${tech.results.yardSign ? "✅" : "❌"} Yard Signs\n`;
+        }
+        
+        // Lead Sets: No eligibility restrictions based on class
         summaryMessage += `  ${tech.results.leadSet ? "✅" : "❌"} Lead Sets\n`;
+        
+        // Timesheet: No eligibility restrictions based on class
         summaryMessage += `  ${tech.results.timesheet ? "✅" : "❌"} Timesheet\n`;
       }
     } else {
@@ -601,7 +635,8 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
     // Flush to ensure any previous operations are completed
     SpreadsheetApp.flush();
     
-    // 1. Process Spiff/Bonus - Skip logic is now handled internally by the Spiff/Bonus module if needed based on Class 1
+    // 1. Process Spiff/Bonus - Skip logic is handled internally by the Spiff/Bonus module 
+    // which will automatically skip processing for "Class 1" technicians
     try {
       var spiffBonusSheet = ss.getSheetByName('Spiff/Bonus');
       if (spiffBonusSheet) {
@@ -831,16 +866,50 @@ function runPayrollForTechnician(technicianName, actionRow, actionColumn, suppre
       timesheet: false
     };
     
+    // Check if technician is Class 1 (ineligible for certain processes)
+    var isClass1 = false;
+    try {
+      var technicianRow = findTechnicianRow(ratesSheet, technicianName, 3); // Assuming data starts at row 3
+      if (technicianRow > 0) {
+        var positionTitle = ratesSheet.getRange(technicianRow, 3).getValue().toString().toLowerCase(); // Column C
+        isClass1 = positionTitle.includes("class 1");
+      }
+    } catch (e) {
+      console.error(`Error checking Class 1 status: ${e.message}`);
+    }
+    
     // Call the silent version of the function and capture results
     // If suppressFinalSummary is true, also suppress stage popups
     processResults = processPayrollForTechnicianSilently(technicianName, actionRow, actionColumn, suppressFinalSummary);
     
     // Create a detailed status report
     var statusReport = `Payroll processing completed for ${technicianName}:\n\n`;
-    statusReport += `${processResults.spiffBonus ? "✅" : "❌"} Spiff/Bonus\n`;
-    statusReport += `${processResults.pbp ? "✅" : "❌"} PBP\n`;
-    statusReport += `${processResults.yardSign ? "✅" : "❌"} Yard Signs\n`;
+    
+    // For Spiff/Bonus: Class 1 technicians are not eligible
+    if (isClass1) {
+      statusReport += `⚠️ Skipped (Not Eligible) Spiff/Bonus\n`;
+    } else {
+      statusReport += `${processResults.spiffBonus ? "✅" : "❌"} Spiff/Bonus\n`;
+    }
+    
+    // For PBP: Class 1 technicians are not eligible
+    if (isClass1) {
+      statusReport += `⚠️ Skipped (Not Eligible) PBP\n`;
+    } else {
+      statusReport += `${processResults.pbp ? "✅" : "❌"} PBP\n`;
+    }
+    
+    // For Yard Signs: Class 1 technicians are not eligible
+    if (isClass1) {
+      statusReport += `⚠️ Skipped (Not Eligible) Yard Signs\n`;
+    } else {
+      statusReport += `${processResults.yardSign ? "✅" : "❌"} Yard Signs\n`;
+    }
+    
+    // For Lead Sets: No eligibility restrictions based on class
     statusReport += `${processResults.leadSet ? "✅" : "❌"} Lead Sets\n`;
+    
+    // For Timesheet: No eligibility restrictions based on class
     statusReport += `${processResults.timesheet ? "✅" : "❌"} Timesheet\n`;
     
     // Show a popup with the detailed status report and wait for user to click OK

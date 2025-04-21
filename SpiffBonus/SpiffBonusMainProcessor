@@ -6,6 +6,7 @@
 /**
  * Main processing function triggered by the "Spiff/Bonus" action.
  * Gets data, calculates the bonus, and updates the technician sheet with the redesigned layout.
+ * Skips processing for Class 1 technicians.
  *
  * @param {Sheet} techSheet The technician's sheet object.
  * @param {string} technicianName The name of the technician being processed.
@@ -28,8 +29,19 @@ function processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesS
     }
 
     console.log(`Starting Spiff/Bonus processing for: ${technicianName}`);
+    
+    // --- 2. Check if technician is Class 1 and skip if so ---
+    if (typeof isTechnicianClass1 === 'function' && isTechnicianClass1(technicianName, ratesSheet)) {
+      console.log(`Skipping Spiff/Bonus processing for Class 1 technician: ${technicianName}`);
+      setActionStatus(ratesSheet, triggerRow, triggerCol, 'Complete');
+      
+      if (!suppressPopup) {
+        ui.alert(`Skipped Spiff/Bonus processing for ${technicianName} (Class 1 technician)`);
+      }
+      return;
+    }
 
-    // --- 2. Get Header Map ---
+    // --- 3. Get Header Map ---
     var headerMap = getSpiffBonusHeaderMap(spiffBonusSheet);
     if (!headerMap || !headerMap.soldBy || !headerMap.assignedTechnician || 
         !headerMap.customerName || !headerMap.jobBusinessUnit || 
@@ -42,10 +54,10 @@ function processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesS
       return;
     }
 
-    // --- 3. Get all data from Spiff/Bonus sheet ---
+    // --- 4. Get all data from Spiff/Bonus sheet ---
     var spiffBonusData = spiffBonusSheet.getDataRange().getValues();
 
-    // --- 4. Collect customer data for the technician ---
+    // --- 5. Collect customer data for the technician ---
     var customerData = [];
     var totalSpiffAmount = 0;
     var tz = Session.getScriptTimeZone() || 'America/New_York';
@@ -98,7 +110,7 @@ function processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesS
       }
     }
     
-    // --- 5. Find customer data section ---
+    // --- 6. Find customer data section ---
     var customerHeaderRow = findSpiffCustomerDataSection(techSheet);
     if (customerHeaderRow <= 0) {
       console.error(`Could not find Customer section in ${technicianName}'s sheet`);
@@ -106,17 +118,17 @@ function processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesS
       return;
     }
     
-    // --- 6. Clear existing Spiff rows BEFORE updating summary ---
+    // --- 7. Clear existing Spiff rows BEFORE updating summary ---
     var rowsCleared = clearSpiffDataSection(techSheet, customerData);
     console.log(`Cleared ${rowsCleared} existing spiff rows before updating`);
     
-    // --- 7. Update technician's top summary AFTER clearing rows ---
+    // --- 8. Update technician's top summary AFTER clearing rows ---
     updateTopSummarySpiffs(techSheet, totalSpiffAmount, customerData.length);
     
-    // --- 8. Write new Spiff data ---
+    // --- 9. Write new Spiff data ---
     writeSpiffDataToSheet(techSheet, customerHeaderRow, customerData);
 
-    // --- 9. Create summary for popup ---
+    // --- 10. Create summary for popup ---
     summaryInfo.push("SPIFF Bonus Update for: " + technicianName);
     summaryInfo.push("Total Calculated SPIFF: $" + totalSpiffAmount.toFixed(2));
     summaryInfo.push("Number of SPIFF Entries: " + customerData.length);
@@ -139,7 +151,7 @@ function processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesS
       ui.alert(summaryInfo.join("\n"));
     }
 
-    // --- 10. Set final status ---
+    // --- 11. Set final status ---
     console.log(`Successfully processed Spiff/Bonus for: ${technicianName}`);
     setActionStatus(ratesSheet, triggerRow, triggerCol, 'Complete');
 
@@ -155,6 +167,7 @@ function processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesS
 /**
  * Processes Spiff/Bonus for all technicians.
  * Called from the menu handler in Main.js.
+ * Skips Class 1 technicians.
  */
 function processSpiffBonusAll() {
   var ui = SpreadsheetApp.getUi();
@@ -169,6 +182,7 @@ function processSpiffBonusAll() {
   var ratesMapping = getRatesSheetMapping(); // Use utility function
   var ratesData = ratesSheet.getDataRange().getValues();
   var techsToProcess = [];
+  var skippedClass1 = [];
 
   // Get all sheets in the spreadsheet to check for existence
   var allSheets = ss.getSheets();
@@ -183,6 +197,17 @@ function processSpiffBonusAll() {
 
     // Ensure techName is valid and sheet exists
     if (techName && typeof techName === 'string' && techName.trim() !== "" && sheetNames.indexOf(techName) !== -1) {
+      // Check if tech is Class 1 (column C)
+      var positionValue = row[2]; // Column C (index 2)
+      var isClass1 = positionValue && typeof positionValue === 'string' && 
+                     positionValue.toString().toLowerCase().includes('class 1');
+      
+      if (isClass1) {
+        console.log(`Skipping Class 1 technician: ${techName}`);
+        skippedClass1.push(techName);
+        continue;
+      }
+      
       techsToProcess.push({
         name: techName,
         row: i + 1, // 1-based row index
@@ -192,7 +217,11 @@ function processSpiffBonusAll() {
   }
 
   if (techsToProcess.length === 0) {
-    ui.alert('No technicians with sheets found for Spiff/Bonus processing.');
+    var message = 'No technicians with sheets found for Spiff/Bonus processing.';
+    if (skippedClass1.length > 0) {
+      message += `\n\nNote: Skipped ${skippedClass1.length} Class 1 technicians: ${skippedClass1.join(', ')}`;
+    }
+    ui.alert(message);
     return;
   }
 
@@ -245,6 +274,13 @@ function processSpiffBonusAll() {
   summaryMessage.push("\nSUMMARY:");
   summaryMessage.push("• Total Technicians Processed: " + successCount);
   summaryMessage.push("• Total Amount: $" + totalAmount.toFixed(2));
+  
+  // Add Class 1 section if any techs were skipped
+  if (skippedClass1.length > 0) {
+    summaryMessage.push("\nSKIPPED (CLASS 1 TECHNICIANS):");
+    summaryMessage.push("• Total skipped: " + skippedClass1.length);
+    summaryMessage.push("• Technicians: " + skippedClass1.join(", "));
+  }
   
   // Add technician details section
   if (processedTechs.length > 0) {
