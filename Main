@@ -172,6 +172,25 @@ if (isProcessing) {
            setActionStatus(sheet, row, column, '⚠️ Error');
          }
       } else if (value === "Payroll") {
+        // Update the technician's sheet Pay Period before running payroll
+        try {
+          // Get technician's sheet
+          var techSheet = ss.getSheetByName(techName);
+          if (techSheet) {
+            // Get the current pay period
+            var currentPayPeriod = getCurrentPayPeriod();
+            
+            // Get the mapping for technician sheet
+            var techMapping = getTechnicianSheetMapping(techSheet);
+            
+            // Update cell A2 with the pay period
+            techSheet.getRange(techMapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
+            console.log(`Updated Pay Period in ${techName}'s sheet to: ${currentPayPeriod}`);
+          }
+        } catch (payPeriodError) {
+          console.error(`Error updating Pay Period for ${techName}: ${payPeriodError.message}`);
+        }
+        
         // Run all payroll processes for this specific technician
         // Explicitly pass false for suppressFinalSummary to ensure popup shows when run individually
         runPayrollForTechnician(techName, row, column, false);
@@ -412,6 +431,9 @@ function runFullPayroll() {
     
     ui.alert("Starting full payroll process. This will run payroll for all technicians with existing sheets.");
     
+    // Get the current pay period
+    var currentPayPeriod = getCurrentPayPeriod();
+    
     // Get the list of technicians from the rates sheet
     var ratesMapping = getRatesSheetMapping(); // Make sure this mapping includes positionColumn (usually 2)
     if (!ratesMapping || !ratesMapping.positionColumn) {
@@ -460,6 +482,18 @@ function runFullPayroll() {
            console.log(`${techName} does not have 'Service' in dept ('${deptValue}') or sheet exists. Not adding to specific skipped list.`);
         }
         continue; // Skip to next technician regardless of department
+      }
+      
+      // Update the pay period in the technician's sheet
+      try {
+        // Get the mapping for technician sheet
+        var techMapping = getTechnicianSheetMapping(techSheet);
+        
+        // Update cell A2 with the pay period
+        techSheet.getRange(techMapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
+        console.log(`Updated Pay Period in ${techName}'s sheet to: ${currentPayPeriod}`);
+      } catch (payPeriodError) {
+        console.error(`Error updating Pay Period for ${techName}: ${payPeriodError.message}`);
       }
       
       // --- Update C17 from Service Tab --- 
@@ -856,6 +890,24 @@ function runPayrollForTechnician(technicianName, actionRow, actionColumn, suppre
     var ui = SpreadsheetApp.getUi();
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var ratesSheet = ss.getSheetByName(HOURLY_SPIFF_SHEET_NAME);
+    
+    // Get technician's sheet and update Pay Period
+    var techSheet = ss.getSheetByName(technicianName);
+    if (techSheet) {
+      try {
+        // Get the current pay period
+        var currentPayPeriod = getCurrentPayPeriod();
+        
+        // Get the mapping for technician sheet
+        var techMapping = getTechnicianSheetMapping(techSheet);
+        
+        // Update cell A2 with the pay period
+        techSheet.getRange(techMapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
+        console.log(`Updated Pay Period in ${technicianName}'s sheet to: ${currentPayPeriod}`);
+      } catch (payPeriodError) {
+        console.error(`Error updating Pay Period for ${technicianName}: ${payPeriodError.message}`);
+      }
+    }
     
     // Store success status for each process
     var processResults = {
