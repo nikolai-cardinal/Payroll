@@ -226,24 +226,13 @@ function getCurrentPayPeriodForTimesheet() {
 }
 
 /**
- * Formats decimal hours to H:m format
+ * Formats decimal hours to display with two decimal places
  * @param {number} decimalHours - The hours in decimal format
- * @return {string} The formatted time in H:m format
+ * @return {string} The formatted decimal hours
  */
 function formatHoursToHM(decimalHours) {
-  // Extract whole hours
-  const hours = Math.floor(decimalHours);
-  
-  // Calculate minutes from decimal part
-  const minutes = Math.round((decimalHours - hours) * 60);
-  
-  // Handle case where minutes rounds to 60
-  if (minutes === 60) {
-    return (hours + 1) + ":0";
-  }
-  
-  // Format as H:m
-  return hours + ":" + (minutes < 10 ? "0" + minutes : minutes);
+  // Just return the decimal hours with 2 decimal places
+  return decimalHours.toFixed(2);
 }
 
 /**

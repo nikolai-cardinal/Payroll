@@ -32,6 +32,11 @@ ui.createMenu('Technician Tools')
   .addItem('All Lead Set', 'processAllLeadSets')
   .addItem('Create New Sheet', 'createNewTechnicianSheet')
   .addToUi();
+
+// Add the Approval Monitor menu items
+addApprovalMonitorMenuItems(ui);
+// Initialize the Approval Monitor
+initApprovalMonitor();
 }
 
 /**
@@ -210,6 +215,15 @@ if (isProcessing) {
     } catch (error) {
       console.error("Error handling LEAD entry in column J: " + error.message);
     }
+  }
+
+  // Delegate to Approval Monitor to handle checkbox resets
+  if (typeof onEditResetApprovalStatus === 'function') {
+    try { onEditResetApprovalStatus(e); } catch(err) { console.error('onEditResetApprovalStatus error: '+err.message); }
+  }
+  // Delegate to Technician sheet recreate handler when dropdown set to Complete
+  if (typeof onEditRecreateTechnicianSheet === 'function') {
+    try { onEditRecreateTechnicianSheet(e); } catch(err) { console.error('onEditRecreateTechnicianSheet error: '+err.message); }
   }
 } catch (error) {
   console.error("Error in onEdit: " + error.message + " Stack: " + error.stack);
@@ -853,9 +867,6 @@ function processPayrollForTechnicianSilently(technicianName, actionRow, actionCo
         // Column I is the 9th column (index 9)
         ratesSheet.getRange(tempRow, 9).setValue(totalPayValue);
         console.log(`Updated pay value for ${technicianName} in Hourly + Spiff Pay sheet: ${totalPayValue}`);
-        
-        // Add warning emoji to Column D of technician's sheet (merged cell)
-        techSheet.getRange("D2").setValue("⚠️");
       } else {
         console.error(`Could not find row for ${technicianName} in Hourly + Spiff Pay sheet`);
       }

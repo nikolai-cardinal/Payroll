@@ -56,13 +56,13 @@ function getCurrentPayPeriodForTimesheet() {
 }
 
 /**
- * Formats decimal hours to H:m format
+ * Formats decimal hours to display with two decimal places
  * @param {number} decimalHours - The hours in decimal format
- * @return {string} The formatted time in H:m format
+ * @return {string} The formatted decimal hours
  */
 function formatHoursToHM(decimalHours) {
-  // Delegate to the TimeSheetLogic module
-  return formatHoursToHM(decimalHours);
+  // Just return the decimal hours with 2 decimal places
+  return decimalHours.toFixed(2);
 }
 
 /**

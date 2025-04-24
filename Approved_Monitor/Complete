@@ -1,0 +1,127 @@
+/* global getRatesSheetMapping, getCurrentPayPeriod, HOURLY_SPIFF_SHEET_NAME, APPROVAL_COLUMN, EMPLOYEE_NAME_COLUMN, clearApprovalStatus */
+/*
+ * Cardinal Payroll System - Technician Sheet Complete Handler
+ * When column J (Approval dropdown) in "Hourly + Spiff Pay" is set to "Complete",
+ * the existing technician sheet is deleted and a fresh copy is generated from the
+ * "Template for Service" sheet. The behaviour mirrors createNewTechnicianSheet()
+ * but runs automatically via the global onEdit trigger.
+ *
+ * IMPORTANT: Wire this up from your main onEdit(e) handler just like
+ * onEditResetApprovalStatus:
+ *
+ *   function onEdit(e) {
+ *     // ...your logic...
+ *     if (typeof onEditRecreateTechnicianSheet === 'function') {
+ *       try { onEditRecreateTechnicianSheet(e); } catch (err) {
+ *         console.error('Re-creating technician sheet failed: ' + err);
+ *       }
+ *     }
+ *   }
+ */
+
+/**
+ * Recreates a technician sheet when the Approval column (J) is set to "Complete".
+ * @param {GoogleAppsScript.Events.SheetsOnEdit} e - The onEdit event object.
+ */
+function onEditRecreateTechnicianSheet(e) {
+  try {
+    var range   = e.range;
+    var sheet   = range.getSheet();
+
+    // Only act on the Hourly + Spiff Pay sheet
+    if (sheet.getName() !== HOURLY_SPIFF_SHEET_NAME) return;
+    // Only act on the Approval column (J)
+    if (range.getColumn() !== APPROVAL_COLUMN) return;
+
+    var newValue = String(range.getValue()).trim();
+    if (!/^complete$/i.test(newValue)) return; // Only proceed when value is "Complete"
+
+    var ss       = sheet.getParent();
+    var row      = range.getRow();
+    var techName = sheet.getRange(row, EMPLOYEE_NAME_COLUMN).getValue();
+    if (!techName) return;
+
+    // Delete existing technician sheet if present
+    var existing = ss.getSheetByName(techName);
+    if (existing) {
+      ss.deleteSheet(existing);
+    }
+
+    // Copy the template to create a fresh technician sheet
+    var templateSheet = ss.getSheetByName('Template for Service');
+    if (!templateSheet) {
+      console.error('Template for Service sheet not found.');
+      return;
+    }
+    var newSheet = templateSheet.copyTo(ss).setName(techName);
+
+    // Clear cell A2 - leave it empty (handles merged A2:C2)
+    newSheet.getRange("A2:C2").clearContent();
+    // If the range is merged, break it apart to guarantee blank state
+    try { newSheet.getRange("A2").breakApart(); } catch(e){}
+
+    // Gather data from Hourly + Spiff Pay to populate the new sheet
+    var getRatesSheetMapping = this.getRatesSheetMapping;
+    var getCurrentPayPeriod = this.getCurrentPayPeriod;
+    var clearApprovalStatus = this.clearApprovalStatus;
+    var ratesMapping = (typeof getRatesSheetMapping === 'function') ? getRatesSheetMapping() : null;
+    var mapping      = getTechnicianSheetMapping(newSheet);
+
+    var techFound   = false;
+    var techRate    = 0;
+    var deptBizUnit = '';
+
+    if (ratesMapping) {
+      var sheetData = sheet.getDataRange().getValues();
+      for (var i = ratesMapping.dataStartRow - 1; i < sheetData.length; i++) {
+        if (sheetData[i][ratesMapping.nameColumn - 1] === techName) {
+          techFound   = true;
+          techRate    = sheetData[i][ratesMapping.rateColumn - 1];
+          deptBizUnit = sheetData[i][1] + ' / ' + sheetData[i][2]; // Columns B & C
+          break;
+        }
+      }
+    }
+
+    // Set basic fields in the new sheet
+    newSheet.getRange(1, 1).setValue(techName);
+
+    if (techFound) {
+      newSheet.getRange(mapping.positionRow, 1).setValue(deptBizUnit);
+      newSheet.getRange(mapping.hourlyRateRow, mapping.rateValueColumn).setValue(techRate);
+    }
+
+    // Clear any stored approval status so the next period starts fresh
+    if (typeof clearApprovalStatus === 'function') {
+      clearApprovalStatus(row);
+    }
+
+    // Mark the dropdown as "Ready" for the completed row
+    try {
+      sheet.getRange(row, APPROVAL_COLUMN).setValue('Ready');
+    } catch (errSet) {
+      console.warn('Unable to set Ready status: ' + errSet.message);
+    }
+
+    console.log('Recreated technician sheet for: ' + techName);
+  } catch (err) {
+    console.error('Error in onEditRecreateTechnicianSheet: ' + err.message);
+  }
+}
+
+/**
+ * Returns a mapping of important rows/columns within a technician sheet.
+ * Duplicated from NewTechnicianSheet to avoid external dependency.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - The technician sheet to map.
+ * @return {Object} Mapping with row/column indexes.
+ */
+function getTechnicianSheetMapping(sheet) {
+  return {
+    payPeriodRow:    2,  // Row containing the pay period text
+    positionRow:     3,  // Row containing the position / dept & BU
+    hourlyRateRow:   4,  // Row containing hourly rate information
+    valueColumn:     2,  // Column B - Main value column
+    rateValueColumn: 3,  // Column C - For the rate value in C4
+    ptoRateColumn:   7   // Column G - PTO rate column
+  };
+} 
