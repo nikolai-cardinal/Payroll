@@ -135,6 +135,15 @@ function onEditRecreateTechnicianSheet(e) {
       clearApprovalStatus(row);
     }
 
+    // Clear the 'Pay' column (column I) for this row
+    try {
+      var PAY_COLUMN = 9; // Column I
+      sheet.getRange(row, PAY_COLUMN).clearContent();
+      console.log('Cleared Pay column for: ' + techName);
+    } catch (errClear) {
+      console.error('Unable to clear Pay column: ' + errClear.message);
+    }
+
     // Mark the dropdown as "Ready" for the completed row
     try {
       sheet.getRange(row, APPROVAL_COLUMN).setValue('Ready');
