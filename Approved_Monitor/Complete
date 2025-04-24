@@ -57,9 +57,7 @@ function onEditRecreateTechnicianSheet(e) {
 
     // Clear cell A2 - leave it empty (handles merged A2:C2)
     newSheet.getRange("A2:C2").clearContent();
-    // If the range is merged, break it apart to guarantee blank state
-    try { newSheet.getRange("A2").breakApart(); } catch(e){}
-
+    
     // Gather data from Hourly + Spiff Pay to populate the new sheet
     var getRatesSheetMapping = this.getRatesSheetMapping;
     var getCurrentPayPeriod = this.getCurrentPayPeriod;
@@ -83,12 +81,53 @@ function onEditRecreateTechnicianSheet(e) {
       }
     }
 
-    // Set basic fields in the new sheet
-    newSheet.getRange(1, 1).setValue(techName);
+    // Set the technician name in cell A1 (which might be part of a merged range)
+    // Always use the top-left cell of any potential merged range to avoid errors
+    try {
+      newSheet.getRange("A1").setValue(techName);
+    } catch (err) {
+      console.error('Error setting technician name: ' + err.message);
+    }
 
     if (techFound) {
-      newSheet.getRange(mapping.positionRow, 1).setValue(deptBizUnit);
-      newSheet.getRange(mapping.hourlyRateRow, mapping.rateValueColumn).setValue(techRate);
+      // Set position/department in cell A3 (which might be part of a merged range)
+      try {
+        newSheet.getRange("A3").setValue(deptBizUnit);
+      } catch (err) {
+        console.error('Error setting department/business unit: ' + err.message);
+      }
+      
+      // Set hourly rate value in C4 (make sure techRate is a number and not null/undefined)
+      try {
+        // First check if there's already a formula or value in C4 we should preserve
+        var currentC4Value = newSheet.getRange("C4").getValue();
+        
+        // Only set the rate if we have a valid value to set
+        if (techRate !== null && techRate !== undefined && techRate !== 0) {
+          newSheet.getRange("C4").setValue(techRate);
+          console.log('Set hourly rate to: ' + techRate);
+        } else if (currentC4Value) {
+          // If techRate is invalid but there's an existing template value, leave it alone
+          console.log('Preserved existing hourly rate: ' + currentC4Value);
+        } else {
+          // Fallback - try to set to a safe default (0) to avoid undefined
+          newSheet.getRange("C4").setValue(0);
+          console.log('Set default hourly rate to 0 (no valid rate found)');
+        }
+      } catch (err) {
+        console.error('Error setting hourly rate in C4: ' + err.message);
+      }
+    } else {
+      // Even if tech not found, ensure C4 is not deleted by setting a default value if needed
+      try {
+        var c4Value = newSheet.getRange("C4").getValue();
+        if (c4Value === null || c4Value === undefined || c4Value === "") {
+          newSheet.getRange("C4").setValue(0);
+          console.log('Set default hourly rate to 0 (technician not found)');
+        }
+      } catch (err) {
+        console.error('Error checking/setting default hourly rate: ' + err.message);
+      }
     }
 
     // Clear any stored approval status so the next period starts fresh
