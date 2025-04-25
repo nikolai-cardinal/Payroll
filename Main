@@ -22,7 +22,7 @@ var processingTimeoutId = null; // Changed variable name from processingTimeout
 */
 function onOpen() {
 var ui = SpreadsheetApp.getUi();
-ui.createMenu('Technician Tools')
+ui.createMenu('🚚 Technician Tools')
   .addItem('✅Payroll', 'runFullPayroll')
   .addItem('Update All Rates', 'updateAllTechnicianRates')
   .addItem('All Spiff/Bonus', 'processAllSpiffBonusWithCustomers')
