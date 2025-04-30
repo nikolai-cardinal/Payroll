@@ -15,7 +15,7 @@ const APPROVAL_COLUMN = 10; // Column J dropdown (used only for manual reset)
 // We track approval status via Document Properties; changing the dropdown will clear emojis
 
 // Store function map for dynamic menu callbacks
-var APPROVAL_FUNCTIONS = {};
+let APPROVAL_FUNCTIONS = {};
 
 // Initialize Document Properties for status tracking
 const docProps = PropertiesService.getDocumentProperties();
@@ -76,17 +76,17 @@ function addApprovalMenu(ui) {
 }
 
 /**
-* Gets technician names from the Hourly + Spiff Pay sheet
+* Gets technician names from the Main sheet
 * to build dynamic menu items (excluding exempt employees)
 * @return {Array} Array of menu item objects with name and function properties
 */
 function getTechnicianMenuItems() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(HOURLY_SPIFF_SHEET_NAME);
+    const sheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
     
     if (!sheet) {
-      console.error("Hourly + Spiff Pay sheet not found");
+      console.error("Main sheet not found");
       return [];
     }
     
@@ -177,10 +177,10 @@ function handleApproval(rowNumber) {
 function approvePayroll(row, silent) {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(HOURLY_SPIFF_SHEET_NAME);
+    const sheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
     
     if (!sheet) {
-      console.error("Hourly + Spiff Pay sheet not found");
+      console.error("Main sheet not found");
       return;
     }
     
@@ -302,8 +302,8 @@ function initApprovalMonitor() {
   console.log("Initializing Approval Monitor");
   
   // Check if the required global constants are available
-  if (typeof HOURLY_SPIFF_SHEET_NAME === 'undefined') {
-    console.error("HOURLY_SPIFF_SHEET_NAME constant not found. Approval Monitor may not function correctly.");
+  if (typeof Modules.Constants === 'undefined' || typeof Modules.Constants.SHEET === 'undefined' || typeof Modules.Constants.SHEET.MAIN === 'undefined') {
+    console.error("Modules.Constants.SHEET.MAIN constant not found. Approval Monitor may not function correctly.");
   }
   
   if (typeof getRatesSheetMapping !== 'function') {
@@ -334,7 +334,7 @@ function refreshApprovalMenu() {
 function initDynamicApprovalFunctions() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const sheet = ss.getSheetByName(HOURLY_SPIFF_SHEET_NAME);
+    const sheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
     if (!sheet) return;
 
     const ratesMapping = getRatesSheetMapping();
@@ -367,9 +367,9 @@ initDynamicApprovalFunctions();
  */
 function approveAllTechnicians() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName(HOURLY_SPIFF_SHEET_NAME);
+  const sheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
   if (!sheet) {
-    SpreadsheetApp.getUi().alert('Hourly + Spiff Pay sheet not found');
+    SpreadsheetApp.getUi().alert('Main sheet not found');
     return;
   }
 
@@ -423,7 +423,7 @@ function onEditResetApprovalStatus(e) {
   try {
     const range = e.range;
     const sheet = range.getSheet();
-    if (sheet.getName() !== HOURLY_SPIFF_SHEET_NAME) return;
+    if (sheet.getName() !== Modules.Constants.SHEET.MAIN) return;
 
     if (range.getColumn() !== APPROVAL_COLUMN) return;
 

@@ -1,0 +1,63 @@
+// Namespace stub – Menu
+var Modules = Modules || {};
+Modules.Menu = Modules.Menu || {};
+
+(function() {
+  'use strict';
+  /**
+   * Appends high-level menu items that are not module-specific.
+   * Called by Core/Main during onOpen.
+   *
+   * @param {GoogleAppsScript.Base.Menu} menu SpreadsheetApp.Menu to append items to
+   */
+  Modules.Menu.addMenuEntries = function(menu) {
+    menu
+      .addItem('✅Payroll', 'runFullPayroll')
+      .addSeparator()
+      .addItem('Update All Rates', 'updateAllTechnicianRates')
+      .addItem('All Spiff/Bonus', 'processAllSpiffBonusWithCustomers')
+      .addItem('All PBP', 'processAllPBPGlobal')
+      .addItem('All Yard Signs', 'menuProcessAllYardSigns')
+      .addItem('All Timesheet', 'processAllTimesheets')
+      .addItem('All Lead Set', 'processAllLeadSets')
+      .addSeparator()
+      .addItem('Create New Sheet', 'createNewTechnicianSheet');
+  };
+
+  /**
+   * Builds the root "Technician Tools" menu and attaches it to the UI.
+   * Iterates over every loaded `Modules.<Module>` that exposes `addMenuEntries` to
+   * contribute its specific submenu items, followed by the static core entries
+   * defined in {@link Modules.Menu.addMenuEntries}.
+   *
+   * Intended to be called exactly once from `Modules.Main.onOpen`.
+   *
+   * @param {GoogleAppsScript.Base.Ui} ui The spreadsheet UI instance.
+   */
+  Modules.Menu.buildRootMenu = function(ui) {
+    if (!ui) return;
+
+    var rootLabel = (Modules.Constants && Modules.Constants.MENU && Modules.Constants.MENU.ROOT) || '🚚 Technician Tools';
+    var menu = ui.createMenu(rootLabel);
+
+    // Delegate to each module so they can append their specific menu items.
+    if (typeof _getOrderedModules === 'function') {
+      _getOrderedModules().forEach(function(mod) {
+        if (typeof mod.addMenuEntries === 'function') {
+          try {
+            mod.addMenuEntries(menu);
+          } catch (err) {
+            console.error(err);
+          }
+        }
+      });
+    }
+
+    // Append core static entries (payroll shortcuts, etc.).
+    if (typeof Modules.Menu.addMenuEntries === 'function') {
+      Modules.Menu.addMenuEntries(menu);
+    }
+
+    menu.addToUi();
+  };
+})(); 

@@ -1,0 +1,26 @@
+// Constants – immutable sheet & menu names
+var Modules = Modules || {};
+
+(function() {
+  'use strict';
+  /**
+   * Immutable Sheet name map.
+   * NOTE: The sheet formerly called 'Hourly + Spiff Pay' is now 'Main'.
+   */
+  const SHEET = Object.freeze({
+    MAIN: 'Main',           // primary payroll sheet
+    SPIFF: 'Spiff/Bonus',   // spiff + bonus calculations
+    SERVICE: 'Service',     // service calls sheet
+    // Add future sheet constants here
+  });
+
+  /**
+   * Immutable UI menu labels.
+   */
+  const MENU = Object.freeze({
+    ROOT: '🚚 Technician Tools'
+  });
+
+  // Expose via global Modules namespace
+  Modules.Constants = { SHEET: SHEET, MENU: MENU };
+})(); 

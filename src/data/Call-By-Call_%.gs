@@ -21,7 +21,9 @@ function pullTechnicianKPI(techName) {
     
     // 1. Get pay period range from active payroll file
     const payrollSS = SpreadsheetApp.getActiveSpreadsheet();
-    const periodStr = payrollSS.getSheetByName('Hourly + Spiff Pay')
+    // Ensure Constants are available (legacy file may run before namespace init)
+    var mainSheetName = (Modules.Constants && Modules.Constants.SHEET && Modules.Constants.SHEET.MAIN) || 'Main';
+    const periodStr = payrollSS.getSheetByName(mainSheetName)
                          .getRange('F1').getDisplayValue(); // ex "3/22 - 3/30"
     
     const { start, end } = parseDateRange(periodStr);

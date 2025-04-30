@@ -256,4 +256,61 @@ function isTechnicianClass1(technicianName, ratesSheet) {
     console.error(`Error in isTechnicianClass1 for ${technicianName}: ${e.message}`);
     return false; // Default to not Class 1 in case of error
   }
+}
+
+/**
+* Manages the number of rows in a given section of a sheet.
+* Adds or deletes rows to match the required number, starting from a specific row.
+* Assumes the section to manage is contiguous.
+*
+* @param {Sheet} sheet The sheet to modify.
+* @param {number} dataStartRow The 1-based row index where the data section begins.
+* @param {number} currentRows The number of rows currently occupied by data (or available space).
+* @param {number} requiredRows The target number of rows needed for the data (including totals, etc.).
+*/
+function manageSheetRows(sheet, dataStartRow, currentRows, requiredRows) {
+  if (!sheet || dataStartRow <= 0 || currentRows < 0 || requiredRows < 0) {
+    console.error("manageSheetRows: Invalid parameters.");
+    return; // Or throw error
+  }
+
+  if (requiredRows > currentRows) {
+    // Need to add more rows
+    var rowsToAdd = requiredRows - currentRows;
+    // Insert rows *after* the last current row. If currentRows is 0, insert after the row *before* dataStartRow.
+    var insertAfterRow = (currentRows > 0) ? (dataStartRow + currentRows - 1) : (dataStartRow - 1);
+    if (insertAfterRow < 1) insertAfterRow = 1; // Cannot insert before row 1
+
+    // Ensure we don't try inserting after a row that doesn't exist if sheet is very short
+    var maxRows = sheet.getMaxRows();
+    if (insertAfterRow > maxRows) {
+       console.warn("manageSheetRows: Attempting to insert rows after a row beyond the sheet max rows. Appending instead.");
+       sheet.insertRows(maxRows + 1, rowsToAdd); // Append if needed
+    } else {
+       sheet.insertRowsAfter(insertAfterRow, rowsToAdd);
+    }
+    console.log(`Inserted ${rowsToAdd} rows after row ${insertAfterRow} in sheet ${sheet.getName()}`);
+
+  } else if (requiredRows < currentRows) {
+    // Need to remove excess rows
+    var rowsToDelete = currentRows - requiredRows;
+    var deleteStartRow = dataStartRow + requiredRows;
+    // Safety check: ensure deleteStartRow is valid
+    if (deleteStartRow > sheet.getLastRow()) {
+        console.warn(`manageSheetRows: Calculated delete start row (${deleteStartRow}) is beyond the last row (${sheet.getLastRow()}). Skipping deletion.`);
+        return;
+    }
+     // Safety check: ensure rowsToDelete doesn't exceed available rows below deleteStartRow
+    var availableRowsToDelete = sheet.getLastRow() - deleteStartRow + 1;
+    if (rowsToDelete > availableRowsToDelete) {
+        console.warn(`manageSheetRows: Attempting to delete ${rowsToDelete} rows, but only ${availableRowsToDelete} are available starting from row ${deleteStartRow}. Adjusting count.`);
+        rowsToDelete = availableRowsToDelete;
+    }
+
+    if (rowsToDelete > 0) {
+        sheet.deleteRows(deleteStartRow, rowsToDelete);
+        console.log(`Deleted ${rowsToDelete} rows starting from row ${deleteStartRow} in sheet ${sheet.getName()}`);
+    }
+  }
+  // If requiredRows === currentRows, do nothing.
 } 

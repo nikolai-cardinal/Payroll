@@ -1,0 +1,105 @@
+// Namespace stub – Proxies
+var Modules = Modules || {};
+Modules.Proxies = Modules.Proxies || {}; 
+
+(function() {
+  /**
+   * Legacy global wrapper preserved for backward compatibility.
+   * Delegates to Modules.PBP.processAll if available.
+   */
+  // eslint-disable-next-line no-unused-vars
+  function processAllPBPGlobal() {
+    return Modules.PBP && typeof Modules.PBP.processAll === 'function' && Modules.PBP.processAll();
+  }
+
+  /**
+   * Legacy wrapper to update PBP for a single technician.
+   * @param {string} name Technician name
+   * @param {number} row  Edited row index
+   * @param {number} col  Edited column index
+   * @param {boolean=} skip Whether to skip heavy calculations
+   * @param {boolean=} suppress Whether to suppress UI alerts
+   */
+  // eslint-disable-next-line no-unused-vars
+  function updatePBPForTechnician(name, row, col, skip, suppress) {
+    return (
+      Modules.PBP &&
+      typeof Modules.PBP.updateForTechnician === 'function' &&
+      Modules.PBP.updateForTechnician(name, row, col, skip, suppress)
+    );
+  }
+
+  /**
+   * Legacy wrapper to process Spiff/Bonus for all technicians.
+   * Delegates to Modules.SpiffBonus.processAll if available.
+   */
+  // eslint-disable-next-line no-unused-vars
+  function processAllSpiffBonusWithCustomers() {
+    return (
+      Modules.SpiffBonus &&
+      typeof Modules.SpiffBonus.processAll === 'function' &&
+      Modules.SpiffBonus.processAll()
+    );
+  }
+
+  /**
+   * Legacy wrapper to update all technician rates.
+   * Delegates to Modules.TechnicianRates.updateAll if available.
+   */
+  // eslint-disable-next-line no-unused-vars
+  function updateAllTechnicianRates() {
+    return (
+      Modules.TechnicianRates &&
+      typeof Modules.TechnicianRates.updateAll === 'function' &&
+      Modules.TechnicianRates.updateAll()
+    );
+  }
+
+  /**
+   * Legacy wrapper to process Yard Signs for all technicians.
+   */
+  // eslint-disable-next-line no-unused-vars
+  function menuProcessAllYardSigns() {
+    return (
+      Modules.YardSign &&
+      typeof Modules.YardSign.processAll === 'function' &&
+      Modules.YardSign.processAll()
+    );
+  }
+
+  /**
+   * Legacy wrapper to process Timesheets for all technicians.
+   */
+  // eslint-disable-next-line no-unused-vars
+  function processAllTimesheets() {
+    return (
+      Modules.TimeSheet &&
+      typeof Modules.TimeSheet.processAll === 'function' &&
+      Modules.TimeSheet.processAll()
+    );
+  }
+
+  /**
+   * Legacy wrapper to process Lead Sets for all technicians.
+   */
+  // eslint-disable-next-line no-unused-vars
+  function processAllLeadSets() {
+    return (
+      Modules.LeadSet &&
+      typeof Modules.LeadSet.processAll === 'function' &&
+      Modules.LeadSet.processAll()
+    );
+  }
+
+  /**
+   * Legacy wrapper to create a new technician sheet.
+   */
+  // eslint-disable-next-line no-unused-vars
+  function createNewTechnicianSheet() {
+    return (
+      Modules.NewTechnician &&
+      typeof Modules.NewTechnician.createSheet === 'function' &&
+      Modules.NewTechnician.createSheet()
+    );
+  }
+})(); 

@@ -1,0 +1,14 @@
+1. Always before writing a new code make sure there are no existing code available that doing the simulair option.
+2. Make sure your code is minimal and don't contains extra unnessary script. 
+3. Always double check the script before providing it to me.   
+4. Don't ever create a new files only inless receive explisit direction to do so. 
+5. If you ever create the new file allways update @FILE_STRUCTURE file to be updated version. 
+6. When adding triggers (e.g. `onOpen`, `onEdit`) or building menus, first search the codebase for existing definitions and extend them or expose helper functions instead of introducing duplicate trigger functions to prevent menu collisions. 
+7. The sheet previously named 'Hourly + Spiff Pay' has been renamed to 'Main'. Always reference the sheet as 'Main' and update any existing occurrences of the old name when modifying or adding code. 
+8. Make sure that Main and any file do not Exceed 500 lines of code. 
+9. `Main` must contain only trigger functions and high-level delegation; no business logic. 500-line hard limit.
+10. Each functional module must expose a single public entry file named `index` that `Main` calls.
+11. All sheet names and global constants live in `src/core/Constants`. `Main` should import/reference them instead of hardcoding.
+12. Any backward-compatibility wrapper functions belong in `src/core/Proxies`, never in `Main`. 
+13. Always edit function documentation file. 
+14. `src/core/Constants` must export immutable objects `SHEET` (sheet names) and `MENU` (UI labels) and attach them to `Modules.Constants` for global access. 

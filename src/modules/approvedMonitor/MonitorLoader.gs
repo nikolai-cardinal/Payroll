@@ -10,8 +10,8 @@ function initApprovalMonitor() {
   console.log("Initializing Approval Monitor");
   
   // Check if the required global constants are available
-  if (typeof HOURLY_SPIFF_SHEET_NAME === 'undefined') {
-    console.error("HOURLY_SPIFF_SHEET_NAME constant not found. Approval Monitor may not function correctly.");
+  if (typeof Modules.Constants === 'undefined' || typeof Modules.Constants.SHEET === 'undefined' || typeof Modules.Constants.SHEET.MAIN === 'undefined') {
+    console.error("Modules.Constants.SHEET.MAIN constant not found. Approval Monitor may not function correctly.");
     return;
   }
   
@@ -83,9 +83,9 @@ function onEditUpdateApprovalMenu(e) {
     var sheet = range.getSheet();
     var sheetName = sheet.getName();
     
-    // Only refresh the menu if changes are made to the Hourly + Spiff Pay sheet
-    if (sheetName === HOURLY_SPIFF_SHEET_NAME) {
-      // Check if changes were made to the name column (C) or exemption column (E)
+    // Only refresh the menu if changes are made to the Main sheet
+    if (sheetName === Modules.Constants.SHEET.MAIN) {
+      // Check if changes were made to the name column (A) or exemption column (E)
       var column = range.getColumn();
       if (column === EMPLOYEE_NAME_COLUMN || column === EXEMPTION_COLUMN) {
         console.log("Employee data changed, refreshing Approval menu");

@@ -10,9 +10,9 @@
 
 const REPORT_UPLOAD_SHEETS = [
   'Time Sheet',
-  'Spiff/Bonus',
+  Modules.Constants.SHEET.SPIFF,
+  Modules.Constants.SHEET.SERVICE,
   'Lead Set',
-  'Service',
   'Yard Sign'
 ];
 
