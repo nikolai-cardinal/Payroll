@@ -1,0 +1,122 @@
+var Modules = Modules || {};
+Modules.PBP = Modules.PBP || {};
+Modules.PBP.Helpers = Modules.PBP.Helpers || {};
+
+(function() {
+  'use strict';
+
+  /**
+   * Builds a quick-lookup cache of technician class/eligibility info from the
+   * Rates sheet data.
+   * @param {Array<Array>} ratesData Full data range from the Main sheet.
+   * @return {Object<string, Object>} Map keyed by lowercase technician name.
+   */
+  function buildTechDetailsCache(ratesData) {
+    var cache = {};
+    for (var r = 1; r < ratesData.length; r++) {
+      var row = ratesData[r];
+      var rawName = row[0];
+      if (!rawName) continue;
+      var name = rawName.toString().trim();
+      var lower = name.toLowerCase();
+      if (cache[lower]) continue;
+      var title = row[2] ? row[2].toString() : '';
+      var info = Modules.Shared.TechnicianUtils.getTechnicianClassAndRole(title);
+      cache[lower] = {
+        name: name,
+        class: info.class,
+        isEligible: info.isEligible,
+        initialRole: info.role
+      };
+    }
+    return cache;
+  }
+
+  /** Extracts numeric PBP amount from the Cross-Sale Group column. */
+  function parsePbpAmount(crossSaleGroup) {
+    if (!crossSaleGroup) return 0;
+    var m = crossSaleGroup.toString().match(/pbp\s*(\d+(?:\.\d+)?)/i);
+    return m && m[1] ? parseFloat(m[1]) : 0;
+  }
+
+  /**
+   * Returns an array of unique technician names involved in the job and a Set
+   * of their lowercase representations for fast lookup.
+   */
+  function getUniqueTechNames(primaryName, assignedTechsString) {
+    var unique = [];
+    var lowerSet = new Set();
+
+    function add(name) {
+      if (!name) return;
+      var trimmed = name.toString().trim();
+      var lower = trimmed.toLowerCase();
+      if (!trimmed || lowerSet.has(lower)) return;
+      unique.push(trimmed);
+      lowerSet.add(lower);
+    }
+
+    add(primaryName);
+    Modules.Shared.TechnicianUtils.parseTechnicianNames(assignedTechsString || '')
+      .forEach(add);
+
+    return { uniqueNames: unique, lowerSet: lowerSet };
+  }
+
+  /**
+   * Computes final role, split %, and payout for each tech on the job.
+   * @param {string[]} uniqueNames Tech names involved in the job.
+   * @param {Object} techCache Output of buildTechDetailsCache.
+   * @param {number} pbpAmount Job-level PBP amount.
+   * @return {Array<Object>} Detailed per-tech breakdown.
+   */
+  function computeJobTechnicians(uniqueNames, techCache, pbpAmount) {
+    var techs = [];
+    var highestClass = 0;
+
+    // Populate base info and find highest class present.
+    uniqueNames.forEach(function(name) {
+      var cached = techCache[name.toLowerCase()];
+      var info = cached || { name: name, class: 0, isEligible: false, initialRole: 'None' };
+      techs.push({
+        name: info.name,
+        class: info.class,
+        isEligible: info.isEligible,
+        initialRole: info.initialRole,
+        finalRole: info.initialRole,
+        splitPercent: 0,
+        payout: 0
+      });
+      if (info.class > highestClass) highestClass = info.class;
+    });
+
+    var total = techs.length;
+    var hasHighClass = techs.some(function(t) { return t.class >= 3; });
+
+    // Determine final role per rules.
+    techs.forEach(function(t) {
+      if (t.class === 2 && t.class === highestClass && !hasHighClass) t.finalRole = 'Lead';
+      if (total === 1 && t.class >= 2) t.finalRole = 'Lead';
+      if (total === 1 && t.class === 1) t.finalRole = 'Assistant';
+    });
+
+    var leadCount = techs.filter(function(t){ return t.finalRole === 'Lead'; }).length;
+    var assistantCount = techs.filter(function(t){ return t.finalRole === 'Assistant'; }).length;
+
+    // Calculate split % + payout
+    techs.forEach(function(t) {
+      t.splitPercent = Modules.Shared.PayrollUtils.calculateSplitPercentage(total, leadCount, assistantCount, t.finalRole);
+      t.payout = t.isEligible ? pbpAmount * (t.splitPercent / 100) : 0;
+    });
+
+    return techs;
+  }
+
+  // Export helpers
+  Object.assign(Modules.PBP.Helpers, {
+    buildTechDetailsCache: buildTechDetailsCache,
+    parsePbpAmount: parsePbpAmount,
+    getUniqueTechNames: getUniqueTechNames,
+    computeJobTechnicians: computeJobTechnicians,
+  });
+})(); 

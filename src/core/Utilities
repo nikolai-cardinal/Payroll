@@ -7,7 +7,7 @@ Modules.Utilities = Modules.Utilities || {};
 
   /**
    * Returns a standard mapping object for columns in the common
-   * "Hourly + Spiff Pay" admin sheet so we only define this once.
+   * "Main" admin sheet so we only define this once.
    *
    * @return {{nameColumn:number, positionColumn:number, rateColumn:number, actionColumn:number, dataStartRow:number}}
    */

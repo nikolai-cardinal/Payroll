@@ -1,0 +1,66 @@
+/**
+ * Bonus Legacy Compatibility
+ * Wrappers for functions previously used in the SpiffBonus module.
+ * These delegate to the new Bonus implementation to maintain backward compatibility.
+ */
+
+// Namespace safety
+var Modules = Modules || {};
+Modules.Bonus = Modules.Bonus || {};
+Modules.Bonus.Legacy = Modules.Bonus.Legacy || {};
+
+/**
+ * Legacy single-technician entry point.
+ * Maintains compatibility with original signature: (technicianName, actionRow, actionColumn)
+ */
+function updateSpiffBonusWithCustomersList(technicianName, actionRow, actionColumn) {
+  console.log('Legacy function updateSpiffBonusWithCustomersList called for: ' + technicianName);
+  return Modules.Bonus.processForTechnician(technicianName, actionRow, actionColumn);
+}
+
+/**
+ * Legacy batch processor.
+ */
+function processAllSpiffBonusWithCustomers() {
+  console.log('Legacy function processAllSpiffBonusWithCustomers called');
+  return Modules.Bonus.processAll();
+}
+
+/**
+ * Legacy helper used by the old batch loop. Simply forwards to the specific technician processor.
+ */
+function updateSpiffBonusWithCustomersListAll(technicianName) {
+  console.log('Legacy function updateSpiffBonusWithCustomersListAll called for: ' + technicianName);
+  return updateSpiffBonusWithCustomersList(technicianName, null, null);
+}
+
+/**
+ * Legacy function for processing Spiff and Bonus.
+ * Delegates to the new Bonus module implementation.
+ */
+function processSpiffAndBonus(techSheet, technicianName, spiffBonusSheet, ratesSheet, triggerRow, triggerCol, suppressPopup = false) {
+  console.log('Legacy function processSpiffAndBonus called for: ' + technicianName);
+  return Modules.Bonus.processForTechnician(technicianName, triggerRow, triggerCol, { suppressPopup: suppressPopup });
+}
+
+/**
+ * Legacy function for batch processing all technicians.
+ */
+function processSpiffBonusAll() {
+  console.log('Legacy function processSpiffBonusAll called');
+  return Modules.Bonus.processAll();
+}
+
+// Export legacy functions through the Bonus namespace for backward compatibility
+Modules.Bonus.Legacy.updateSpiffBonusWithCustomersList = updateSpiffBonusWithCustomersList;
+Modules.Bonus.Legacy.processAllSpiffBonusWithCustomers = processAllSpiffBonusWithCustomers;
+Modules.Bonus.Legacy.updateSpiffBonusWithCustomersListAll = updateSpiffBonusWithCustomersListAll;
+Modules.Bonus.Legacy.processSpiffAndBonus = processSpiffAndBonus;
+Modules.Bonus.Legacy.processSpiffBonusAll = processSpiffBonusAll;
+
+// Create global references for backward compatibility
+var updateSpiffBonusWithCustomersList = Modules.Bonus.Legacy.updateSpiffBonusWithCustomersList;
+var processAllSpiffBonusWithCustomers = Modules.Bonus.Legacy.processAllSpiffBonusWithCustomers;
+var updateSpiffBonusWithCustomersListAll = Modules.Bonus.Legacy.updateSpiffBonusWithCustomersListAll;
+var processSpiffAndBonus = Modules.Bonus.Legacy.processSpiffAndBonus;
+var processSpiffBonusAll = Modules.Bonus.Legacy.processSpiffBonusAll; 

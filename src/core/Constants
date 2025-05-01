@@ -3,6 +3,8 @@ var Modules = Modules || {};
 
 (function() {
   'use strict';
+  // Bail out if another constants file has already defined these.
+  if (Modules.Constants && Modules.Constants.SHEET) return;
   /**
    * Immutable Sheet name map.
    * NOTE: The sheet formerly called 'Hourly + Spiff Pay' is now 'Main'.

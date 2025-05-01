@@ -1,0 +1,128 @@
+// Namespace stub – TechnicianUtils
+var Modules = Modules || {};
+Modules.NewTechnician = Modules.NewTechnician || {};
+Modules.NewTechnician.Utils = Modules.NewTechnician.Utils || {};
+
+/**
+* Parses technician names from a string (comma or space separated).
+* @param {string} nameString - The string containing technician names.
+* @return {Array<string>} An array of cleaned technician names.
+*/
+Modules.NewTechnician.Utils.parseTechnicianNames = function(nameString) {
+    if (!nameString || typeof nameString !== 'string') return [];
+    
+    var names = [];
+    // Replace multiple spaces with single space, trim
+    var cleanedString = nameString.replace(/\s+/g, ' ').trim();
+    
+    // Handle common separators (comma, semicolon, potentially multiple spaces between names)
+    if (cleanedString.includes(',')) {
+        names = cleanedString.split(',');
+    } else if (cleanedString.includes(';')) {
+        names = cleanedString.split(';');
+    } else {
+        // Attempt space separation, trying to group first/last names
+        var parts = cleanedString.split(' ');
+        if (parts.length <= 2) { // Likely one name
+            names = [cleanedString];
+        } else {
+             // Heuristic: Assume names are pairs if even number of parts > 2
+             if (parts.length % 2 === 0) {
+                 for (var i = 0; i < parts.length; i += 2) {
+                     names.push(parts[i] + ' ' + parts[i+1]);
+                 }
+             } else {
+                  // Odd number of parts - less certain. Treat as single names or log warning?
+                  // For now, treat as single name parts - may need refinement
+                  if (Modules.Safe && Modules.Safe.Logger) {
+                      Modules.Safe.Logger.log("Warning: Ambiguous space-separated names detected: '" + cleanedString + "'. Splitting by space.");
+                  }
+                  names = parts;
+             }
+        }
+    }
+    
+    // Final clean: remove percentages, trim, filter empty
+    return names.map(function(name) {
+        return name.replace(/\(\d+%?\)/, '').replace(/\((Lead|Assistant|\d+%?)\)/i, '').trim(); // Remove role/percent hints too
+    }).filter(function(name){ return name.length > 0; });
+};
+
+/**
+* Determines technician class, eligibility, and initial role based on Position Title.
+* @param {string} positionTitle - The technician's position title from 'Hourly + Spiff Pay'.
+* @return {{class: number, isEligible: boolean, role: string}}
+*/
+Modules.NewTechnician.Utils.getTechnicianClassAndRole = function(positionTitle) {
+    var techClass = 0; // Default to invalid/ineligible
+    var isEligible = false;
+    var initialRole = 'None';
+    // Ensure it's treated as a string, trim whitespace, then lowercase
+    var titleLower = positionTitle ? positionTitle.toString().trim().toLowerCase() : "";
+
+    // ---> Enhanced Debug Logging <---
+    if (Modules.Safe && Modules.Safe.Logger) {
+        Modules.Safe.Logger.log("Parsing Position Title: Raw='" + positionTitle + "' ==> Trimmed Lowercase='" + titleLower + "'");
+    }
+
+    if (!titleLower) {
+        if (Modules.Safe && Modules.Safe.Logger) {
+            Modules.Safe.Logger.log(" -> Title is empty. Defaulting to Class 0/Ineligible.");
+        }
+        return { class: techClass, isEligible: isEligible, role: initialRole };
+    }
+
+    // Check for Class number first
+    var classMatch = titleLower.match(/class\s*([1-4])/);
+    if (classMatch && classMatch[1]) {
+        techClass = parseInt(classMatch[1], 10);
+        if (Modules.Safe && Modules.Safe.Logger) {
+            Modules.Safe.Logger.log(" -> Matched Class: " + techClass); // Log success
+        }
+    } else {
+        // Only log failure if we didn't match Class 1-4
+        if (techClass === 0 && Modules.Safe && Modules.Safe.Logger) { 
+           Modules.Safe.Logger.log(" -> No 'Class [1-4]' match found in title."); // Log failure
+        }
+    }
+    // Add other potential title mappings if needed (e.g., "lead installer" mapping to Class 4)
+    // else if (titleLower.includes("lead installer")) { techClass = 4; console.log(" -> Matched 'lead installer'. Setting Class: 4"); }
+
+    // Determine Eligibility and Initial Role based on Class
+    switch (techClass) {
+        case 4:
+            isEligible = true;
+            initialRole = 'Lead';
+            break;
+        case 3:
+            isEligible = true;
+            initialRole = 'Lead';
+            break;
+        case 2:
+            isEligible = true;
+            initialRole = 'Assistant'; // Default for Class 2
+            break;
+        case 1:
+            isEligible = false; // Apprentices are ineligible for payout
+            initialRole = 'Assistant';
+            break;
+        default: // Includes Class 0 or unparsed
+            isEligible = false;
+            initialRole = 'None';
+            break;
+    }
+    if (Modules.Safe && Modules.Safe.Logger) {
+        Modules.Safe.Logger.log(" -> Result: Class=" + techClass + ", Eligible=" + isEligible + ", Role=" + initialRole); // Log final result for this title
+    }
+    return { class: techClass, isEligible: isEligible, role: initialRole };
+};
+
+// ---- Compatibility Alias ----
+var Modules = Modules || {};
+Modules.Shared = Modules.Shared || {};
+// Expose the utilities so legacy modules can access them via Modules.Shared.TechnicianUtils
+if (!Modules.Shared.TechnicianUtils) {
+  Modules.Shared.TechnicianUtils = Modules.NewTechnician.Utils;
+}
+
+// (no wrapping IIFE needed beyond this point) 

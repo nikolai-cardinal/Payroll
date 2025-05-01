@@ -1,0 +1,29 @@
+/**
+ * Menu
+ * Adds custom menu items on spreadsheet open.
+ */
+
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  // Main payroll utilities menu.
+  ui.createMenu('🚚 Installation Tools')
+    .addItem('Run Payroll', 'runFullPayroll')
+    .addItem('All TimeSheet', 'processAllTimesheets')
+    .addItem('All PBP', 'PBPMain_runBatch')
+    .addItem('All Yard Signs', 'YardSignMain_runBatch')
+    .addItem('All Bonus', 'Bonus_runBatch')
+    .addToUi();
+
+  // Stand-alone technician-sheet menu.
+  ui.createMenu('🗂 Technician Sheets')
+    .addItem('New Sheet', 'createNewTechnicianSheet')
+    .addItem('All New Sheets', 'createAllNewTechnicianSheets')
+    .addToUi();
+
+  // Approval Monitor menu
+  if (typeof initApprovalMonitor === 'function') {
+    try { initApprovalMonitor(); } catch (err) {
+      Logger.log('Approval Monitor init failed: ' + err);
+    }
+  }
+} 

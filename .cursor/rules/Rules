@@ -12,3 +12,11 @@
 12. Any backward-compatibility wrapper functions belong in `src/core/Proxies`, never in `Main`. 
 13. Always edit function documentation file. 
 14. `src/core/Constants` must export immutable objects `SHEET` (sheet names) and `MENU` (UI labels) and attach them to `Modules.Constants` for global access. 
+15. Make sure that wihen you modifying the code the features that are existing in the existing code are never erased. 
+16. When looking for the files never look with the file name.gs. Only look for file mane without .gs
+17. Only files without the .gs extension in their filenames are loaded to Google Apps Script. When referring to files in the codebase, always use the base name without the .gs extension.
+18. IMPORTANT: Always review files in @core, @shared, and any related utility modules (like TechnicianUtils) when troubleshooting errors or developing new functionality. These contain critical shared functionality and utilities that many modules depend on.
+19. When implementing code that references another module, always check if that module exists and has the expected functions before calling them. Implement appropriate fallbacks when necessary.
+20. Pay special attention to code in src/core/Proxies as it contains backward-compatibility wrappers that may hide the actual implementation location.
+21. Module dependencies should always be clearly documented at the top of each file, especially for shared utilities and helpers.
+22. NEVER add duplicate menu items. Before adding any menu entry in a module's `addMenuEntries` function, check src/core/Menu to ensure it's not already defined there. If core Menu already defines an entry (like 'All PBP'), the module should NOT add a similar entry (like 'Process PBP').

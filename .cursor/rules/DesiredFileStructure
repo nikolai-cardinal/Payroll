@@ -1,11 +1,12 @@
-Project Root (proposed)
+Project Root
 ├─ src/
 │  ├─ core/
 │  │  ├─ Main
 │  │  ├─ Menu
 │  │  ├─ Utilities
+│  │  ├─ Constants
 │  │  ├─ TechnicianRates
-│  │  └─ Constants
+│  │  └─ Proxies
 │  ├─ shared/
 │  │  ├─ SheetUtils
 │  │  ├─ DateUtils
@@ -17,18 +18,13 @@ Project Root (proposed)
 │  │  │  ├─ ApprovedMonitor
 │  │  │  ├─ MonitorLoader
 │  │  │  └─ ReportUpload
-│  │  ├─ spiffBonus/
+│  │  ├─ Bonus/
 │  │  │  ├─ index        ← consolidates Spiff/Bonus logic
-│  │  │  ├─ SpiffBonusMainProcessor
-│  │  │  ├─ SpiffBonusDataHandler
-│  │  │  ├─ SpiffBonusUtilities
-│  │  │  ├─ SpiffBonusSectionHandlers
-│  │  │  ├─ SpiffBonusSummaryUpdater
-│  │  │  └─ SpiffBonusHeaderMap
+│  │  │  ├─ BonusMain
+│  │  │  ├─ BonusUtilities
 │  │  ├─ pbp/
 │  │  │  ├─ index        ← single public surface for PBP actions
-│  │  │  ├─ PBPCalculation
-│  │  │  ├─ PBPSheetOperations
+│  │  │  ├─ PBPMain
 │  │  │  └─ PBPUtilities
 │  │  ├─ yardSign/
 │  │  │  ├─ index
@@ -39,26 +35,17 @@ Project Root (proposed)
 │  │  ├─ leadSet/
 │  │  │  ├─ index
 │  │  │  ├─ LeadSetMain
-│  │  │  ├─ LeadSetCalculation
-│  │  │  ├─ LeadSetSheetOperations
 │  │  │  └─ LeadSetUtilities
 │  │  ├─ timeSheet/
 │  │  │  ├─ index
 │  │  │  ├─ TimeSheetLogic
 │  │  │  └─ TimesheetActions
-│  │  ├─ yardSign/
-│  │  │  ├─ index
-│  │  │  ├─ YardSignMain
-│  │  │  ├─ YardSignCalculation
-│  │  │  ├─ YardSignSheetOperations
-│  │  │  └─ YardSignUtilities
 │  │  └─ newTechnician/
 │  │     ├─ index
 │  │     └─ NewTechnicianSheet
 │  └─ data/
-│     ├─ CallByCall
-│     ├─ CallByCallData
-│     └─ SpiffBonusDirectoryExplanation   ← developer docs co-located with data
+│     ├─ Call-By-Call_%
+│     └─ Call-By-Call_Data
 ├─ docs/
 │  ├─ README
 │  └─ popup_debrief_modification_guide
@@ -69,6 +56,6 @@ Key Points:
 • All triggers (onOpen, onEdit) live in src/core/Main and delegate to module entry-points to avoid duplicate triggers.
 • Each functional area is wrapped in a module directory with a single exposed index file; internal helpers stay private.
 • Shared utilities (SheetUtils, DateUtils, ErrorHandlers, Cache) avoid duplicated helper code across modules.
-• Data-only assets (e.g., CallByCallData) reside in src/data.
+• Data-only assets (e.g., Call-By-Call_Data) reside in src/data.
 • Docs live under /docs to keep code directories clean.
 • Tests (if adopted) stay isolated so prod code remains minimal. 

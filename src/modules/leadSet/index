@@ -1,0 +1,74 @@
+// Namespace stub – LeadSet
+var Modules = Modules || {};
+Modules.LeadSet = Modules.LeadSet || {};
+
+// Public API for LeadSet Module
+
+/**
+ * Adds menu entries specific to the Lead Set module.
+ * @param {GoogleAppsScript.Base.Menu} menu The menu to add items to.
+ * @return {GoogleAppsScript.Base.Menu} The updated menu.
+ */
+Modules.LeadSet.addMenuEntries = function(menu) {
+  // Avoid duplicate "All Lead Set" – core menu already adds this entry.
+  return menu;
+};
+
+/**
+ * Handles edit events relevant to the Lead Set module.
+ * @param {GoogleAppsScript.Events.SheetsOnEdit} e The edit event object.
+ * @return {Object|null} Optional result or status.
+ */
+Modules.LeadSet.handleEdit = function(e) {
+  if (!e || !e.range) return null;
+  
+  // Delegate lead entry handling to the Utilities implementation when edits occur in column J.
+  if (e.range.getColumn() === 10 && e.range.getValue() === 'LEAD') {
+    Modules.LeadSet.Utilities.handleLeadEntryInColumnJ(
+      e.range.getSheet(),
+      e.range.getRow(),
+      e.range.getSheet().getName()
+    );
+    return true;
+  }
+  
+  return null;
+};
+
+/**
+ * Processes all relevant entries for the Lead Set module.
+ */
+Modules.LeadSet.processAll = function() {
+  // Call the correct function name that's implemented in LeadSetMain
+  if (typeof menuProcessAllLeadSet === 'function') {
+    menuProcessAllLeadSet();
+  } else if (typeof Modules.LeadSet.Main && typeof Modules.LeadSet.Main.menuProcessAllLeadSet === 'function') {
+    Modules.LeadSet.Main.menuProcessAllLeadSet();
+  } else if (typeof Modules.LeadSet.Main && typeof Modules.LeadSet.Main.processAllLeadSet === 'function') {
+    Modules.LeadSet.Main.processAllLeadSet();
+  } else {
+    console.error('Cannot find Lead Set processing function');
+  }
+};
+
+/**
+ * Processes Lead Set entries for a specific technician.
+ * @param {string} technicianName The name of the technician to process.
+ */
+Modules.LeadSet.processForTechnician = function(technicianName) {
+  if (!technicianName) return;
+  
+  // Call internal function to process Lead Set for the specific technician
+  // Assuming there's an implementation or this would be implemented in the future
+  if (typeof processLeadSetForTechnician === 'function') {
+    processLeadSetForTechnician(technicianName);
+  } else {
+    console.log('Lead Set individual processing not yet implemented for: ' + technicianName);
+  }
+};
+
+// Export functions for direct access if needed
+function addMenuEntries(menu) { return Modules.LeadSet.addMenuEntries(menu); }
+function handleEdit(e) { return Modules.LeadSet.handleEdit(e); }
+function processAll() { Modules.LeadSet.processAll(); }
+function processForTechnician(technicianName) { return Modules.LeadSet.processForTechnician(technicianName); } 

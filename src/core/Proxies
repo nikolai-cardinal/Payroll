@@ -2,15 +2,20 @@
 var Modules = Modules || {};
 Modules.Proxies = Modules.Proxies || {}; 
 
+// eslint-disable-next-line no-unused-vars
+function processAllPBPGlobal() {
+  return Modules.PBP && typeof Modules.PBP.processAllPBP === 'function' && Modules.PBP.processAllPBP();
+}
+
 (function() {
   /**
    * Legacy global wrapper preserved for backward compatibility.
    * Delegates to Modules.PBP.processAll if available.
    */
   // eslint-disable-next-line no-unused-vars
-  function processAllPBPGlobal() {
+  /*function processAllPBPGlobal() {
     return Modules.PBP && typeof Modules.PBP.processAll === 'function' && Modules.PBP.processAll();
-  }
+  }*/
 
   /**
    * Legacy wrapper to update PBP for a single technician.

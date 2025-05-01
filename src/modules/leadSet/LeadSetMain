@@ -1,0 +1,484 @@
+/**
+ * Main entry point for the All Lead Set functionality.
+ * Adds menu items and handles menu interactions.
+ */
+
+// Namespace definition
+var Modules = Modules || {};
+Modules.LeadSet = Modules.LeadSet || {};
+Modules.LeadSet.Main = Modules.LeadSet.Main || {};
+Modules.LeadSet.Utilities = Modules.LeadSet.Utilities || {};
+
+/**
+ * Initializes the Lead Set module.
+ * Called when the spreadsheet is opened.
+ */
+function initLeadSet() {
+  // Set up any necessary configurations
+  PropertiesService.getScriptProperties().setProperty('LEAD_SET_VERSION', '1.0.0');
+}
+
+/**
+ * Adds the All Lead Set menu item to the Technician Tools > Payroll menu.
+ * @param {UI.Menu} menu - The menu to add the item to.
+ * @return {UI.Menu} The updated menu with the Lead Set item added.
+ */
+function addLeadSetMenuItem(menu) {
+  return menu.addItem('All Lead Set', 'menuProcessAllLeadSet');
+}
+
+/**
+ * Menu entry point for processing all lead sets.
+ * Triggered when the user selects All Lead Set from the menu.
+ */
+function menuProcessAllLeadSet() {
+  Modules.LeadSet.Utilities.handleErrorsWithUI(() => {
+    processAllLeadSet();
+  }, "Processing Lead Sets");
+}
+
+/**
+ * Main entry point for processing all lead sets.
+ * Handles the batch processing of lead sets for all technicians.
+ */
+function processAllLeadSet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ui = SpreadsheetApp.getUi();
+  
+  const leadSetSheet = Modules.LeadSet.Utilities.findLeadSetSheet(ss);
+  if (!leadSetSheet) {
+    ui.alert('Error', 'Lead Set sheet not found. Please create one first.', ui.ButtonSet.OK);
+    return;
+  }
+  
+  Modules.LeadSet.Utilities.updateStatus("Processing lead sets...");
+  const result = Modules.LeadSet.Utilities.processLeadDataForAllTechs(ss, leadSetSheet);
+  Modules.LeadSet.Utilities.updateStatus("Lead set processing complete");
+  
+  Modules.LeadSet.Utilities.displayProcessingResults(ui, result);
+}
+
+/**
+ * Updates lead set for a specific technician.
+ * This function is called when "Leads" or "Lead Set" is selected from the dropdown.
+ * 
+ * @param {SpreadsheetApp.Spreadsheet} ss - The active spreadsheet.
+ * @param {SpreadsheetApp.Sheet} leadSetSheet - The Lead Set sheet (can be null, will be found if needed).
+ * @param {String} technicianName - The name of the technician.
+ * @param {Number} actionRow - Optional row in Rates sheet to update status.
+ * @param {Number} actionCol - Optional column in Rates sheet to update status.
+ * @param {Boolean} suppressPopup - Optional flag to suppress popup notifications, defaults to false.
+ * @return {Object} Object containing processing results.
+ */
+function updateLeadSetForTechnician(ss, leadSetSheet, technicianName, actionRow, actionCol, suppressPopup = false) {
+  try {
+    console.log(`Starting updateLeadSetForTechnician for ${technicianName}`);
+    
+    // Update status and validate resources
+    updateActionStatus(actionRow, actionCol, 'Processing...');
+    ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+    
+    // Get required sheets
+    let techSheet, validLeadSetSheet;
+    try {
+      // Use the utility function to get required sheets
+      const sheetsResult = Modules.LeadSet.Utilities.getRequiredSheets(ss, leadSetSheet, technicianName);
+      techSheet = sheetsResult.techSheet;
+      validLeadSetSheet = sheetsResult.validLeadSetSheet;
+      
+      if (!techSheet) {
+        const errorMsg = `Technician sheet not found for: ${technicianName}`;
+        console.error(errorMsg);
+        updateActionStatus(actionRow, actionCol, 'Error: No Sheet');
+        return { success: false, error: errorMsg };
+      }
+      
+      if (!validLeadSetSheet) {
+        const errorMsg = 'Lead Set sheet not found';
+        console.error(errorMsg);
+        updateActionStatus(actionRow, actionCol, 'Error: No LeadSet');
+        return { success: false, error: errorMsg };
+      }
+      
+      console.log(`Found required sheets for ${technicianName}`);
+    } catch (sheetError) {
+      const errorMsg = `Error getting sheets: ${sheetError.message}`;
+      console.error(errorMsg);
+      updateActionStatus(actionRow, actionCol, 'Error: Sheet');
+      return { success: false, error: errorMsg };
+    }
+    
+    // Clear existing lead data
+    console.log(`Clearing existing lead data for ${technicianName}`);
+    try {
+      const clearedRows = Modules.LeadSet.Utilities.clearLeadDataInInstallSection(techSheet);
+      console.log(`Cleared ${clearedRows} existing lead rows for ${technicianName}`);
+    } catch (clearError) {
+      console.error(`Error clearing existing data: ${clearError.message}`);
+      // Continue anyway - we'll try to write new data
+    }
+    
+    // Process lead data and write to sheet
+    try {
+      const result = Modules.LeadSet.Utilities.processAndWriteLeadData(validLeadSetSheet, techSheet, technicianName, suppressPopup);
+      updateActionStatus(actionRow, actionCol, 'Complete');
+      return result;
+    } catch (processError) {
+      const errorMsg = `Error processing lead data: ${processError.message}`;
+      console.error(errorMsg);
+      console.error(`Stack: ${processError.stack}`);
+      updateActionStatus(actionRow, actionCol, 'Error: Process');
+      return { success: false, error: errorMsg };
+    }
+  } catch (error) {
+    const errorMsg = `Error in updateLeadSetForTechnician: ${error.message}`;
+    console.error(errorMsg);
+    console.error(`Stack: ${error.stack}`);
+    updateActionStatus(actionRow, actionCol, 'Error');
+    return { success: false, error: errorMsg };
+  }
+}
+
+/**
+ * Updates the action status cell in the Rates sheet.
+ * @param {Number} row - The row number.
+ * @param {Number} col - The column number.
+ * @param {String} status - The status message.
+ */
+function updateActionStatus(row, col, status) {
+  if (!row || !col) return;
+  
+  // Use the canonical Main sheet constant from core constants, with a sensible fallback.
+  const ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(
+    (Modules.Constants && Modules.Constants.SHEET && Modules.Constants.SHEET.MAIN) || 'Main'
+  );
+  if (ratesSheet) {
+    ratesSheet.getRange(row, col).setValue(status);
+  }
+}
+
+/**
+ * Gets and verifies the technician sheet exists.
+ * @param {SpreadsheetApp.Spreadsheet} ss - The active spreadsheet.
+ * @param {String} technicianName - The name of the technician.
+ * @return {SpreadsheetApp.Sheet|null} The technician sheet or null if not found.
+ */
+function getTechnicianSheet(ss, technicianName) {
+  return ss.getSheetByName(technicianName);
+}
+
+/**
+ * Gets and verifies the Lead Set sheet.
+ * @param {SpreadsheetApp.Spreadsheet} ss - The active spreadsheet.
+ * @param {SpreadsheetApp.Sheet} leadSetSheet - Optional existing Lead Set sheet.
+ * @return {SpreadsheetApp.Sheet|null} The verified Lead Set sheet or null if invalid.
+ */
+function getVerifiedLeadSetSheet(ss, leadSetSheet) {
+  if (!leadSetSheet) {
+    leadSetSheet = Modules.LeadSet.Utilities.findLeadSetSheet(ss);
+  }
+  return leadSetSheet;
+}
+
+/**
+ * Processes leads for a specific technician.
+ * @param {SpreadsheetApp.Sheet} leadSetSheet - The Lead Set sheet.
+ * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
+ * @param {String} technicianName - The name of the technician.
+ * @return {Object} Processing results.
+ */
+function processLeadsForTechnician(leadSetSheet, techSheet, technicianName) {
+  const leadsData = Modules.LeadSet.Utilities.getLeadDataForTechnician(leadSetSheet, technicianName);
+  
+  if (!leadsData || leadsData.length === 0) {
+    return { success: true, leadsProcessed: 0, totalCommission: 0 };
+  }
+  
+  // Process the leads using the utilities
+  const { processedLeads, totalCommission } = Modules.LeadSet.Utilities.calculateLeadCommissions(leadsData);
+  
+  // Write to the technician sheet
+  Modules.LeadSet.Utilities.writeNewLeadEntries(techSheet, processedLeads);
+  Modules.LeadSet.Utilities.updateTopSummaryLeadSet(techSheet, processedLeads.length, totalCommission);
+  
+  return { 
+    success: true, 
+    leadsProcessed: processedLeads.length, 
+    totalCommission: totalCommission 
+  };
+}
+
+/**
+ * Updates the status display for the user.
+ * @param {String} message - The status message to display.
+ */
+function updateStatus(message) {
+  SpreadsheetApp.getActiveSpreadsheet().toast(message, "Lead Set Status");
+}
+
+/**
+ * Error handling wrapper for UI functions.
+ * @param {Function} fn - The function to execute.
+ * @param {String} context - The context of the operation for error reporting.
+ */
+function handleErrorsWithUI(fn, context) {
+  try {
+    return fn();
+  } catch (error) {
+    Logger.log(`Error in ${context}: ${error.message}`);
+    Logger.log(`Stack: ${error.stack}`);
+    SpreadsheetApp.getUi().alert(
+      'Error',
+      `An error occurred while ${context.toLowerCase()}: ${error.message}`,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
+    return null;
+  }
+}
+
+/**
+ * Checks if a sheet is a technician sheet.
+ * @param {String} sheetName - The name of the sheet.
+ * @return {Boolean} True if it's a technician sheet, false otherwise.
+ */
+function isTechnicianSheet(sheetName) {
+  // Exclude system sheets and known non-technician sheets
+  const nonTechSheets = ['Setup', 'Summary', 'Lead Set', 'Config', 'Instructions', 'Rates'];
+  return !nonTechSheets.includes(sheetName) && !sheetName.startsWith('_');
+}
+
+/**
+ * Handles "LEAD" entries detected in column J of technician sheets.
+ * This function is called from the Main onEdit function when LEAD text is found in column J.
+ * 
+ * @param {SpreadsheetApp.Sheet} sheet - The sheet where the edit occurred.
+ * @param {Number} row - The row number (1-based) where the edit occurred.
+ * @param {String} sheetName - The name of the sheet (technician name).
+ */
+function handleLeadEntryInColumnJ(sheet, row, sheetName) {
+  try {
+    // Validate inputs and check if this is a technician sheet
+    if (!isValidLeadEntryRequest(sheet, row, sheetName)) {
+      return;
+    }
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const leadSetSheet = Modules.LeadSet.Utilities.findLeadSetSheet(ss);
+    if (!leadSetSheet) {
+      Logger.log("Lead Set sheet not found when processing lead entry in column J");
+      return;
+    }
+    
+    // Get lead data and populate the row
+    const leadData = Modules.LeadSet.Utilities.getLeadDataForTechnician(leadSetSheet, sheetName);
+    if (leadData && leadData.length > 0) {
+      const leadItem = findMatchingLeadItem(sheet, row, leadData);
+      populateLeadRowData(sheet, row, leadItem);
+      updateLeadTotalsAfterEdit(sheet);
+    }
+  } catch (error) {
+    Logger.log(`Error in handleLeadEntryInColumnJ: ${error.message}`);
+    // Don't throw - this is called from onEdit which needs to continue
+  }
+}
+
+/**
+ * Validates that the lead entry request is valid.
+ * 
+ * @param {SpreadsheetApp.Sheet} sheet - The sheet where the edit occurred.
+ * @param {Number} row - The row number (1-based) where the edit occurred.
+ * @param {String} sheetName - The name of the sheet.
+ * @return {Boolean} True if the request is valid, false otherwise.
+ */
+function isValidLeadEntryRequest(sheet, row, sheetName) {
+  // Validate inputs
+  if (!sheet || !row || !sheetName) {
+    Logger.log("Invalid parameters for handleLeadEntryInColumnJ");
+    return false;
+  }
+  
+  // Verify this is a technician sheet
+  if (!isTechnicianSheet(sheetName)) {
+    return false; // Not a technician sheet, ignore
+  }
+  
+  return true;
+}
+
+/**
+ * Finds a matching lead item for a specific row.
+ * 
+ * @param {SpreadsheetApp.Sheet} sheet - The technician sheet.
+ * @param {Number} row - The row number (1-based).
+ * @param {Array} leadData - Array of lead data objects.
+ * @return {Object} The matching lead item, or the first lead if no match found.
+ */
+function findMatchingLeadItem(sheet, row, leadData) {
+  let leadItem = leadData[0]; // Default to first lead if no better match
+  
+  // Try to find a better match if possible based on existing customer name
+  const existingCustomer = sheet.getRange(row, 5).getValue();
+  if (existingCustomer) {
+    // Look for a lead that matches the customer name
+    const matchingLead = leadData.find(lead => 
+      lead.customer && lead.customer.toString().toLowerCase() === existingCustomer.toString().toLowerCase()
+    );
+    if (matchingLead) {
+      leadItem = matchingLead;
+    }
+  }
+  
+  return leadItem;
+}
+
+/**
+ * Populates a row with lead data.
+ * 
+ * @param {SpreadsheetApp.Sheet} sheet - The technician sheet.
+ * @param {Number} row - The row number (1-based).
+ * @param {Object} leadItem - The lead data item.
+ */
+function populateLeadRowData(sheet, row, leadItem) {
+  // Batch update all cells at once
+  const values = [
+    leadItem.customer || '',                    // Column E - Customer name
+    leadItem.businessUnit || '',                // Column F - Business unit
+    leadItem.completionDate || '',              // Column G - Completion date
+    0,                                          // Column H - Commission amount (placeholder)
+    '',                                         // Column I - Notes (placeholder)
+    'L-E-A-D'                                   // Column J - Lead marker
+  ];
+  
+  // Calculate commission and description
+  let commission = 0;
+  let description = '';
+  
+  if (leadItem.revenue) {
+    // Use proper calculation
+    const commData = calculateCommissionForLeadEntry(leadItem.revenue);
+    commission = commData.amount;
+    description = commData.description;
+    
+    // Update commission and description in values array
+    values[3] = commission;
+    
+    // Format notes to include both calculation description and any original notes
+    const noteParts = [];
+    
+    // Add calculation description
+    noteParts.push(description);
+    
+    // Add original notes if any exist
+    if (leadItem.notes && leadItem.notes.trim() !== '') {
+      noteParts.push(leadItem.notes.trim());
+    }
+    
+    // Join all note parts with a separator
+    values[4] = noteParts.join(' - ');
+  }
+  
+  // Write all values at once
+  sheet.getRange(row, 5, 1, 6).setValues([values]);
+  
+  // Format cells appropriately
+  sheet.getRange(row, 8, 1, 1).setNumberFormat('$#,##0.00'); // Format commission as currency
+  if (leadItem.completionDate instanceof Date) {
+    sheet.getRange(row, 7, 1, 1).setNumberFormat('mm/dd/yyyy'); // Format date
+  }
+}
+
+/**
+ * Calculates commission for a lead entry.
+ * 
+ * @param {Number} revenue - The revenue amount.
+ * @return {Object} The calculated commission data.
+ */
+function calculateCommissionForLeadEntry(revenue) {
+  let amount = 0;
+  let description = '';
+  
+  // Use the proper calculation function from LeadSetCalculation.js if available
+  if (typeof calculateLeadCommission === 'function') {
+    const calculated = calculateLeadCommission(revenue);
+    amount = calculated.amount;
+    
+    // Create a note showing the tier and percentage applied
+    let tier = '';
+    if (revenue < 10000) {
+      tier = '$1-$9,999 → 2%';
+    } else if (revenue < 30000) {
+      tier = '$10,000-$29,999 → 3%';
+    } else {
+      tier = '$30,000+ → 4%';
+    }
+    
+    // Format the revenue for display
+    const formattedRevenue = revenue.toLocaleString('en-US', {style: 'currency', currency: 'USD'});
+    
+    // Include the bracket information in the description
+    description = `${calculated.percentage}% commission on ${formattedRevenue} (${tier})`;
+  } else {
+    // Fallback to a simple calculation if the function isn't available
+    amount = revenue * 0.05; // 5% commission as example
+    description = `5% commission on $${revenue.toFixed(2)} (Default 5% bracket)`;
+  }
+  
+  return { amount, description };
+}
+
+/**
+ * Updates the lead set totals in rows 13-14 after editing a lead entry.
+ * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
+ */
+function updateLeadTotalsAfterEdit(techSheet) {
+  try {
+    // Count all rows with "LEAD" in column J
+    const data = techSheet.getDataRange().getValues();
+    let leadCount = 0;
+    let totalCommission = 0;
+    
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      if (row[9] && row[9].toString().toUpperCase().includes('LEAD')) {
+        leadCount++;
+        // Add commission amount from column H (index 7)
+        if (row[7] && typeof row[7] === 'number') {
+          totalCommission += row[7];
+        }
+      }
+    }
+    
+    // Update lead count in row 14, column B
+    techSheet.getRange(14, 2).setValue(leadCount);
+    
+    // Update total commission in row 14, column C
+    techSheet.getRange(14, 3).setValue(totalCommission);
+    techSheet.getRange(14, 3).setNumberFormat('$#,##0.00');
+  } catch (error) {
+    Logger.log(`Error in updateLeadTotalsAfterEdit: ${error.message}`);
+  }
+}
+
+/**
+ * Global function to handle menu call for processing all lead sets.
+ * This matches the function name called from the menu in src/core/Menu.
+ */
+function processAllLeadSets() {
+  // Delegate to the existing function
+  if (typeof processAllLeadSet === 'function') {
+    processAllLeadSet();
+  } else if (typeof Modules.LeadSet.Main && typeof Modules.LeadSet.Main.processAllLeadSet === 'function') {
+    Modules.LeadSet.Main.processAllLeadSet();
+  } else {
+    console.error('Cannot find Lead Set processing function');
+  }
+}
+
+// Attach all Main functions to namespace
+Modules.LeadSet.Main.initLeadSet = initLeadSet;
+Modules.LeadSet.Main.addLeadSetMenuItem = addLeadSetMenuItem;
+Modules.LeadSet.Main.menuProcessAllLeadSet = menuProcessAllLeadSet;
+Modules.LeadSet.Main.processAllLeadSet = processAllLeadSet;
+Modules.LeadSet.Main.handleLeadEntryInColumnJ = handleLeadEntryInColumnJ;
+Modules.LeadSet.Main.updateLeadSetForTechnician = updateLeadSetForTechnician;
+Modules.LeadSet.Main.processAllLeadSets = processAllLeadSets; 

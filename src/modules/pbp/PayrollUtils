@@ -1,0 +1,59 @@
+// Namespace stub – PayrollUtils for PBP module
+var Modules = Modules || {};
+Modules.PBP = Modules.PBP || {};
+Modules.PBP.Utils = Modules.PBP.Utils || {};
+
+/**
+ * Calculates the PBP split percentage for a technician based on team composition.
+ * @param {number} totalTechs - Total number of technicians on the job.
+ * @param {number} leadCount - Number of technicians with the 'Lead' role.
+ * @param {number} assistantCount - Number of technicians with the 'Assistant' role.
+ * @param {string} techRole - The final role ('Lead' or 'Assistant') of the technician asking for their split.
+ * @return {number} The percentage split (0-100).
+ */
+Modules.PBP.Utils.calculateSplitPercentage = function(totalTechs, leadCount, assistantCount, techRole) {
+    if (techRole === 'None' || totalTechs === 0) {
+        return 0;
+    }
+
+    // Ensure counts add up (or handle discrepancy)
+    if (leadCount + assistantCount !== totalTechs) {
+         // This might happen if some techs had role 'None' initially
+         if (Modules.Safe && Modules.Safe.Logger) {
+             Modules.Safe.Logger.log(`Warning: Role count mismatch. Total: ${totalTechs}, Leads: ${leadCount}, Assistants: ${assistantCount}. Recalculating effective total.`);
+         }
+         totalTechs = leadCount + assistantCount; // Adjust total to only paying roles
+         if (totalTechs === 0) return 0; // No paying roles left
+    }
+
+    switch (totalTechs) {
+        case 1:
+            return 100; // Solo job
+
+        case 2:
+            if (leadCount === 1 && assistantCount === 1) { return (techRole === 'Lead') ? 65 : 35; }
+            if (leadCount === 2 && assistantCount === 0) { return 50; }
+            if (leadCount === 0 && assistantCount === 2) { return 50; } // Handles 2 Class 2s who were both Assistants initially
+            break; // Go to fallback if mismatch
+
+        case 3:
+            if (leadCount === 1 && assistantCount === 2) { return (techRole === 'Lead') ? 46 : 27; }
+            if (leadCount === 2 && assistantCount === 1) { return (techRole === 'Lead') ? 38 : 24; }
+            if (leadCount === 3 && assistantCount === 0) { return 100 / 3; } // Equal split for 3 leads
+            if (leadCount === 0 && assistantCount === 3) { return 100 / 3; } // Equal split for 3 assistants
+             break; // Go to fallback if mismatch
+
+        case 4:
+            if (leadCount === 2 && assistantCount === 2) { return (techRole === 'Lead') ? 30 : 20; }
+            if (leadCount === 3 && assistantCount === 1) { return (techRole === 'Lead') ? 30 : 10; }
+            if (leadCount === 4 && assistantCount === 0) { return 25; } // Equal split for 4 leads
+            if (leadCount === 0 && assistantCount === 4) { return 25; } // Equal split for 4 assistants
+            break; // Go to fallback if mismatch
+    }
+
+    // Fallback for > 4 techs or unexpected role combinations
+    if (Modules.Safe && Modules.Safe.Logger) {
+        Modules.Safe.Logger.log(`Using fallback split calculation for ${totalTechs} techs (${leadCount}L / ${assistantCount}A)`);
+    }
+    return (totalTechs > 0) ? (100 / totalTechs) : 0;
+}; 

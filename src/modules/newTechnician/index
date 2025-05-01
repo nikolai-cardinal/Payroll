@@ -1,0 +1,63 @@
+// Namespace stub – NewTechnician
+var Modules = Modules || {};
+Modules.NewTechnician = Modules.NewTechnician || {};
+
+// Public API for NewTechnician Module
+
+/**
+ * Adds menu entries specific to the New Technician module.
+ * @param {GoogleAppsScript.Base.Ui} menu The menu environment.
+ */
+Modules.NewTechnician.addMenuEntries = function(menu) {
+  // Intentionally left blank – this module now uses its own standalone menu added
+  // via onOpenInit instead of injecting items into the root Technician Tools menu.
+};
+
+/**
+ * Handles edit events relevant to the NewTechnician module.
+ * Ignores any triggers from Column G in the Main sheet.
+ * @param {GoogleAppsScript.Events.SheetsOnEdit} e The edit event object.
+ * @return {Object|null} Optional result or status.
+ */
+Modules.NewTechnician.handleEdit = function(e) {
+  // Skip processing if edit is in Column G of Main sheet
+  if (e && e.range) {
+    var sheet = e.range.getSheet();
+    if (sheet.getName() === Modules.Constants.SHEET.MAIN && e.range.getColumn() === 7) {
+      Logger.log('NewTechnician: Ignoring trigger from Column G in Main sheet as requested');
+      return null;
+    }
+  }
+  
+  // TODO: Call internal logic from moved files
+  Logger.log('NewTechnician: handleEdit called for range ' + (e && e.range ? e.range.getA1Notation() : 'N/A'));
+  return null;
+};
+
+/**
+ * Initialisation fired from Core/Main.onOpen.
+ * Builds a stand-alone "🗂 Technician Sheets" menu replicating legacy behaviour.
+ *
+ * @param {GoogleAppsScript.Events.SheetsOnOpen=} e Event payload (ignored).
+ */
+Modules.NewTechnician.onOpenInit = function(e) {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('🗂 Technician Sheets')
+    .addItem('New Sheet', 'createNewTechnicianSheet')
+    .addItem('All New Sheets', 'createAllNewTechnicianSheets')
+    .addToUi();
+};
+
+// Note: processAll is not listed for this module in the migration plan table.
+
+// After the handleEdit definition add back-compat functions
+// ------------------------------------------------------------------
+// Legacy API exposure for Core/Proxies wrappers
+Modules.NewTechnician.createSheet = function(name) {
+  return createNewTechnicianSheet(name);
+};
+
+Modules.NewTechnician.createAllSheets = function() {
+  return createAllNewTechnicianSheets();
+};
+// ------------------------------------------------------------------ 

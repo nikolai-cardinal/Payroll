@@ -1,0 +1,156 @@
+/**
+ * Cardinal Payroll System - New Sheet
+ * This script handles creating new technician sheets.
+ */
+
+/**
+ * Creates a new technician sheet based on the Template
+ */
+function createNewTechnicianSheet(techName, suppressPopup) {
+    var ui = SpreadsheetApp.getUi();
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    // Only prompt the user when no technician name was supplied (menu action).
+    if (!techName) {
+      var response = ui.prompt(
+        'Create New Technician Sheet',
+        'Enter the technician\'s name:',
+        ui.ButtonSet.OK_CANCEL);
+
+      var button = response.getSelectedButton();
+      techName = response.getResponseText();
+
+      if (button !== ui.Button.OK || !techName) {
+        return;
+      }
+    }
+
+    // Helper to optionally silence pop-ups when running in bulk mode.
+    var notify = function (msg) {
+      if (!suppressPopup) ui.alert(msg);
+    };
+    
+    // Check if the sheet already exists
+    try {
+      var existingSheet = ss.getSheetByName(techName);
+      if (existingSheet) {
+        notify('A sheet with this name already exists.');
+        return;
+      }
+    } catch (e) {
+      // Sheet doesn\'t exist, which is what we want
+    }
+    
+    // Get the template sheet (renamed to "Template")
+    var templateSheet = ss.getSheetByName('Template');
+    if (!templateSheet) {
+      notify('Template sheet not found.');
+      return;
+    }
+    
+    // Create a new sheet by copying the template
+    var newSheet = templateSheet.copyTo(ss);
+    newSheet.setName(techName);
+    
+    // Get mapping for rates sheet and new technician sheet
+    var ratesMapping = getRatesSheetMapping();
+    var mapping = getTechnicianSheetMapping(newSheet);
+    
+    // Check if the technician exists in the Main sheet
+    var ratesSheet = ss.getSheetByName('Main');
+    var ratesData = ratesSheet.getDataRange().getValues();
+    
+    var techFound = false;
+    var techPosition = '';
+    var techRate = 0;
+    var departmentAndBusinessUnit = ''; // Variable to store combined value
+    
+    for (var i = ratesMapping.dataStartRow - 1; i < ratesData.length; i++) {
+      if (ratesData[i][ratesMapping.nameColumn - 1] === techName) {
+        techFound = true;
+        techPosition = ratesData[i][ratesMapping.positionColumn - 1];
+        // Column D (configured via ratesMapping.rateColumn) contains the hourly pay rate
+        techRate = ratesData[i][ratesMapping.rateColumn - 1];
+        var department = ratesData[i][1]; // Column B (0-based index 1) contains the department
+        var businessUnit = ratesData[i][2]; // Column C (0-based index 2) contains the business unit
+        departmentAndBusinessUnit = department + " / " + businessUnit; // Combine B and C with format 'B / C'
+        break;
+      }
+    }
+    
+    // Get the current pay period from cell F1 of the Main sheet
+    var currentPayPeriod = ratesSheet.getRange(1, 6).getDisplayValue();
+    
+    // Update the new sheet
+    newSheet.getRange(1, 1).setValue(techName);
+    
+    // Update pay period regardless of whether the tech was found
+    newSheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
+    
+    if (techFound) {
+      // Set combined department and business unit in cell A3
+      newSheet.getRange(mapping.positionRow, 1).setValue(departmentAndBusinessUnit);
+      // Update the hourly rate in the new location (cell C4)
+      newSheet.getRange(mapping.hourlyRateRow, mapping.rateValueColumn).setValue(techRate);
+      notify('Technician sheet created with data from Main.');
+    } else {
+      notify('Technician sheet created, but the technician was not found in Main. Please add them to that sheet and run Update All Technician Rates.');
+    }
+  }
+  
+  /**
+  * Gets the field mappings for a technician sheet
+  * @param {Sheet} sheet - The technician sheet to map
+  * @return {Object} An object containing row and column indexes for important fields
+  */
+  function getTechnicianSheetMapping(sheet) {
+    return {
+      payPeriodRow: 2,      // Row containing the pay period text
+      positionRow: 3,       // Row containing the position
+      hourlyRateRow: 4,     // Row containing hourly rate information (updated from 5 to 4)
+      valueColumn: 2,       // Column B - Main value column
+      rateValueColumn: 3,   // Column C - For the rate value in C4 (new)
+      ptoRateColumn: 7      // Column G - PTO rate column
+    };
+  }
+
+/**
+ * Batch-creates sheets for every technician on the Main sheet whose column E
+ * is NOT "Exempt" and who does not already have an individual sheet.
+ */
+function createAllNewTechnicianSheets() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  var ratesSheet = ss.getSheetByName('Main');
+  if (!ratesSheet) return ui.alert('Error: Could not find "Main" sheet.');
+
+  var map = getRatesSheetMapping();
+  var lastRow = ratesSheet.getLastRow();
+  if (lastRow < map.dataStartRow) return ui.alert('No technicians listed in Main sheet.');
+
+  // Fetch columns A-E (name through exempt status).
+  var rows = ratesSheet
+    .getRange(map.dataStartRow, 1, lastRow - map.dataStartRow + 1, 5)
+    .getValues();
+
+  var created = 0;
+
+  rows.forEach(function (row) {
+    var name = row[map.nameColumn - 1]; // column A
+    var exemptFlag = row[4];            // column E (0-based index 4)
+
+    if (!name || exemptFlag === 'Exempt') return;          // skip blank or exempt
+    if (ss.getSheetByName(name))         return;          // skip if sheet exists
+
+    try {
+      createNewTechnicianSheet(name, /*suppressPopup=*/true);
+      created++;
+    } catch (err) {
+      // ignore errors per-technician to allow batch to continue
+      Logger.log('Error creating sheet for ' + name + ': ' + err);
+    }
+  });
+
+  ui.alert('Created ' + created + ' new technician sheet' + (created !== 1 ? 's' : '') + '.');
+} 

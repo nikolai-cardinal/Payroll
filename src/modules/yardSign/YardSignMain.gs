@@ -16,7 +16,7 @@ function initYardSign() {
 /**
 * Sets the status in the Action column of the rates sheet.
 * Local version to avoid cross-file reference issues.
-* @param {Sheet} ratesSheet The 'Hourly + Spiff Pay' sheet object.
+* @param {Sheet} ratesSheet The 'Main' sheet object.
 * @param {number} row The 1-based row index.
 * @param {number} col The 1-based column index (should be the Action column).
 * @param {string} status The status to set (e.g., 'Complete', 'Error', 'Processing...').
@@ -66,7 +66,7 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
   initYardSign();
   
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+  var ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
   var ui = SpreadsheetApp.getUi();
   var summaryInfo = []; // Array to collect detailed information for the popup
   
@@ -322,7 +322,7 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
 function processAllYardSigns() {
   initYardSign(); // Ensure initialization
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+  var ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
   var ui = SpreadsheetApp.getUi();
   var processedCount = 0;
   var skippedCount = 0;
@@ -330,7 +330,7 @@ function processAllYardSigns() {
   var skippedTechs = []; // Store names of skipped technicians
 
   if (!ratesSheet) {
-    ui.alert('Error: Hourly + Spiff Pay sheet not found.');
+    ui.alert('Error: Main sheet not found.');
     return;
   }
 
@@ -339,7 +339,7 @@ function processAllYardSigns() {
   var startRow = 3; 
   var lastRow = ratesSheet.getLastRow();
   if (lastRow < startRow) {
-    ui.alert("No technician data found in 'Hourly + Spiff Pay' sheet (starting row 3).");
+    ui.alert("No technician data found in 'Main' sheet (starting row 3).");
     return;
   }
   // Get columns A (Name), B (Dept - maybe needed later?), C (Class)

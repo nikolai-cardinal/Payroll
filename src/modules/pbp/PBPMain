@@ -2,7 +2,12 @@
 * Payroll System - PBP Main Coordinator
 * Contains the main entry point for PBP updates, coordinates calls
 * to calculation and sheet operations, and handles status reporting.
+* Now includes calculation functions originally from PBPCalculation.gs.
 */
+
+// Standard initialization pattern - Create our namespace
+var Modules = Modules || {};
+Modules.PBP = Modules.PBP || {};
 
 /**
 * Returns a standard mapping object for columns in the 'Main' sheet relevant to PBP.
@@ -17,10 +22,10 @@ function _getRatesSheetMappingPBP() {
     nameColumn: 1,       // Column A: Technician Name
     positionColumn: 3,   // Column C: Position (Used for Class 1 check)
     actionColumn: 7,     // Column G: Action Dropdown (Assuming this remains the PBP trigger column)
-    dataStartRow: 3      // Row number where the actual technician data begins
+    dataStartRow: 3,     // Row number where the actual technician data begins
+    exemptColumn: 5      // Column E: Exempt status flag (optional)
   };
 }
-
 
 /**
 * Updates PBP for a specific technician when Action is set to PBP.
@@ -33,7 +38,9 @@ function _getRatesSheetMappingPBP() {
 * @param {boolean} [options.suppressPopup=false] - Flag to suppress popup notifications.
 * @return {object|null} Result object with entryCount and totalAmount if successful, null otherwise.
 */
-function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn, options = {}) {
+function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn, options) {
+  // Ensure options is always an object
+  options = options || {};
   const { skipStatusUpdate = false, suppressPopup = false } = options;
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -80,15 +87,15 @@ function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn,
 
       if (technicianRowData) {
         const title = technicianRowData.position;
-        // Assuming getTechnicianClassAndRole is in PBPCalculation
-        const techInfo = Modules.PBP.Calculation.getTechnicianClassAndRole(title);
+        // Using shared utility instead of direct function call
+        const techInfo = Modules.Shared.TechnicianUtils.getTechnicianClassAndRole(title);
 
         if (techInfo.class === 1) {
           console.log(`Skipping PBP processing for Class 1 technician: ${technicianName}`);
 
           // Update summary to 0 and clear section
-          Modules.PBP.SheetOperations.updateTopSummaryInstallPay(techSheet, 0, 0);
-          Modules.PBP.SheetOperations.clearInstallDataSection(techSheet);
+          Modules.PBP.updateTopSummaryInstallPay(techSheet, 0, 0);
+          Modules.PBP.clearInstallDataSection(techSheet);
 
           // Set status to Complete if not skipping status updates
           if (!skipStatusUpdate && actionRow && actionColumn) {
@@ -114,10 +121,10 @@ function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn,
     const spiffBonusData = spiffBonusSheet.getDataRange().getValues();
     const ratesData = ratesSheet.getDataRange().getValues(); // Used for default splits
 
-    // --- 2. Perform Calculations (Delegate to PBPCalculation.gs) ---
+    // --- 2. Perform Calculations (Using integrated function) ---
     console.log("Starting PBP calculation for: " + technicianName);
-    // Assuming calculatePbpEntries is in PBPCalculation
-    const calculationResult = Modules.PBP.Calculation.calculatePbpEntries(technicianName, spiffBonusData, ratesData);
+    // Direct function call
+    const calculationResult = calculatePbpEntries(technicianName, spiffBonusData, ratesData);
 
     const allPbpEntries = calculationResult.entries;
     const totalTechnicianShare = calculationResult.totalShare;
@@ -133,8 +140,8 @@ function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn,
            ui.alert("No PBP entries found for " + technicianName + " in the Spiff/Bonus tab for this period.");
          }
          // Update summary to 0 and clear section
-         Modules.PBP.SheetOperations.updateTopSummaryInstallPay(techSheet, 0, 0);
-         Modules.PBP.SheetOperations.clearInstallDataSection(techSheet);
+         Modules.PBP.updateTopSummaryInstallPay(techSheet, 0, 0);
+         Modules.PBP.clearInstallDataSection(techSheet);
          if (!skipStatusUpdate && actionRow && actionColumn) {
             Modules.Shared.SheetUtils.setActionStatus(ratesSheet, actionRow, actionColumn, "Complete"); // Mark as complete even if 0 entries
          }
@@ -149,10 +156,10 @@ function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn,
       return { entryCount: 0, totalAmount: 0 }; // Return standard object
     }
 
-    // --- 4. Update Technician Sheet (Delegate to PBPSheetOperations.gs) ---
+    // --- 4. Update Technician Sheet (Delegate to PBPUtilities.gs now) ---
     console.log("Starting sheet update for: " + technicianName);
-    // Assuming writePbpDataToSheet is in PBPSheetOperations
-    Modules.PBP.SheetOperations.writePbpDataToSheet(techSheet, allPbpEntries, totalTechnicianShare);
+    // Using updated namespace
+    Modules.PBP.writePbpDataToSheet(techSheet, allPbpEntries, totalTechnicianShare);
     console.log("Sheet update finished for: " + technicianName);
 
     // --- 5. Prepare and Show Summary Popup ---
@@ -174,7 +181,7 @@ function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn,
             summaryInfo.push("\nEntry #" + (k+1) + ":");
             summaryInfo.push("• Customer: " + entry.customerName);
             // Assuming formatDate is in Shared.DateUtils
-            summaryInfo.push("• Date: " + Modules.Shared.DateUtils.formatDate(entry.completionDate));
+            summaryInfo.push("• Date: " + formatDateSafe(entry.completionDate));
             summaryInfo.push("• Item: " + entry.itemName);
             summaryInfo.push("• Job Total PBP: $" + entry.totalPbp.toFixed(2));
             summaryInfo.push("• Tech Role (Job): " + entry.roleForJob + " (" + entry.splitPercentage.toFixed(1) + "%)");
@@ -244,74 +251,47 @@ function pbpMain_processAllPBP() {
   const allSheetNames = ss.getSheets().map(sheet => sheet.getName());
   const sheetNameSet = new Set(allSheetNames); // Use Set for faster lookups
 
-  // Get all technicians from Main sheet
-  const dataRange = ratesSheet.getRange(ratesMapping.dataStartRow, ratesMapping.nameColumn, ratesSheet.getLastRow() - ratesMapping.dataStartRow + 1, 1);
-  const data = dataRange.getValues();
+  // Fetch full data once (name + exempt status, etc.)
+  const allRatesData = ratesSheet.getDataRange().getValues();
 
-  // Process each technician
-  for (let i = 0; i < data.length; i++) {
-    const techName = data[i][0]; // Technician name
+  // Process each technician row starting from dataStartRow (convert to zero-based index)
+  for (let i = ratesMapping.dataStartRow - 1; i < allRatesData.length; i++) {
+    const row = allRatesData[i];
+    const techName = row[ratesMapping.nameColumn - 1];
+    const exemptFlag = row[ratesMapping.exemptColumn - 1];
 
-    // Skip empty rows or rows with no technician name
-    if (!techName || typeof techName !== 'string' || techName.trim() === '') {
+    // Skip blank names or exempt employees
+    if (!techName || typeof techName !== 'string' || techName.trim() === '' || String(exemptFlag).trim().toLowerCase() === 'exempt') {
       continue;
     }
     const trimmedTechName = techName.trim();
 
-    // Check if the technician has a sheet using the Set
+    // Check if the technician has a sheet
     if (!sheetNameSet.has(trimmedTechName)) {
       console.log(`Skipping ${trimmedTechName} - no sheet exists`);
       skippedCount++;
       continue;
     }
 
-    // Calculate row index in the rates sheet (needed if we were setting status per row)
-    // const actualRow = i + ratesMapping.dataStartRow;
-
     try {
-      // Call the single, refactored update function with options
-      const result = pbpMain_updatePBPForTechnician(trimmedTechName, null, null, { // Pass null for row/col as they aren't relevant here
+      const result = pbpMain_updatePBPForTechnician(trimmedTechName, null, null, {
         skipStatusUpdate: true,
         suppressPopup: true
       });
 
-      // Check the result
       if (result !== null) {
-         // Check if it was a Class 1 skip (indicated by amount 0 and count 0, but not an error)
-         const isClass1Skip = result.entryCount === 0 && result.totalAmount === 0 &&
-            // Add a check here based on Class 1 logic if possible,
-            // otherwise, assume 0/0 might be a skip.
-            // We might need pbpMain_updatePBPForTechnician to return an explicit skip flag.
-            // For now, we can't definitively distinguish 0 entries from a Class 1 skip without more info.
-            // Let's assume for now it processed successfully, even if with 0 result.
-             true; // Placeholder - Assume success if no error thrown
-
-         if (isClass1Skip) {
-            // This distinction isn't perfectly reliable with current return value.
-            // Needs improvement if accurate Class 1 skip count is vital.
-            // class1SkippedCount++;
-            console.log(`Technician ${trimmedTechName} processed (likely Class 1 or no entries).`);
-            // We still count it as processed, just with 0 amount/entries.
-         }
-
-         // Record success and track amount
-         successCount++;
-         techniciansProcessed.push({
-            name: trimmedTechName,
-            count: result.entryCount || 0,
-            amount: result.totalAmount || 0
-         });
-         totalAmount += (result.totalAmount || 0);
-
+        successCount++;
+        techniciansProcessed.push({
+          name: trimmedTechName,
+          count: result.entryCount || 0,
+          amount: result.totalAmount || 0
+        });
+        totalAmount += (result.totalAmount || 0);
       } else {
-        // The function returned null, indicating an error occurred and was caught internally
-        console.error(`Error processing PBP for ${trimmedTechName} (handled within update function).`);
         errorCount++;
         errors.push(`${trimmedTechName}: Processing error (see logs)`);
       }
-
     } catch (error) {
-      // Catch errors thrown *up* from pbpMain_updatePBPForTechnician (should be rare if it handles its own)
       console.error(`Unhandled error processing PBP for ${trimmedTechName}: ${error.message} ${error.stack}`);
       errorCount++;
       errors.push(`${trimmedTechName}: ${error.message}`);
@@ -323,34 +303,129 @@ function pbpMain_processAllPBP() {
   summaryMessage.push("\nSUMMARY:");
   summaryMessage.push(`• Technicians Processed Successfully: ${successCount}`);
   summaryMessage.push(`• Technicians Skipped (No Sheet): ${skippedCount}`);
-  // summaryMessage.push(`• Technicians Skipped (Class 1): ${class1SkippedCount}`); // Optional, if tracking improves
   summaryMessage.push(`• Technicians with Errors: ${errorCount}`);
   summaryMessage.push(`• Total PBP Amount Calculated: $${totalAmount.toFixed(2)}`);
 
-  // Add technician details section if we have any successful non-zero results
   const successfulEntries = techniciansProcessed.filter(t => t.count > 0);
   if (successfulEntries.length > 0) {
     summaryMessage.push("\nDETAILS BY TECHNICIAN (with entries):");
     successfulEntries.forEach(tech => {
-        summaryMessage.push(`\n  ${tech.name}:`);
-        summaryMessage.push(`  • Entries: ${tech.count}`);
-        summaryMessage.push(`  • Amount: $${tech.amount.toFixed(2)}`);
+      summaryMessage.push(`\n  ${tech.name}:`);
+      summaryMessage.push(`  • Entries: ${tech.count}`);
+      summaryMessage.push(`  • Amount: $${tech.amount.toFixed(2)}`);
     });
   }
 
-  // Add errors section if any
   if (errors.length > 0) {
     summaryMessage.push("\nERRORS ENCOUNTERED:");
     errors.forEach(err => summaryMessage.push(`• ${err}`));
   }
 
-  // Show the popup
   ui.alert(summaryMessage.join("\n"));
 }
 
+// --- CALCULATION FUNCTIONS FROM PBPCalculation.gs ---
 
-// REMOVED Global Exports:
-// var updatePBPForTechnician = pbpMain_updatePBPForTechnician;
-// var processAllPBP = pbpMain_processAllPBP;
+/**
+* Processes PBP entries from Spiff/Bonus data and calculates shares based on new class/role logic.
+* @param {string} technicianName - The name of the technician being processed.
+* @param {Array<Array>} spiffBonusData - 2D array of data from 'Spiff/Bonus' sheet.
+* @param {Array<Array>} ratesData - 2D array of data from 'Hourly + Spiff Pay' sheet.
+* @return {object} An object containing { entries: Array<object>, totalShare: number }.
+*/
+function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
+  var techCache = Modules.PBP.Helpers.buildTechDetailsCache(ratesData);
+  var processed = {};
+  var resultEntries = [];
+  var totalShare = 0;
 
-// REMOVED Function: updatePBPForTechnicianAll (logic merged into pbpMain_processAllPBP and pbpMain_updatePBPForTechnician) 
+  for (var r = 1; r < spiffBonusData.length; r++) {
+    var row = spiffBonusData[r];
+    var pbpAmount = Modules.PBP.Helpers.parsePbpAmount(row[9]); // Col J – Cross-Sale Group
+    if (!pbpAmount) continue;
+
+    var namesInfo = Modules.PBP.Helpers.getUniqueTechNames(row[6], row[7]);
+    if (!namesInfo.lowerSet.has(technicianName.toLowerCase())) continue;
+
+    var key = [row[1], row[3], row[10], pbpAmount].join('|');
+    if (processed[key]) continue;
+    processed[key] = true;
+
+    var jobTechs = Modules.PBP.Helpers.computeJobTechnicians(namesInfo.uniqueNames, techCache, pbpAmount);
+    var target = jobTechs.find(function(t){ return t.name.toLowerCase() === technicianName.toLowerCase(); });
+    if (!target) continue;
+
+    resultEntries.push({
+      customerName: row[1],
+      jobBusinessUnit: row[2],
+      completionDate: row[3],
+      itemName: row[10],
+      totalPbp: pbpAmount,
+      technicianShare: target.payout,
+      roleForJob: target.finalRole,
+      splitPercentage: target.splitPercent,
+      isEligible: target.isEligible,
+      teamDetails: jobTechs.map(function(t){return t.name+" (C"+t.class+"/"+t.finalRole+"/"+t.splitPercent.toFixed(1)+"%)";}).join(', ')
+    });
+    totalShare += target.payout;
+  }
+
+  return { entries: resultEntries, totalShare: totalShare };
+}
+
+// Make functions available globally for direct menu calls
+function updatePBPForTechnician(technicianName) {
+  return pbpMain_updatePBPForTechnician(technicianName, null, null, {});
+}
+
+function processAllPBP() {
+  return pbpMain_processAllPBP();
+}
+
+// Make functions available through the Modules.PBP namespace for programmatic access
+Modules.PBP.updatePBPForTechnician = pbpMain_updatePBPForTechnician;
+Modules.PBP.processAllPBP = pbpMain_processAllPBP;
+
+// Menu-specific global function
+function processAllPBPGlobal() {
+  return pbpMain_processAllPBP();
+}
+
+/**
+ * Local fallback date formatting function in case Modules.Shared.DateUtils is not available
+ * Formats a date as a string using MM/dd/yyyy format
+ * 
+ * @param {*} date - The date to format, can be Date object, string, or number
+ * @return {string} Formatted date string
+ */
+function formatDateSafe(date) {
+  try {
+    // First try to parse the date if it's not already a Date object
+    var dateObj;
+    if (date instanceof Date) {
+      dateObj = date;
+    } else if (typeof date === 'number') {
+      // Convert Google Sheets serial number to Date
+      dateObj = new Date(Math.round((date - 25569) * 86400000));
+    } else if (typeof date === 'string') {
+      dateObj = new Date(date);
+    } else {
+      return String(date || ''); // If all else fails, return as string
+    }
+    
+    // Check if date is valid
+    if (isNaN(dateObj.getTime())) {
+      return String(date || '');
+    }
+    
+    // Format the date as MM/dd/yyyy
+    var month = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+    var day = dateObj.getDate().toString().padStart(2, '0');
+    var year = dateObj.getFullYear();
+    
+    return month + '/' + day + '/' + year;
+  } catch (e) {
+    console.error("Error formatting date: " + e.message);
+    return String(date || '');
+  }
+}

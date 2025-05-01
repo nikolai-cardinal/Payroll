@@ -197,16 +197,16 @@ function getTechnicianSheetMappingForTimesheet(sheet) {
 }
 
 /**
- * Gets the current pay period from Hourly + Spiff Pay sheet
+ * Gets the current pay period from Main sheet
  * @return {string} The current pay period string
  */
 function getCurrentPayPeriodForTimesheet() {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
     
     if (!ratesSheet) {
-      console.error("Hourly + Spiff Pay sheet not found!");
+      console.error("Main sheet not found!");
       return "Current Pay Period";
     }
     
@@ -238,8 +238,8 @@ function formatHoursToHM(decimalHours) {
 /**
  * Updates hours for a specific technician based on the Time Sheet
  * @param {string} technicianName - The name of the technician to update
- * @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
- * @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
+ * @param {number} actionRow - The row in the Main sheet where the action was triggered
+ * @param {number} actionColumn - The column in the Main sheet where the action was triggered
  * @param {boolean} skipStatusUpdate - Optional flag to skip updating status (for batch processing)
  * @param {boolean} suppressPopup - Optional flag to suppress popup notifications
  */
@@ -249,7 +249,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var timeSheetTab = ss.getSheetByName('Time Sheet');
-    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
     
     if (!timeSheetTab) {
       if (!skipStatusUpdate && !suppressPopup) {
@@ -345,7 +345,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
     var totalPayValue = totalPayCell.getValue();
     console.log("Total Pay for " + technicianName + ": " + totalPayValue);
     
-    // Find the technician in the Hourly + Spiff Pay sheet to update their Pay column
+    // Find the technician in the Main sheet to update their Pay column
     if (ratesSheet) {
       var ratesData = ratesSheet.getDataRange().getValues();
       var techRow = -1;
@@ -364,7 +364,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
         ratesSheet.getRange(techRow, payColumn).setValue(totalPayValue);
         console.log("Updated Pay column for " + technicianName + " to " + totalPayValue);
       } else {
-        console.error("Could not find " + technicianName + " in the Hourly + Spiff Pay sheet");
+        console.error("Could not find " + technicianName + " in the Main sheet");
       }
     }
     
@@ -389,7 +389,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
     // If there was an error, reset the action dropdown
     try {
       if (actionRow && actionColumn && !skipStatusUpdate) {
-        var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Hourly + Spiff Pay');
+        var ratesSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(Modules.Constants.SHEET.MAIN);
         if (ratesSheet) {
           ratesSheet.getRange(actionRow, actionColumn).setValue("Ready");
         }
@@ -412,11 +412,11 @@ function processAllTimesheets() {
   try {
     var ui = SpreadsheetApp.getUi();
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
     var timeSheet = ss.getSheetByName('Time Sheet');
     
     if (!ratesSheet) {
-      ui.alert('Error: Could not find "Hourly + Spiff Pay" sheet.');
+      ui.alert('Error: Could not find "Main" sheet.');
       return;
     }
     
@@ -434,7 +434,7 @@ function processAllTimesheets() {
     });
     
     if (technicianNames.length === 0) {
-      ui.alert('No technicians found in Hourly + Spiff Pay sheet.');
+      ui.alert('No technicians found in Main sheet.');
       return;
     }
     

@@ -12,16 +12,15 @@ Modules.Menu = Modules.Menu || {};
    */
   Modules.Menu.addMenuEntries = function(menu) {
     menu
-      .addItem('✅Payroll', 'runFullPayroll')
+      .addItem('All Payroll', 'runFullPayroll')
       .addSeparator()
-      .addItem('Update All Rates', 'updateAllTechnicianRates')
+      .addItem('Individual Payroll', 'runIndividualPayroll')
+      .addSeparator()
       .addItem('All Spiff/Bonus', 'processAllSpiffBonusWithCustomers')
       .addItem('All PBP', 'processAllPBPGlobal')
       .addItem('All Yard Signs', 'menuProcessAllYardSigns')
       .addItem('All Timesheet', 'processAllTimesheets')
-      .addItem('All Lead Set', 'processAllLeadSets')
-      .addSeparator()
-      .addItem('Create New Sheet', 'createNewTechnicianSheet');
+      .addItem('All Lead Set', 'processAllLeadSets');
   };
 
   /**
@@ -40,18 +39,30 @@ Modules.Menu = Modules.Menu || {};
     var rootLabel = (Modules.Constants && Modules.Constants.MENU && Modules.Constants.MENU.ROOT) || '🚚 Technician Tools';
     var menu = ui.createMenu(rootLabel);
 
+    // Get ordered modules directly, no longer relying on external _getOrderedModules
+    var orderedModules = [
+      Modules.ApprovedMonitor,
+      Modules.TimeSheet,
+      Modules.SpiffBonus,
+      Modules.PBP,
+      Modules.YardSign,
+      Modules.LeadSet,
+      Modules.NewTechnician
+    ].filter(function(m) { return m; });
+
     // Delegate to each module so they can append their specific menu items.
-    if (typeof _getOrderedModules === 'function') {
-      _getOrderedModules().forEach(function(mod) {
-        if (typeof mod.addMenuEntries === 'function') {
-          try {
-            mod.addMenuEntries(menu);
-          } catch (err) {
-            console.error(err);
-          }
+    orderedModules.forEach(function(mod) {
+      // Skip NewTechnician module to prevent its items appearing in Technician Tools
+      if (mod === Modules.NewTechnician) return;
+      
+      if (typeof mod.addMenuEntries === 'function') {
+        try {
+          mod.addMenuEntries(menu);
+        } catch (err) {
+          Modules.Shared.PayrollLogger.error(err);
         }
-      });
-    }
+      }
+    });
 
     // Append core static entries (payroll shortcuts, etc.).
     if (typeof Modules.Menu.addMenuEntries === 'function') {
@@ -59,5 +70,11 @@ Modules.Menu = Modules.Menu || {};
     }
 
     menu.addToUi();
+
+    // Stand-alone "Technician Sheets" menu – moved here from NewTechnician module
+    ui.createMenu('🗂 Technician Sheets')
+      .addItem('New Sheet', 'createNewTechnicianSheet')
+      .addItem('All New Sheets', 'createAllNewTechnicianSheets')
+      .addToUi();
   };
 })(); 

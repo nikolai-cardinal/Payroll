@@ -1,0 +1,170 @@
+/**
+ * Cardinal Payroll System - New Technician Sheet
+ * This script handles creating new technician sheets.
+ */
+
+/**
+ * New Technician utilities
+ * Creates individual or batch technician sheets from the 'Template' tab
+ * while populating data from the Main rates sheet.
+ *
+ * Public entry points (referenced by Core/Menu & Modules.NewTechnician.index):
+ *   • createNewTechnicianSheet(name?, suppressPopup?)
+ *   • createAllNewTechnicianSheets()
+ */
+
+/**
+ * Creates a new technician sheet based on the "Template" tab.
+ * If techName is omitted a prompt is shown.
+ *
+ * @param {string=} techName        Technician\'s full name.
+ * @param {boolean=} suppressPopup Suppress UI alerts (used for batch mode).
+ */
+function createNewTechnicianSheet(techName, suppressPopup) {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Always use "Main" as the rates sheet name
+  var MAIN_SHEET_NAME = 'Main';
+
+  // Prompt only when name not supplied (manual menu action).
+  if (!techName) {
+    var res = ui.prompt('Create New Technician Sheet', 'Enter the technician\'s name:', ui.ButtonSet.OK_CANCEL);
+    if (res.getSelectedButton() !== ui.Button.OK) return;
+    techName = (res.getResponseText() || '').trim();
+    if (!techName) return;
+  }
+
+  var notify = function (msg) { if (!suppressPopup) ui.alert(msg); };
+
+  // Abort if sheet already exists
+  if (ss.getSheetByName(techName)) {
+    notify('A sheet with this name already exists.');
+    return;
+  }
+
+  // Locate template
+  var template = ss.getSheetByName('Template');
+  if (!template) {
+    notify('Template sheet not found.');
+    return;
+  }
+
+  // Duplicate template and rename
+  var newSheet = template.copyTo(ss);
+  newSheet.setName(techName);
+
+  // Fetch mapping helpers - with fallback
+  var ratesMap = (Modules && Modules.Utilities && typeof Modules.Utilities.getRatesSheetMapping === 'function') ? 
+                  Modules.Utilities.getRatesSheetMapping() : getFallbackRatesSheetMapping();
+  var techMap = getTechnicianSheetMapping();
+
+  // Access Main sheet and its data
+  var ratesSheet = ss.getSheetByName(MAIN_SHEET_NAME);
+  if (!ratesSheet) {
+    notify('Cannot locate "Main" sheet.');
+    return;
+  }
+
+  var data = ratesSheet.getDataRange().getValues();
+  var techFound = false;
+  var rate      = 0;
+  var departmentAndBusinessUnit = '';
+
+  for (var i = ratesMap.dataStartRow - 1; i < data.length; i++) {
+    if (data[i][ratesMap.nameColumn - 1] === techName) {
+      techFound = true;
+      rate      = data[i][ratesMap.rateColumn - 1];
+      var department = data[i][1];            // Column B: Department
+      var businessUnit = data[i][2];            // Column C: Business Unit
+      departmentAndBusinessUnit = department + ' / ' + businessUnit;
+      break;
+    }
+  }
+
+  // Current pay-period resides in F1 of Main.
+  var currentPayPeriod = ratesSheet.getRange(1, 6).getDisplayValue();
+
+  // Write header cells
+  newSheet.getRange(1, 1).setValue(techName);
+  newSheet.getRange(techMap.payPeriodRow, 1).setValue('Pay Period: ' + currentPayPeriod);
+
+  if (techFound) {
+    newSheet.getRange(techMap.positionRow, 1).setValue(departmentAndBusinessUnit);
+    newSheet.getRange(techMap.hourlyRateRow, techMap.rateValueColumn).setValue(rate);
+    notify('Technician sheet created with data from Main.');
+  } else {
+    notify('Technician sheet created, but the technician was not found in Main. Please add them and then run Update All Technician Rates.');
+  }
+}
+
+/**
+ * Batch-creates sheets for every technician on the Main sheet whose column E is NOT
+ * "Exempt" and who does not already have an individual sheet.
+ */
+function createAllNewTechnicianSheets() {
+  var ui = SpreadsheetApp.getUi();
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // Always use "Main" as the rates sheet name
+  var MAIN_SHEET_NAME = 'Main';
+  
+  var ratesSheet = ss.getSheetByName(MAIN_SHEET_NAME);
+  if (!ratesSheet) return ui.alert('Error: Could not find "Main" sheet.');
+
+  // Fetch mapping helpers - with fallback
+  var map = (Modules && Modules.Utilities && typeof Modules.Utilities.getRatesSheetMapping === 'function') ? 
+             Modules.Utilities.getRatesSheetMapping() : getFallbackRatesSheetMapping();
+  var lastRow  = ratesSheet.getLastRow();
+  if (lastRow < map.dataStartRow) return ui.alert('No technicians listed in Main sheet.');
+
+  // Fetch columns A-E (name through exempt status).
+  var rows = ratesSheet.getRange(map.dataStartRow, 1, lastRow - map.dataStartRow + 1, 5).getValues();
+  var created = 0;
+
+  rows.forEach(function (row) {
+    var name       = row[map.nameColumn - 1]; // Column A
+    var exemptFlag = row[4];                  // Column E (0-based index 4)
+    if (!name || exemptFlag === 'Exempt') return;      // Skip blank or exempt
+    if (ss.getSheetByName(name)) return;               // Skip if sheet exists
+
+    try {
+      createNewTechnicianSheet(name, /*suppressPopup=*/ true);
+      created++;
+    } catch (err) {
+      // Continue processing others even if one fails
+      console.error('Error creating sheet for ' + name + ': ' + err);
+    }
+  });
+
+  ui.alert('Created ' + created + ' new technician sheet' + (created !== 1 ? 's' : '') + '.');
+}
+
+/**
+ * Local mapping helper for the technician sheet layout.
+ * @return {{payPeriodRow:number, positionRow:number, hourlyRateRow:number, valueColumn:number, rateValueColumn:number, ptoRateColumn:number}}
+ */
+function getTechnicianSheetMapping() {
+  return Object.freeze({
+    payPeriodRow:   2,  // Row containing the pay period text
+    positionRow:    3,  // Row containing the position / department
+    hourlyRateRow:  4,  // Row containing hourly rate information
+    valueColumn:    2,  // Column B – main value column
+    rateValueColumn: 3, // Column C – hourly rate cell (C4)
+    ptoRateColumn:  7,  // Column G – PTO rate
+  });
+}
+
+/**
+ * Fallback for rates sheet mapping if Modules.Utilities is not available.
+ * Matches the structure expected in Test_1.
+ * @return {Object} Field mappings for the Main rates sheet.
+ */
+function getFallbackRatesSheetMapping() {
+  return {
+    dataStartRow: 2,    // First row of data (below header)
+    nameColumn: 1,      // Column A: Technician name
+    positionColumn: 3,  // Column C: Position
+    rateColumn: 4       // Column D: Hourly rate
+  };
+}

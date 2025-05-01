@@ -99,7 +99,7 @@ function validateYardSignSheet(yardSignSheet) {
 }
 
 /**
-* Gets the rates sheet mapping for the 'Hourly + Spiff Pay' sheet.
+* Gets the rates sheet mapping for the 'Main' sheet.
 * @return {Object} An object containing column indices.
 */
 function getRatesSheetMapping() {
@@ -121,10 +121,10 @@ function getRatesSheetMapping() {
 function processAllYardSignsUtility(statusCallback) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+    var ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
     
     if (!ratesSheet) {
-      return { success: false, message: "Could not find 'Hourly + Spiff Pay' sheet" };
+      return { success: false, message: "Could not find 'Main' sheet" };
     }
     
     // Get or create yard sign sheet with proper structure

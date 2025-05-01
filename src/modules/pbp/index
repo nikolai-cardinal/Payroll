@@ -1,0 +1,394 @@
+// Namespace stub – PBP
+var Modules = Modules || {};
+Modules.PBP = Modules.PBP || {};
+Modules.PBP.Helpers = Modules.PBP.Helpers || {};
+Modules.Shared = Modules.Shared || {};
+Modules.Shared.PayrollUtils = Modules.Shared.PayrollUtils || {};
+
+// Dependencies on shared modules:
+// - Modules.Shared.SheetUtils: For sheet operations
+// - Modules.Shared.DateUtils: For date formatting
+// - Modules.Shared.TechnicianUtils: For technician name parsing and class/role determination
+// - Modules.Shared.PayrollUtils: For payment calculation helpers
+
+// Ensure critical functions are available even if dependencies aren't loaded correctly
+(function() {
+  'use strict';
+  
+  // Add fallback for Modules.Shared.PayrollUtils.calculateSplitPercentage
+  if (!Modules.Shared.PayrollUtils.calculateSplitPercentage) {
+    Modules.Shared.PayrollUtils.calculateSplitPercentage = function(totalTechs, leadCount, assistantCount, techRole) {
+      // Guard clauses
+      if (techRole === 'None' || totalTechs === 0) return 0;
+
+      // Ensure role counts add up; adjust if there are non-paying roles counted in totalTechs
+      if (leadCount + assistantCount !== totalTechs) {
+        totalTechs = leadCount + assistantCount;
+        if (totalTechs === 0) return 0;
+      }
+
+      switch (totalTechs) {
+        case 1:
+          return 100; // Solo tech gets full amount
+
+        case 2:
+          if (leadCount === 1 && assistantCount === 1) return techRole === 'Lead' ? 65 : 35;
+          if (leadCount === 2 || assistantCount === 2) return 50; // 2 Leads OR 2 Assistants
+          break;
+
+        case 3:
+          if (leadCount === 1 && assistantCount === 2) return techRole === 'Lead' ? 46 : 27;
+          if (leadCount === 2 && assistantCount === 1) return techRole === 'Lead' ? 38 : 24;
+          if (leadCount === 3 || assistantCount === 3) return 100 / 3; // 3 Leads OR 3 Assistants
+          break;
+
+        case 4:
+          if (leadCount === 2 && assistantCount === 2) return techRole === 'Lead' ? 30 : 20;
+          if (leadCount === 3 && assistantCount === 1) return techRole === 'Lead' ? 30 : 10;
+          if (leadCount === 4 || assistantCount === 4) return 25; // 4 Leads OR 4 Assistants
+          break;
+      }
+
+      // Fallback – split equally among eligible paying roles.
+      return 100 / totalTechs;
+    };
+  }
+  
+  // Add writePbpDataToSheet function
+  if (!Modules.PBP.writePbpDataToSheet) {
+    Modules.PBP.writePbpDataToSheet = function(techSheet, allPbpEntries, totalTechnicianShare) {
+      if (!techSheet || !allPbpEntries) return;
+      
+      console.log("Starting sheet update for " + techSheet.getName() + " with " + allPbpEntries.length + " entries");
+      
+      // Update summary at top of sheet
+      Modules.PBP.updateTopSummaryInstallPay(techSheet, totalTechnicianShare, allPbpEntries.length);
+      
+      // Find the Install section (Customer Name header in column E)
+      var lastRow = Math.min(50, techSheet.getLastRow());
+      var columnE = techSheet.getRange(1, 5, lastRow, 1).getValues();
+      var installSectionRow = -1;
+      
+      for (var i = 0; i < columnE.length; i++) {
+        var cellValue = columnE[i][0];
+        if (cellValue && typeof cellValue === 'string' &&
+            cellValue.toString().trim().toLowerCase() === "customer name") {
+          installSectionRow = i + 1;
+          break;
+        }
+      }
+      
+      if (installSectionRow <= 0) {
+        console.log("Install section not found in " + techSheet.getName());
+        return;
+      }
+      
+      // Clear existing PBP rows
+      Modules.PBP.clearInstallDataSection(techSheet);
+      
+      // Prepare data to write
+      var dataStartRow = installSectionRow + 1;
+      var dataToWrite = [];
+      var tz = Session.getScriptTimeZone();
+      
+      for (var idx = 0; idx < allPbpEntries.length; idx++) {
+        var entry = allPbpEntries[idx];
+        
+        // Format date if needed
+        var dateObj = null;
+        try {
+          if (entry.completionDate) {
+            if (typeof entry.completionDate === 'object' && entry.completionDate.getTime) {
+              dateObj = entry.completionDate;
+            } else {
+              // Try to parse date string
+              var parts = entry.completionDate.split('/');
+              if (parts.length === 3) {
+                dateObj = new Date(parts[2], parts[0]-1, parts[1]);
+              }
+            }
+          }
+        } catch (e) {
+          console.log("Date parsing error: " + e.message);
+        }
+        
+        var displayDate = dateObj ? Utilities.formatDate(dateObj, tz, "MM/dd/yyyy") : (entry.completionDate || "");
+        
+        // Build notes column
+        var notesParts = [];
+        notesParts.push(`${entry.roleForJob} (${entry.splitPercentage.toFixed(1)}%)`);
+        
+        if (entry.teamDetails) {
+          // Always include team details regardless of team size
+          notesParts.push(`Team: ${entry.teamDetails}`);
+        }
+        
+        // Append the job's total PBP amount for full context
+        var notesText = notesParts.join(' - ') + ` | Job PBP: $${entry.totalPbp.toFixed(2)}`;
+        
+        dataToWrite.push([
+          entry.customerName || "",      // Column E: Customer Name
+          entry.jobBusinessUnit || "",   // Column F: Job Business Unit
+          displayDate,                   // Column G: Completion Date
+          entry.technicianShare,         // Column H: Commission Amount
+          notesText,                     // Column I: Notes
+          "PBP"                          // Column J: Type
+        ]);
+      }
+      
+      // Write data to sheet
+      if (dataToWrite.length === 0) {
+        console.log("No PBP data to write");
+        return;
+      }
+      
+      // Write data starting at the first row after the header
+      var targetRange = techSheet.getRange(dataStartRow, 5, dataToWrite.length, 6);
+      targetRange.setValues(dataToWrite);
+      
+      // Format currency in column H
+      var amountRange = techSheet.getRange(dataStartRow, 8, dataToWrite.length, 1);
+      amountRange.setNumberFormat("$#,##0.00");
+      
+      console.log("Completed writing " + dataToWrite.length + " PBP entries to " + techSheet.getName());
+    };
+  }
+  
+  // Add updateTopSummaryInstallPay function
+  if (!Modules.PBP.updateTopSummaryInstallPay) {
+    Modules.PBP.updateTopSummaryInstallPay = function(sheet, amount, count) {
+      if (!sheet) return;
+      // Target row 13 specifically for Total Install Pay
+      var installPayRow = 13;
+      try {
+        sheet.getRange(installPayRow, 2).setValue(count); // Count in Col B (B13)
+        sheet.getRange(installPayRow, 3).setValue(amount).setNumberFormat("$#,##0.00"); // Amount in Col C (C13)
+        console.log("Updated Total Install Pay in B13/C13 with count: " + count + ", amount: $" + amount.toFixed(2));
+      } catch (e) {
+        console.error("Error updating install pay summary: " + e.message);
+      }
+    };
+  }
+  
+  // Only define these functions if they don't already exist (as defined in CalculationHelpers)
+  if (!Modules.PBP.Helpers.buildTechDetailsCache) {
+    Modules.PBP.Helpers.buildTechDetailsCache = function(ratesData) {
+      var cache = {};
+      for (var r = 1; r < ratesData.length; r++) {
+        var row = ratesData[r];
+        if (!row[0]) continue;
+        var name = row[0].toString().trim();
+        var lower = name.toLowerCase();
+        if (cache[lower]) continue;
+        var title = row[2] ? row[2].toString() : '';
+        var info = Modules.Shared.TechnicianUtils.getTechnicianClassAndRole(title);
+        cache[lower] = {
+          name: name,
+          class: info.class,
+          isEligible: info.isEligible,
+          initialRole: info.role
+        };
+      }
+      return cache;
+    };
+  }
+
+  if (!Modules.PBP.Helpers.parsePbpAmount) {
+    Modules.PBP.Helpers.parsePbpAmount = function(crossSaleGroup) {
+      if (!crossSaleGroup) return 0;
+      var m = crossSaleGroup.toString().match(/pbp\s*(\d+(?:\.\d+)?)/i);
+      return m && m[1] ? parseFloat(m[1]) : 0;
+    };
+  }
+  
+  if (!Modules.PBP.Helpers.getUniqueTechNames) {
+    Modules.PBP.Helpers.getUniqueTechNames = function(primaryName, assignedTechsString) {
+      var unique = [];
+      var lowerSet = new Set();
+
+      function add(name) {
+        if (!name) return;
+        var trimmed = name.toString().trim();
+        var lower = trimmed.toLowerCase();
+        if (!trimmed || lowerSet.has(lower)) return;
+        unique.push(trimmed);
+        lowerSet.add(lower);
+      }
+
+      add(primaryName);
+      Modules.Shared.TechnicianUtils.parseTechnicianNames(assignedTechsString || '')
+        .forEach(add);
+
+      return { uniqueNames: unique, lowerSet: lowerSet };
+    };
+  }
+
+  if (!Modules.PBP.Helpers.computeJobTechnicians) {
+    Modules.PBP.Helpers.computeJobTechnicians = function(uniqueNames, techCache, pbpAmount) {
+      var techs = [];
+      var highestClass = 0;
+
+      // Populate base info and find highest class present.
+      uniqueNames.forEach(function(name) {
+        var cached = techCache[name.toLowerCase()];
+        var info = cached || { name: name, class: 0, isEligible: false, initialRole: 'None' };
+        techs.push({
+          name: info.name,
+          class: info.class,
+          isEligible: info.isEligible,
+          initialRole: info.initialRole,
+          finalRole: info.initialRole,
+          splitPercent: 0,
+          payout: 0
+        });
+        if (info.class > highestClass) highestClass = info.class;
+      });
+
+      var total = techs.length;
+      var hasHighClass = techs.some(function(t) { return t.class >= 3; });
+
+      // Determine final role per rules.
+      techs.forEach(function(t) {
+        if (t.class === 2 && t.class === highestClass && !hasHighClass) t.finalRole = 'Lead';
+        if (total === 1 && t.class >= 2) t.finalRole = 'Lead';
+        if (total === 1 && t.class === 1) t.finalRole = 'Assistant';
+      });
+
+      var leadCount = techs.filter(function(t){ return t.finalRole === 'Lead'; }).length;
+      var assistantCount = techs.filter(function(t){ return t.finalRole === 'Assistant'; }).length;
+
+      // Calculate split % + payout
+      techs.forEach(function(t) {
+        t.splitPercent = Modules.Shared.PayrollUtils.calculateSplitPercentage(total, leadCount, assistantCount, t.finalRole);
+        t.payout = t.isEligible ? pbpAmount * (t.splitPercent / 100) : 0;
+      });
+
+      return techs;
+    };
+  }
+  
+  // Add missing PBP.clearInstallDataSection function
+  if (!Modules.PBP.clearInstallDataSection) {
+    Modules.PBP.clearInstallDataSection = function(sheet) {
+      if (!sheet) return 0;
+      try {
+        // Find Install section - looking for "Customer Name" header in column E
+        var lastRow = Math.min(50, sheet.getLastRow());
+        var columnE = sheet.getRange(1, 5, lastRow, 1).getValues();
+        var installSectionRow = -1;
+        
+        for (var i = 0; i < columnE.length; i++) {
+          var cellValue = columnE[i][0];
+          if (cellValue && typeof cellValue === 'string' &&
+              cellValue.toString().trim().toLowerCase() === "customer name") {
+            installSectionRow = i + 1;
+            break;
+          }
+        }
+        
+        if (installSectionRow <= 0) {
+          console.log("Clear Install Data: Install section not found in " + sheet.getName());
+          return 0;
+        }
+        
+        var dataStartRow = installSectionRow + 1;
+        var maxRows = 20; // Reasonable limit for PBP entries
+        
+        // Find rows with "PBP" in column J (10)
+        var typeColumn = 10;
+        var lastSearchRow = dataStartRow + maxRows;
+        var typeValues = sheet.getRange(dataStartRow, typeColumn, lastSearchRow - dataStartRow, 1).getValues();
+        
+        var rowsCleared = 0;
+        for (var j = 0; j < typeValues.length; j++) {
+          var typeValue = typeValues[j][0];
+          if (typeValue && typeValue.toString().trim().toLowerCase() === "pbp") {
+            var rowToClear = dataStartRow + j;
+            sheet.getRange(rowToClear, 5, 1, 6).clearContent(); // Clear columns E-J (5-10)
+            rowsCleared++;
+          }
+        }
+        
+        console.log("Cleared " + rowsCleared + " rows with Type='PBP' in " + sheet.getName());
+        return rowsCleared;
+      } catch (e) {
+        console.error("Error clearing install data section: " + e.message);
+        return 0;
+      }
+    };
+  }
+})();
+
+// Public API for PBP Module
+
+/**
+ * Adds menu entries specific to the PBP module.
+ * @param {GoogleAppsScript.Base.Menu} menu The menu to add entries to.
+ */
+Modules.PBP.addMenuEntries = function(menu) {
+  // No specific menu entries needed as 'All PBP' is already added by core Menu
+  // Removed duplicate 'Process PBP' entry to avoid menu clutter
+  Logger.log('PBP: addMenuEntries called');
+};
+
+/**
+ * Handles edit events relevant to the PBP module.
+ * Ignores any triggers from Column G in the Main sheet.
+ * @param {GoogleAppsScript.Events.SheetsOnEdit} e The edit event object.
+ * @return {Object|null} Optional result or status.
+ */
+Modules.PBP.handleEdit = function(e) {
+  // Skip processing if edit is in Column G of Main sheet
+  if (e && e.range) {
+    var sheet = e.range.getSheet();
+    if (sheet.getName() === Modules.Constants.SHEET.MAIN && e.range.getColumn() === 7) {
+      Logger.log('PBP: Ignoring trigger from Column G in Main sheet as requested');
+      return null;
+    }
+  }
+  
+  Logger.log('PBP: handleEdit called for range ' + (e && e.range ? e.range.getA1Notation() : 'N/A'));
+  return null;
+};
+
+/**
+ * Processes all relevant entries for the PBP module (if applicable).
+ */
+Modules.PBP.processAll = function() {
+  // Call the process all function from PBPMain
+  if (typeof pbpMain_processAllPBP === 'function') {
+    pbpMain_processAllPBP();
+  } else {
+    Logger.log('Error: pbpMain_processAllPBP function not found');
+    SpreadsheetApp.getUi().alert('Error: PBP processing function not available. Please contact support.');
+  }
+  Logger.log('PBP: processAll called');
+};
+
+/**
+ * Processes PBP entries for a specific technician.
+ * @param {string} technicianName The name of the technician to process.
+ */
+Modules.PBP.processForTechnician = function(technicianName) {
+  if (!technicianName) return;
+  
+  Logger.log('PBP: Processing for technician ' + technicianName);
+  
+  if (typeof pbpMain_updatePBPForTechnician === 'function') {
+    pbpMain_updatePBPForTechnician(technicianName, null, null, {
+      skipStatusUpdate: false,
+      suppressPopup: false
+    });
+  } else {
+    Logger.log('Error: pbpMain_updatePBPForTechnician function not found');
+    SpreadsheetApp.getUi().alert('Error: PBP processing function not available. Please contact support.');
+  }
+};
+
+// Global function to be called from the menu
+function processAllPBPGlobal() {
+  Modules.PBP.processAll();
+}
+
+// Create proxy functions for backward compatibility
+var updatePBPForTechnician = Modules.PBP.processForTechnician; 

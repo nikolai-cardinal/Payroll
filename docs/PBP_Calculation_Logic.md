@@ -2,6 +2,8 @@
 
 This document outlines the process for calculating Pay-By-Performance (PBP) for service technicians based on job completion data and technician classification.
 
+> **Note on Code Organization:** As of April 2025, the PBP module has been consolidated to improve maintainability. All calculation functions are now in PBPMain.gs, and all sheet operations are in PBPUtilities.gs, with a clean API exposed through index.gs. The previous files PBPCalculation.gs and PBPSheetOperations.gs have been merged into these files.
+
 **Source Data:**
 
 1.  **Job Performance Data Sheet:** (Assumed to be 'Spiff/Bonus' based on current code)
