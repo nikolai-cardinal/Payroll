@@ -47,7 +47,7 @@ function getTechnicianSheetMappingForTimesheet(sheet) {
 }
 
 /**
- * Gets the current pay period from Hourly + Spiff Pay sheet
+ * Gets the current pay period from Main sheet
  * @return {string} The current pay period string
  */
 function getCurrentPayPeriodForTimesheet() {
@@ -68,8 +68,8 @@ function formatHoursToHM(decimalHours) {
 /**
  * Updates hours for a specific technician based on the Time Sheet
  * @param {string} technicianName - The name of the technician to update
- * @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
- * @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
+ * @param {number} actionRow - The row in the Main sheet where the action was triggered
+ * @param {number} actionColumn - The column in the Main sheet where the action was triggered
  */
 function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipStatusUpdate) {
   // Delegate to the TimeSheetLogic module

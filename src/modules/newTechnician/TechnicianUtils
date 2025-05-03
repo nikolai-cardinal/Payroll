@@ -50,7 +50,7 @@ Modules.NewTechnician.Utils.parseTechnicianNames = function(nameString) {
 
 /**
 * Determines technician class, eligibility, and initial role based on Position Title.
-* @param {string} positionTitle - The technician's position title from 'Hourly + Spiff Pay'.
+* @param {string} positionTitle - The technician's position title from 'Main'.
 * @return {{class: number, isEligible: boolean, role: string}}
 */
 Modules.NewTechnician.Utils.getTechnicianClassAndRole = function(positionTitle) {

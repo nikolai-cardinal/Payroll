@@ -356,13 +356,16 @@ Modules.PBP.handleEdit = function(e) {
  */
 Modules.PBP.processAll = function() {
   // Call the process all function from PBPMain
+  Logger.log('PBP: processAll called');
+  
   if (typeof pbpMain_processAllPBP === 'function') {
-    pbpMain_processAllPBP();
+    return pbpMain_processAllPBP();
+  } else if (typeof processAllPBP === 'function') {
+    return processAllPBP();
   } else {
-    Logger.log('Error: pbpMain_processAllPBP function not found');
+    console.error('Error: PBP processing function not found');
     SpreadsheetApp.getUi().alert('Error: PBP processing function not available. Please contact support.');
   }
-  Logger.log('PBP: processAll called');
 };
 
 /**
@@ -387,7 +390,14 @@ Modules.PBP.processForTechnician = function(technicianName) {
 
 // Global function to be called from the menu
 function processAllPBPGlobal() {
-  Modules.PBP.processAll();
+  console.log("Starting processAllPBPGlobal menu function");
+  if (typeof pbpMain_processAllPBP === 'function') {
+    return pbpMain_processAllPBP();
+  } else if (typeof processAllPBP === 'function') {
+    return processAllPBP();
+  } else {
+    Modules.PBP.processAll();
+  }
 }
 
 // Create proxy functions for backward compatibility

@@ -3,10 +3,10 @@
  * After a successful Bulk Approval, this module sends five PDF reports (Time Sheet,
  * Spiff/Bonus, Lead Set, Service, Yard Sign) to the same webhook endpoint used
  * for individual approvals. Each report is sent 10 seconds apart and contains
- * the payroll period (F1 from Hourly + Spiff Pay) plus the file payload.
+ * the payroll period (F1 from Main) plus the file payload.
  */
 
-/* global HOURLY_SPIFF_SHEET_NAME, APPROVED_WEBHOOK_URL, getSheetAsPdfBlob */
+/* global APPROVED_WEBHOOK_URL, getSheetAsPdfBlob */
 
 const REPORT_UPLOAD_SHEETS = [
   'Time Sheet',
@@ -24,7 +24,7 @@ const REPORT_UPLOAD_SHEETS = [
 function sendBulkReportUploads() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const ratesSheet = ss.getSheetByName(HOURLY_SPIFF_SHEET_NAME);
+    const ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
     let payrollPeriod = '';
     try {
       payrollPeriod = ratesSheet ? ratesSheet.getRange('F1').getValue() : '';

@@ -167,9 +167,61 @@ function runIndividualPayroll() {
   }
 }
 
+// Prompt user to run payroll for everyone or an individual technician.
+function payrollPrompt() {
+  var ui = SpreadsheetApp.getUi();
+  var choice = ui.alert(
+    'Payroll',
+    'Run payroll for EVERYONE (Yes) or an INDIVIDUAL technician (No)?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (choice === ui.Button.YES) {
+    // Run payroll for all technicians
+    runFullPayroll();
+  } else if (choice === ui.Button.NO) {
+    // Run payroll for one technician (will prompt for name)
+    runIndividualPayroll();
+  }
+}
+
+// Prompt user to run Bonus for everyone or an individual technician.
+function bonusPrompt() {
+  var ui = SpreadsheetApp.getUi();
+  var choice = ui.alert(
+    'Bonus',
+    'Run BONUS for EVERYONE (Yes) or an INDIVIDUAL technician (No)?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (choice === ui.Button.YES) {
+    // Run bonus for all technicians
+    if (typeof processAllSpiffBonusWithCustomers === 'function') {
+      processAllSpiffBonusWithCustomers();
+    } else if (Modules.Bonus && typeof Modules.Bonus.processAllBonus === 'function') {
+      Modules.Bonus.processAllBonus(false);
+    }
+  } else if (choice === ui.Button.NO) {
+    // Prompt for technician name
+    var resp = ui.prompt('Individual Bonus', 'Enter the technician\'s name:', ui.ButtonSet.OK_CANCEL);
+    if (resp.getSelectedButton() !== ui.Button.OK) return;
+    var techName = resp.getResponseText().trim();
+    if (!techName) return;
+
+    // Delegate to bonus processing for individual
+    if (Modules.Bonus && typeof Modules.Bonus.processTechnicianBonus === 'function') {
+      Modules.Bonus.processTechnicianBonus(techName, null, null);
+    } else if (typeof updateSpiffBonusWithCustomersList === 'function') {
+      updateSpiffBonusWithCustomersList(techName, null, null);
+    }
+  }
+}
+
 Modules.Main = {
   onOpen: onOpen,
   onEdit: onEdit,
   runFullPayroll: runFullPayroll,
   runIndividualPayroll: runIndividualPayroll,
+  payrollPrompt: payrollPrompt,
+  bonusPrompt: bonusPrompt,
 }; 

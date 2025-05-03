@@ -1,156 +1,212 @@
-/**
- * Cardinal Payroll System - New Sheet
- * This script handles creating new technician sheets.
- */
+// BonusMain – minimal implementation replicating Spiff Bonus logic described
+// Depends on BonusUtilities located in the same folder.
 
 /**
- * Creates a new technician sheet based on the Template
+ * Processes BONUS entries for a single technician and writes results to their sheet.
+ *
+ * Logic (adapted to new Spiff/Bonus sheet layout):
+ *   1. Qualifying row when
+ *        (a) Technician appears in both Sold By (col E) AND Technician (col F)
+ *            OR
+ *        (b) Sold By is blank AND technician appears in Technician (F) *or* in
+ *            Assigned Technicians (G)
+ *   2. Commission taken from column K ($ Bonus).
  */
-function createNewTechnicianSheet(techName, suppressPopup) {
-    var ui = SpreadsheetApp.getUi();
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    
-    // Only prompt the user when no technician name was supplied (menu action).
-    if (!techName) {
-      var response = ui.prompt(
-        'Create New Technician Sheet',
-        'Enter the technician\'s name:',
-        ui.ButtonSet.OK_CANCEL);
-
-      var button = response.getSelectedButton();
-      techName = response.getResponseText();
-
-      if (button !== ui.Button.OK || !techName) {
-        return;
-      }
-    }
-
-    // Helper to optionally silence pop-ups when running in bulk mode.
-    var notify = function (msg) {
-      if (!suppressPopup) ui.alert(msg);
-    };
-    
-    // Check if the sheet already exists
-    try {
-      var existingSheet = ss.getSheetByName(techName);
-      if (existingSheet) {
-        notify('A sheet with this name already exists.');
-        return;
-      }
-    } catch (e) {
-      // Sheet doesn\'t exist, which is what we want
-    }
-    
-    // Get the template sheet (renamed to "Template")
-    var templateSheet = ss.getSheetByName('Template');
-    if (!templateSheet) {
-      notify('Template sheet not found.');
+function Bonus_updateForTechnician(technicianName, opt_actionRow, opt_actionCol, opt_suppressPopup) {
+    if (!technicianName) return;
+    technicianName = String(technicianName).trim();
+    var techLower = technicianName.toLowerCase();
+  
+    var ss          = SpreadsheetApp.getActiveSpreadsheet();
+    var bonusSheet  = ss.getSheetByName('Spiff/Bonus');
+    var ratesSheet  = ss.getSheetByName('Main'); // renamed sheet (was "Hourly + Spiff Pay")
+    var techSheet   = ss.getSheetByName(technicianName);
+    var ui          = SpreadsheetApp.getUi();
+  
+    if (!bonusSheet || !techSheet) {
+      ui.alert('Required sheet missing (Spiff/Bonus or technician sheet)');
       return;
     }
-    
-    // Create a new sheet by copying the template
-    var newSheet = templateSheet.copyTo(ss);
-    newSheet.setName(techName);
-    
-    // Get mapping for rates sheet and new technician sheet
-    var ratesMapping = getRatesSheetMapping();
-    var mapping = getTechnicianSheetMapping(newSheet);
-    
-    // Check if the technician exists in the Main sheet
-    var ratesSheet = ss.getSheetByName('Main');
-    var ratesData = ratesSheet.getDataRange().getValues();
-    
-    var techFound = false;
-    var techPosition = '';
-    var techRate = 0;
-    var departmentAndBusinessUnit = ''; // Variable to store combined value
-    
-    for (var i = ratesMapping.dataStartRow - 1; i < ratesData.length; i++) {
-      if (ratesData[i][ratesMapping.nameColumn - 1] === techName) {
-        techFound = true;
-        techPosition = ratesData[i][ratesMapping.positionColumn - 1];
-        // Column D (configured via ratesMapping.rateColumn) contains the hourly pay rate
-        techRate = ratesData[i][ratesMapping.rateColumn - 1];
-        var department = ratesData[i][1]; // Column B (0-based index 1) contains the department
-        var businessUnit = ratesData[i][2]; // Column C (0-based index 2) contains the business unit
-        departmentAndBusinessUnit = department + " / " + businessUnit; // Combine B and C with format 'B / C'
-        break;
-      }
+  
+    // Map headers → indices ------------------------------------------------------
+    var map = Bonus_getHeaderMap(bonusSheet);
+  
+    // Grab data (including header) once -----------------------------------------
+    var data = bonusSheet.getDataRange().getValues();
+    if (data.length < 2) return; // nothing
+  
+    // Iterate rows, collect qualifying entries ----------------------------------
+    var entries   = [];
+    var totalPay  = 0;
+  
+    for (var r = 1; r < data.length; r++) { // skip header row 0
+      var row = data[r];
+      var soldBy        = (row[map.soldBy - 1]       || '').toString().trim();
+      var primaryTech   = (row[map.technician - 1]    || '').toString().trim();
+      var assignedStr   = (row[map.assignedTechs - 1] || '').toString();
+  
+      var assignmentMatch = primaryTech.toLowerCase() === techLower ||
+                            Bonus_parseTechnicianNames(assignedStr).some(function(n){return n.toLowerCase() === techLower;});
+      var soldByMatch     = soldBy.toLowerCase() === techLower;
+  
+      var qualifies = (soldByMatch && assignmentMatch) || (!soldBy && assignmentMatch);
+      if (!qualifies) continue;
+  
+      var amountRaw = row[map.bonusAmount - 1];
+      var amount = parseFloat(String(amountRaw).replace(/[^0-9.+-]/g, '')) || 0;
+      if (!amount) continue;
+  
+      totalPay += amount;
+      entries.push({
+        customer:       row[map.customerName - 1]   || '',
+        businessUnit:   row[map.businessUnit - 1]   || '',
+        date:           row[map.completionDate - 1] || '',
+        amount:         amount,
+        itemName:       row[map.itemName - 1]       || '',
+        soldBy:         soldBy                               // preserve original sold-by tech name
+      });
     }
-    
-    // Get the current pay period from cell F1 of the Main sheet
-    var currentPayPeriod = ratesSheet.getRange(1, 6).getDisplayValue();
-    
-    // Update the new sheet
-    newSheet.getRange(1, 1).setValue(techName);
-    
-    // Update pay period regardless of whether the tech was found
-    newSheet.getRange(mapping.payPeriodRow, 1).setValue("Pay Period: " + currentPayPeriod);
-    
-    if (techFound) {
-      // Set combined department and business unit in cell A3
-      newSheet.getRange(mapping.positionRow, 1).setValue(departmentAndBusinessUnit);
-      // Update the hourly rate in the new location (cell C4)
-      newSheet.getRange(mapping.hourlyRateRow, mapping.rateValueColumn).setValue(techRate);
-      notify('Technician sheet created with data from Main.');
-    } else {
-      notify('Technician sheet created, but the technician was not found in Main. Please add them to that sheet and run Update All Technician Rates.');
+  
+    // --- Update technician sheet ------------------------------------------------
+    // 1. Update summary (row with label "Bonus") — A13 in template
+    var bonusRow = Bonus_findRowByColA(techSheet, 'Bonus');
+    if (bonusRow > 0) {
+      techSheet.getRange(bonusRow, 2).setValue(entries.length); // column B – quantity
+      techSheet.getRange(bonusRow, 3).setValue(totalPay);       // column C – total amount
     }
+  
+    // 2. Append detailed lines to technician sheet (columns E:J) ---------------
+    if (entries.length) {
+      _Bonus_writeToTechSheet(techSheet, entries);
+    }
+  
+    // 3. Mark action column complete if provided --------------------------------
+    if (ratesSheet && opt_actionRow && opt_actionCol) {
+      try {
+        ratesSheet.getRange(opt_actionRow, opt_actionCol).setValue('Complete');
+      } catch (ignore) {}
+    }
+  
+    // Popup summary (only when not suppressed) ----------------------------------
+    if (!opt_suppressPopup) {
+      ui.alert('Bonus processed for ' + technicianName + '. Total: $' + totalPay.toFixed(2) + ' (' + entries.length + ' entries)');
+    }
+  
+    return totalPay;
   }
   
   /**
-  * Gets the field mappings for a technician sheet
-  * @param {Sheet} sheet - The technician sheet to map
-  * @return {Object} An object containing row and column indexes for important fields
-  */
-  function getTechnicianSheetMapping(sheet) {
-    return {
-      payPeriodRow: 2,      // Row containing the pay period text
-      positionRow: 3,       // Row containing the position
-      hourlyRateRow: 4,     // Row containing hourly rate information (updated from 5 to 4)
-      valueColumn: 2,       // Column B - Main value column
-      rateValueColumn: 3,   // Column C - For the rate value in C4 (new)
-      ptoRateColumn: 7      // Column G - PTO rate column
-    };
-  }
-
-/**
- * Batch-creates sheets for every technician on the Main sheet whose column E
- * is NOT "Exempt" and who does not already have an individual sheet.
- */
-function createAllNewTechnicianSheets() {
-  var ui = SpreadsheetApp.getUi();
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  var ratesSheet = ss.getSheetByName('Main');
-  if (!ratesSheet) return ui.alert('Error: Could not find "Main" sheet.');
-
-  var map = getRatesSheetMapping();
-  var lastRow = ratesSheet.getLastRow();
-  if (lastRow < map.dataStartRow) return ui.alert('No technicians listed in Main sheet.');
-
-  // Fetch columns A-E (name through exempt status).
-  var rows = ratesSheet
-    .getRange(map.dataStartRow, 1, lastRow - map.dataStartRow + 1, 5)
-    .getValues();
-
-  var created = 0;
-
-  rows.forEach(function (row) {
-    var name = row[map.nameColumn - 1]; // column A
-    var exemptFlag = row[4];            // column E (0-based index 4)
-
-    if (!name || exemptFlag === 'Exempt') return;          // skip blank or exempt
-    if (ss.getSheetByName(name))         return;          // skip if sheet exists
-
-    try {
-      createNewTechnicianSheet(name, /*suppressPopup=*/true);
-      created++;
-    } catch (err) {
-      // ignore errors per-technician to allow batch to continue
-      Logger.log('Error creating sheet for ' + name + ': ' + err);
+   * Processes BONUS for every technician listed on the Main sheet that has an
+   * individual sheet.
+   */
+  function Bonus_runBatch(opt_suppressPopup) {
+    var silent = !!opt_suppressPopup;
+    var ss   = SpreadsheetApp.getActiveSpreadsheet();
+    var main = ss.getSheetByName('Main');
+    if (!main) {
+      var msgMain = 'Main sheet not found';
+      if (silent) return { ok:false, message:msgMain };
+      return SpreadsheetApp.getUi().alert(msgMain);
     }
-  });
-
-  ui.alert('Created ' + created + ' new technician sheet' + (created !== 1 ? 's' : '') + '.');
-} 
+  
+    var map = { nameColumn: 1, actionColumn: 7, dataStartRow: 3 }; // mirrors getRatesSheetMapping fallback
+    var data = main.getRange(map.dataStartRow, map.nameColumn, main.getLastRow() - map.dataStartRow + 1, 1).getValues();
+  
+    var names = data.map(function(r){return String(r[0]).trim();}).filter(Boolean);
+    var processed = 0,
+        total = 0,
+        details = [];
+  
+    names.forEach(function(name){
+      if (!ss.getSheetByName(name)) return; // skip if no individual sheet
+      var pay = Bonus_updateForTechnician(name, null, null, true) || 0;
+      processed++;
+      total += pay;
+      details.push({name:name, total:pay});
+    });
+  
+    var ui = SpreadsheetApp.getUi();
+  
+    if (!processed) {
+      var noneTech = 'No technician sheets processed.';
+      if (silent) return { ok:false, message:noneTech };
+      return ui.alert(noneTech);
+    }
+  
+    var msg = [
+      'BONUS PROCESSING COMPLETE',
+      '',
+      'Total Technicians Processed: ' + processed,
+      'Total Paid: $' + total.toFixed(2),
+      '',
+      'DETAILS BY TECHNICIAN:'
+    ];
+  
+    details.forEach(function(d){
+      msg.push('\n' + d.name + ': $' + d.total.toFixed(2));
+    });
+  
+    var summary = msg.join('\n');
+    if (silent) return { ok:true, message:summary };
+    ui.alert(summary);
+  }
+  
+  // -----------------------------------------------------------------------------
+  // Helper – append Bonus detail rows to technician sheet (cols E-J) -----------
+  // ----------------------------------------------------------------------------
+  function _Bonus_writeToTechSheet(sheet, entries) {
+    // Find the header row that starts the Bonus detail section by searching
+    // for the text "Customer Name" in column E (within the first ~50 rows).
+    var headerRow = -1;
+    var colE = sheet.getRange(1, 5, 50, 1).getValues();
+    for (var r = 0; r < colE.length; r++) {
+      if (String(colE[r][0]).trim().toLowerCase() === 'customer name') {
+        headerRow = r + 1;
+        break;
+      }
+    }
+    if (headerRow < 0) {
+      Logger.log('[BONUS] Could not locate detail section on sheet "' + sheet.getName() + '"');
+      return;
+    }
+  
+    // Determine the first empty row below the header so that new Bonus entries
+    // are appended – never overwrite previously written data from earlier runs.
+    var startRow = headerRow + 1;
+    var scanRow  = startRow;
+    while (scanRow <= sheet.getLastRow() && sheet.getRange(scanRow, 5).getValue() !== '') {
+      scanRow++;
+    }
+    startRow = scanRow;
+  
+    // Transform entries into the 6-column structure expected by the technician
+    // template (E → J). We show Business Unit + Item Name together in column F
+    // similar to PBP to keep columns concise.
+    var data = entries.map(function (e) {
+      var combinedBI = '';
+      if (e.businessUnit && e.itemName)      combinedBI = e.businessUnit + ' – ' + e.itemName;
+      else if (e.businessUnit)               combinedBI = e.businessUnit;
+      else if (e.itemName)                   combinedBI = e.itemName;
+  
+      return [
+        e.customer,                   // Column E – Customer Name
+        combinedBI,                   // Column F – Business Unit / Item
+        _Bonus_fmtDate(e.date),       // Column G – Completion Date
+        e.amount,                     // Column H – Bonus Amount
+        (e.soldBy ? ('Sold By: ' + e.soldBy) : ''), // Column I – Sold By note
+        'Bonus'                       // Column J – Type label
+      ];
+    });
+  
+    sheet.getRange(startRow, 5, data.length, 6).setValues(data);
+    sheet.getRange(startRow, 8, data.length, 1).setNumberFormat('$#,##0.00');
+  
+    // Update summary quantity & total (row labelled "Bonus" – handled earlier)
+  }
+  
+  function _Bonus_fmtDate(d) {
+    if (d instanceof Date) {
+      return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+    }
+    return d;
+  }

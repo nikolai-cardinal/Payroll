@@ -11,7 +11,7 @@ This document outlines the process for calculating Pay-By-Performance (PBP) for 
     *   Column H (in 'Spiff/Bonus'): Assigned Technicians (comma or space-separated list)
     *   Column J (in 'Spiff/Bonus'): PBP Indicator and Amount (e.g., "PBP 150.00")
     *   Other relevant columns: Customer Name, Completion Date, Item Name, etc.
-2.  **Technician Rates & Details Sheet:** ('Hourly + Spiff Pay')
+2.  **Technician Rates & Details Sheet:** ('Main')
     *   Column A: Technician Name
     *   Column C: Position Title (e.g., "Class 3 HVAC Service Technician", "Apprentice Technician")
     *   Column H: Split Percentage (Used by old logic, potentially ignored now)
@@ -27,7 +27,7 @@ For each row in the Job Performance Data Sheet identified as a PBP entry (contai
     *   Create a unique list of involved technician names for this job.
 3.  **Determine Technician Class, Role, and Eligibility:**
     *   For each unique technician name involved:
-        *   Find the technician in the 'Hourly + Spiff Pay' sheet.
+        *   Find the technician in the 'Main' sheet.
         *   **Get Class:** Look for the pattern "Class X" (where X is 1, 2, 3, or 4) within their 'Position Title' (Column C). This is the primary method for determining the class.
             *   The script expects titles like "Class 1", "Class 2", "Class 3", "Class 4". Additional text (like "Service Technician") is ignored by the matching logic.
             *   *(Note: The script no longer specifically checks for the word "Apprentice". Class 1 technicians should have "Class 1" in their title).*

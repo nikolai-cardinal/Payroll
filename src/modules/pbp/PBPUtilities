@@ -13,8 +13,8 @@ Modules.PBP = Modules.PBP || {};
 * This is the main function called when 'Spiff/Bonus' is selected in the Action column.
 *
 * @param {string} technicianName - The name of the technician to update
-* @param {number} actionRow - The row in the Hourly + Spiff Pay sheet where the action was triggered
-* @param {number} actionColumn - The column in the Hourly + Spiff Pay sheet where the action was triggered
+* @param {number} actionRow - The row in the Main sheet where the action was triggered
+* @param {number} actionColumn - The column in the Main sheet where the action was triggered
 */
 function updateSpiffBonusWithCustomersList(technicianName, actionRow, actionColumn) {
  var ui = SpreadsheetApp.getUi();
@@ -22,7 +22,7 @@ function updateSpiffBonusWithCustomersList(technicianName, actionRow, actionColu
    // Core sheets
    var ss = SpreadsheetApp.getActiveSpreadsheet();
    var spiffBonusTab = ss.getSheetByName('Spiff/Bonus');
-   var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+   var ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
    if (!spiffBonusTab) {
      ui.alert('Spiff/Bonus tab not found!');
      resetActionDropdown(ratesSheet, actionRow, actionColumn);
@@ -207,7 +207,7 @@ function updateSpiffBonusWithCustomersList(technicianName, actionRow, actionColu
    // 9) Add/Update Total Row (This will overwrite the placeholder total row if data exists)
    addSpiffTotalRow(techSheet, spiffHeaderRow, customerData.length);
 
-   // 10) Mark as done in 'Hourly + Spiff Pay' sheet
+   // 10) Mark as done in 'Main' sheet
    if (ratesSheet && actionRow && actionColumn) {
       ratesSheet.getRange(actionRow, actionColumn).setValue("Complete");
    }
@@ -240,13 +240,13 @@ function updateSpiffBonusWithCustomersList(technicianName, actionRow, actionColu
 function processAllSpiffBonusWithCustomers() {
  var ui = SpreadsheetApp.getUi();
  var ss = SpreadsheetApp.getActiveSpreadsheet();
- var ratesSheet = ss.getSheetByName('Hourly + Spiff Pay');
+ var ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
  if (!ratesSheet) {
-   ui.alert('Hourly + Spiff Pay sheet not found!');
+   ui.alert(Modules.Constants.SHEET.MAIN + ' sheet not found!');
    return;
  }
 
- var ratesMapping = getRatesSheetMapping(); // Use utility function
+ var ratesMapping = Modules.Utilities.getRatesSheetMapping(); // Use utility function from core
  var ratesData = ratesSheet.getDataRange().getValues();
  var techsToProcess = [];
 
@@ -256,23 +256,42 @@ function processAllSpiffBonusWithCustomers() {
    return sheet.getName();
  });
 
- // Gather all technicians regardless of status
+ // Gather all technicians who are eligible for Bonus processing
  for (var i = ratesMapping.dataStartRow - 1; i < ratesData.length; i++) { // Adjust index for 0-based array
    var row = ratesData[i];
    var techName = row[ratesMapping.nameColumn - 1];
+   var position = row[ratesMapping.positionColumn - 1];
+   
+   // Convert position to string and normalize for comparison
+   var positionStr = position ? position.toString().trim().toUpperCase() : "";
 
-   // Ensure techName is valid and sheet exists
-   if (techName && typeof techName === 'string' && techName.trim() !== "" && sheetNames.indexOf(techName) !== -1) {
-     techsToProcess.push({
-       name: techName,
-       row: i + 1, // 1-based row index
-       col: ratesMapping.actionColumn
-     });
+   // Ensure techName is valid, sheet exists, eligible for Bonus (not C1)
+   if (techName && typeof techName === 'string' && techName.trim() !== "" && 
+       sheetNames.indexOf(techName) !== -1 && 
+       positionStr !== "C1" && positionStr !== "CLASS 1") {
+     
+     // Use @core utility function to check eligibility - fall back to simple position check if not available
+     var isBonusEligible = true; // Default to eligible
+     
+     // Check if Utilities module has a technician eligibility function
+     if (typeof Modules !== 'undefined' && 
+         typeof Modules.Utilities !== 'undefined' && 
+         typeof Modules.Utilities.isTechnicianEligibleForBonus === 'function') {
+       isBonusEligible = Modules.Utilities.isTechnicianEligibleForBonus(techName, ratesSheet);
+     }
+     
+     if (isBonusEligible) {
+       techsToProcess.push({
+         name: techName,
+         row: i + 1, // 1-based row index
+         col: ratesMapping.actionColumn
+       });
+     }
    }
  }
 
  if (techsToProcess.length === 0) {
-   ui.alert('No technicians with sheets found for Spiff/Bonus processing.');
+   ui.alert('No eligible technicians found for Bonus processing.');
    return;
  }
 
@@ -285,7 +304,7 @@ function processAllSpiffBonusWithCustomers() {
  for (var t = 0; t < techsToProcess.length; t++) {
    var tech = techsToProcess[t];
    try {
-     console.log("Processing Spiff/Bonus for: " + tech.name + " (Row: " + tech.row + ")");
+     console.log("Processing Bonus for: " + tech.name + " (Row: " + tech.row + ")");
      var result = updateSpiffBonusWithCustomersListAll(tech.name);
      successCount++;
      
@@ -299,14 +318,14 @@ function processAllSpiffBonusWithCustomers() {
        totalAmount += result.amount;
      }
    } catch (error) {
-     console.error("Failed processing Spiff/Bonus for " + tech.name + ": " + error.message);
+     console.error("Failed processing Bonus for " + tech.name + ": " + error.message);
      errors.push(tech.name + ": " + error.message);
    }
  }
 
  // Build pretty summary message like the screenshot
  var summaryMessage = [];
- summaryMessage.push("SPIFF/BONUS PROCESSING COMPLETE");
+ summaryMessage.push("BONUS PROCESSING COMPLETE");
  
  // Add summary section
  summaryMessage.push("\nSUMMARY:");
@@ -843,4 +862,463 @@ function parseDateSafe(value) {
   }
   
   return null;
+}
+
+/**
+ * Main entry point for processing all PBP for all technicians.
+ * Called from the menu or other trigger points.
+ * Delegates to the appropriate PBP processing functions.
+ */
+function pbpMain_processAllPBP() {
+  console.log("PBP: processAll called");
+  
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.alert("Process PBP for all technicians?", 
+                         "This will update PBP data for all eligible technicians. Continue?", 
+                         ui.ButtonSet.YES_NO);
+  
+  if (response === ui.Button.YES) {
+    try {
+      // Check if we have a dedicated function for processing all PBP
+      if (typeof Modules !== 'undefined' && 
+          typeof Modules.PBP !== 'undefined' && 
+          typeof Modules.PBP.processAllPBP === 'function') {
+        
+        // Use the dedicated module function if available
+        Modules.PBP.processAllPBP();
+      } else {
+        // Fallback to a simpler implementation using existing functions
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        var technicians = getAllEligibleTechnicians();
+        
+        if (technicians.length === 0) {
+          ui.alert("No eligible technicians found for PBP processing.");
+          return;
+        }
+        
+        var successCount = 0;
+        var errors = [];
+        
+        for (var i = 0; i < technicians.length; i++) {
+          try {
+            // If there's a specific function for processing a single technician's PBP, call it
+            if (typeof Modules.PBP.processPBPForTechnician === 'function') {
+              Modules.PBP.processPBPForTechnician(technicians[i]);
+            } else {
+              // Otherwise just clear and let the next run populate data
+              var techSheet = ss.getSheetByName(technicians[i]);
+              if (techSheet) {
+                Modules.PBP.clearInstallDataSection(techSheet);
+              }
+            }
+            successCount++;
+          } catch (error) {
+            console.error("Error processing PBP for " + technicians[i] + ": " + error.message);
+            errors.push(technicians[i] + ": " + error.message);
+          }
+        }
+        
+        // Show summary
+        var message = "PBP PROCESSING COMPLETE\n\nProcessed " + successCount + " technicians.";
+        if (errors.length > 0) {
+          message += "\n\nErrors:\n" + errors.join("\n");
+        }
+        ui.alert(message);
+      }
+    } catch (e) {
+      console.error("Error in pbpMain_processAllPBP: " + e.message);
+      ui.alert("Error processing PBP: " + e.message);
+    }
+  }
+}
+
+/**
+ * Helper function to get all eligible technicians for PBP processing.
+ * @return {Array} Array of technician names who are eligible for PBP
+ */
+function getAllEligibleTechnicians() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var sheetNames = sheets.map(function(sheet) { return sheet.getName(); });
+  
+  // If available, use the core utility function
+  if (typeof Modules !== 'undefined' && 
+      typeof Modules.Utilities !== 'undefined' && 
+      typeof Modules.Utilities.getTechnicianNames === 'function') {
+    return Modules.Utilities.getTechnicianNames();
+  }
+  
+  // Fallback: get Main sheet and find technicians
+  var mainSheet = ss.getSheetByName(
+    typeof Modules !== 'undefined' && 
+    typeof Modules.Constants !== 'undefined' && 
+    typeof Modules.Constants.SHEET !== 'undefined' ? 
+    Modules.Constants.SHEET.MAIN : 'Main'
+  );
+  
+  if (!mainSheet) return [];
+  
+  var techNames = [];
+  var lastRow = mainSheet.getLastRow();
+  var nameCol = 1; // Assume column A has technician names
+  
+  if (lastRow <= 1) return [];
+  
+  var nameValues = mainSheet.getRange(2, nameCol, lastRow-1, 1).getValues();
+  for (var i = 0; i < nameValues.length; i++) {
+    var name = nameValues[i][0];
+    if (name && typeof name === 'string' && name.trim() !== "" && 
+        sheetNames.indexOf(name) !== -1) {
+      techNames.push(name);
+    }
+  }
+  
+  return techNames;
+}
+
+/**
+ * Process PBP for a single technician
+ * @param {string} technicianName - The name of the technician
+ * @return {object} Result with count and amount properties
+ */
+Modules.PBP.processPBPForTechnician = function(technicianName) {
+  try {
+    console.log("Processing PBP for: " + technicianName);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var techSheet = ss.getSheetByName(technicianName);
+    
+    if (!techSheet) {
+      console.error("No sheet found for technician: " + technicianName);
+      return { count: 0, amount: 0 };
+    }
+    
+    // First clear existing PBP data
+    var clearedRows = Modules.PBP.clearInstallDataSection(techSheet);
+    console.log("Cleared " + clearedRows + " PBP rows for " + technicianName);
+    
+    // Now actually calculate and add data - this was missing!
+    
+    // 1. Get the necessary data
+    var spiffBonusSheet = ss.getSheetByName('Spiff/Bonus');
+    var ratesSheet = ss.getSheetByName(Modules.Constants && Modules.Constants.SHEET ? 
+                                       Modules.Constants.SHEET.MAIN : 'Main');
+    
+    if (!spiffBonusSheet) {
+      console.error("Spiff/Bonus sheet not found - cannot process PBP data");
+      Modules.PBP.updateTopSummaryInstallPay(techSheet, 0, 0);
+      return { count: 0, amount: 0 };
+    }
+    
+    if (!ratesSheet) {
+      console.error("Main sheet not found - cannot process PBP data");
+      Modules.PBP.updateTopSummaryInstallPay(techSheet, 0, 0);
+      return { count: 0, amount: 0 };
+    }
+    
+    // 2. Get all data from the sheets (do this once)
+    var spiffBonusData = spiffBonusSheet.getDataRange().getValues();
+    var ratesData = ratesSheet.getDataRange().getValues();
+    
+    // 3. Calculate PBP entries
+    console.log("Calculating PBP entries for: " + technicianName);
+    var calculationResult = calculatePbpEntries(technicianName, spiffBonusData, ratesData);
+    var allPbpEntries = calculationResult.entries;
+    var totalTechnicianShare = calculationResult.totalShare;
+    
+    console.log("Found " + allPbpEntries.length + " PBP entries with total share: $" + totalTechnicianShare);
+    
+    // 4. Update the technician's sheet with the calculated data
+    if (allPbpEntries.length > 0) {
+      Modules.PBP.writePbpDataToSheet(techSheet, allPbpEntries, totalTechnicianShare);
+      console.log("Successfully wrote PBP data to " + technicianName + "'s sheet");
+    } else {
+      // No entries found, just update the summary to 0
+      Modules.PBP.updateTopSummaryInstallPay(techSheet, 0, 0);
+      console.log("No PBP entries found for " + technicianName);
+    }
+    
+    return {
+      count: allPbpEntries.length,
+      amount: totalTechnicianShare
+    };
+  } catch (error) {
+    console.error("Error in processPBPForTechnician for " + technicianName + ": " + error.message + "\n" + error.stack);
+    // Try to update the summary to 0 anyway
+    try {
+      if (techSheet) {
+        Modules.PBP.updateTopSummaryInstallPay(techSheet, 0, 0);
+      }
+    } catch (e) {
+      console.error("Failed to update summary: " + e.message);
+    }
+    return { count: 0, amount: 0 };
+  }
+};
+
+/**
+ * Local fallback implementation of TechnicianUtils.getTechnicianClassAndRole
+ * Used when the shared module isn't available
+ * 
+ * @param {string} title - The technician's title/position
+ * @return {object} Object with class, role, and isEligible properties
+ */
+function getClassAndRoleFromTitle(title) {
+  if (!title) {
+    return { class: 0, role: 'None', isEligible: false };
+  }
+  
+  var titleLower = title.toString().toLowerCase().trim();
+  
+  // Class 4 roles (highest seniority)
+  if (titleLower.includes('master') || titleLower.includes('senior tech')) {
+    return { class: 4, role: 'Lead', isEligible: true };
+  }
+  
+  // Class 3 roles (mid-senior)
+  if (titleLower.includes('journeyman') || titleLower.includes('tech 3') || titleLower.includes('technician 3')) {
+    return { class: 3, role: 'Lead', isEligible: true };
+  }
+  
+  // Class 2 roles (qualified techs)
+  if (titleLower.includes('tech 2') || titleLower.includes('technician 2') || 
+      titleLower.includes('c2') || titleLower.match(/class\s*2/)) {
+    return { class: 2, role: 'Assistant', isEligible: true };
+  }
+  
+  // Class 1 roles (apprentice or new techs) - not eligible for PBP/bonus
+  if (titleLower.includes('tech 1') || titleLower.includes('technician 1') || 
+      titleLower.includes('c1') || titleLower.match(/class\s*1/) || 
+      titleLower.includes('apprentice')) {
+    return { class: 1, role: 'None', isEligible: false };
+  }
+  
+  // Default fallback
+  return { class: 2, role: 'Assistant', isEligible: true };
+}
+
+/**
+* Processes PBP entries from Spiff/Bonus data and calculates shares based on class/role logic.
+* 
+* @param {string} technicianName - The name of the technician being processed.
+* @param {Array<Array>} spiffBonusData - 2D array of data from 'Spiff/Bonus' sheet.
+* @param {Array<Array>} ratesData - 2D array of data from Modules.Constants.SHEET.MAIN sheet.
+* @return {object} An object containing { entries: Array<object>, totalShare: number }.
+*/
+function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
+  // Ensure TechnicianUtils is available or use fallback
+  var getTechClassAndRole = (Modules.Shared && 
+                           Modules.Shared.TechnicianUtils && 
+                           Modules.Shared.TechnicianUtils.getTechnicianClassAndRole) ? 
+    Modules.Shared.TechnicianUtils.getTechnicianClassAndRole : 
+    getClassAndRoleFromTitle;
+  
+  // Build a cache of technician details for quick lookups
+  var techCache = {};
+  // Build technician details cache with fallback
+  for (var r = 1; r < ratesData.length; r++) {
+    var row = ratesData[r];
+    if (!row[0]) continue;
+    var name = row[0].toString().trim();
+    var lower = name.toLowerCase();
+    if (techCache[lower]) continue;
+    var title = row[2] ? row[2].toString() : '';
+    var info = getTechClassAndRole(title);
+    techCache[lower] = {
+      name: name,
+      class: info.class,
+      isEligible: info.isEligible,
+      initialRole: info.role
+    };
+  }
+  
+  var processed = {};  // Track processed entries to avoid duplicates
+  var resultEntries = [];
+  var totalShare = 0;
+
+  // Helper to parse names with fallback
+  function parseTechnicianNames(str) {
+    if (!str) return [];
+    
+    // Use Shared utility if available
+    if (Modules.Shared && 
+        Modules.Shared.TechnicianUtils && 
+        Modules.Shared.TechnicianUtils.parseTechnicianNames) {
+      return Modules.Shared.TechnicianUtils.parseTechnicianNames(str);
+    }
+    
+    // Fallback implementation
+    return String(str)
+      .split(/[,\n&]+/)
+      .map(function(s) { return s.trim(); })
+      .filter(function(s) { return s.length > 0; });
+  }
+
+  // Process each row in the Spiff/Bonus sheet (skip header row)
+  for (var r = 1; r < spiffBonusData.length; r++) {
+    var row = spiffBonusData[r];
+    
+    // Check the Cross-Sale Group column for PBP information 
+    var crossSaleValue = row[9] || ""; // Typically column J
+    if (!crossSaleValue) continue;
+    
+    // Check for PBP marker
+    var pbpMatch = String(crossSaleValue).match(/pbp\s*(\d+(?:\.\d+)?)/i);
+    var pbpAmount = pbpMatch && pbpMatch[1] ? parseFloat(pbpMatch[1]) : 0;
+    if (!pbpAmount) continue; // Skip if no PBP amount found
+    
+    // Get technician names from the sheet
+    var salesTechCol = 5; // Column F - Sold By Technician 
+    var primaryTechCol = 6; // Column G - Primary Technician
+    var assignedTechsCol = 7; // Column H - Assigned Technicians
+    
+    // Get unique technician names for this job
+    var uniqueNames = [];
+    var lowerSet = new Set();
+
+    // Helper to add names uniquely
+    function addTech(name) {
+      if (!name) return;
+      var trimmed = String(name).trim();
+      var lower = trimmed.toLowerCase();
+      if (trimmed && !lowerSet.has(lower)) {
+        uniqueNames.push(trimmed);
+        lowerSet.add(lower);
+      }
+    }
+
+    // Add primary tech and all assigned techs
+    addTech(row[salesTechCol]);
+    var assignedTechs = parseTechnicianNames(row[assignedTechsCol] || '');
+    for (var a = 0; a < assignedTechs.length; a++) {
+      addTech(assignedTechs[a]);
+    }
+    
+    // Check if the current technician is involved in this job
+    if (!lowerSet.has(technicianName.toLowerCase())) continue;
+    
+    // Create a key to deduplicate entries
+    var customerName = row[1] || ""; // Column B
+    var completionDate = row[3] || ""; // Column D
+    var itemName = row[10] || ""; // Column K
+    var key = [customerName, completionDate, itemName, pbpAmount].join('|');
+    
+    // Skip if we've already processed this entry
+    if (processed[key]) continue;
+    processed[key] = true;
+    
+    // Calculate split percentages - simplified fallback
+    var techs = [];
+    var highestClass = 0;
+
+    // Populate base info and find highest class present
+    for (var u = 0; u < uniqueNames.length; u++) {
+      var techName = uniqueNames[u];
+      var cached = techCache[techName.toLowerCase()];
+      var techInfo = cached || { 
+        name: techName, 
+        class: 2, // Default to Class 2
+        isEligible: true, 
+        initialRole: 'Assistant' 
+      };
+      
+      techs.push({
+        name: techInfo.name,
+        class: techInfo.class,
+        isEligible: techInfo.isEligible,
+        initialRole: techInfo.initialRole,
+        finalRole: techInfo.initialRole,
+        splitPercent: 0,
+        payout: 0
+      });
+      
+      if (techInfo.class > highestClass) {
+        highestClass = techInfo.class;
+      }
+    }
+
+    var total = techs.length;
+    var hasHighClass = techs.some(function(t) { return t.class >= 3; });
+
+    // Determine final role per rules
+    for (var t = 0; t < techs.length; t++) {
+      var tech = techs[t];
+      if (tech.class === 2 && tech.class === highestClass && !hasHighClass) {
+        tech.finalRole = 'Lead';
+      }
+      if (total === 1 && tech.class >= 2) {
+        tech.finalRole = 'Lead';
+      }
+      if (total === 1 && tech.class === 1) {
+        tech.finalRole = 'Assistant';
+      }
+    }
+
+    var leadCount = techs.filter(function(t) { return t.finalRole === 'Lead'; }).length;
+    var assistantCount = techs.filter(function(t) { return t.finalRole === 'Assistant'; }).length;
+
+    // Calculate split % + payout
+    for (var s = 0; s < techs.length; s++) {
+      var t = techs[s];
+      
+      // Calculate split percentage
+      var splitPercent = 0;
+      
+      // If there's only one tech, they get 100%
+      if (total === 1) {
+        splitPercent = 100;
+      } 
+      // Two techs - 65/35 split for Lead/Assistant, 50/50 for same roles
+      else if (total === 2) {
+        if (leadCount === 1 && assistantCount === 1) {
+          splitPercent = t.finalRole === 'Lead' ? 65 : 35;
+        } else {
+          splitPercent = 50; // 2 Leads OR 2 Assistants
+        }
+      } 
+      // More techs - use standard splits
+      else if (total >= 3) {
+        // Fall back to equal split
+        splitPercent = 100 / total;
+      }
+      
+      t.splitPercent = splitPercent;
+      t.payout = t.isEligible ? pbpAmount * (splitPercent / 100) : 0;
+    }
+    
+    // Find this technician's details
+    var targetTech = null;
+    for (var f = 0; f < techs.length; f++) {
+      if (techs[f].name.toLowerCase() === technicianName.toLowerCase()) {
+        targetTech = techs[f];
+        break;
+      }
+    }
+    
+    // Skip if technician not found or not eligible
+    if (!targetTech) continue;
+    
+    // Add entry to results
+    resultEntries.push({
+      customerName: customerName,
+      jobBusinessUnit: row[2] || "", // Column C
+      completionDate: completionDate,
+      itemName: itemName,
+      totalPbp: pbpAmount,
+      technicianShare: targetTech.payout,
+      roleForJob: targetTech.finalRole,
+      splitPercentage: targetTech.splitPercent,
+      isEligible: targetTech.isEligible,
+      teamDetails: techs.map(function(t) {
+        return t.name + " (C" + t.class + "/" + t.finalRole + "/" + t.splitPercent.toFixed(1) + "%)";
+      }).join(', ')
+    });
+    
+    // Add to total share
+    totalShare += targetTech.payout;
+  }
+
+  return { 
+    entries: resultEntries, 
+    totalShare: totalShare 
+  };
 } 

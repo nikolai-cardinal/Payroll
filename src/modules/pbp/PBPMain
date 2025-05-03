@@ -330,7 +330,7 @@ function pbpMain_processAllPBP() {
 * Processes PBP entries from Spiff/Bonus data and calculates shares based on new class/role logic.
 * @param {string} technicianName - The name of the technician being processed.
 * @param {Array<Array>} spiffBonusData - 2D array of data from 'Spiff/Bonus' sheet.
-* @param {Array<Array>} ratesData - 2D array of data from 'Hourly + Spiff Pay' sheet.
+* @param {Array<Array>} ratesData - 2D array of data from Modules.Constants.SHEET.MAIN sheet.
 * @return {object} An object containing { entries: Array<object>, totalShare: number }.
 */
 function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {

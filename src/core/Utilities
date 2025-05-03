@@ -61,10 +61,69 @@ Modules.Utilities = Modules.Utilities || {};
     }
   }
 
+  /**
+   * Checks if a technician is eligible for bonus payments.
+   * Abstracts eligibility logic that was previously in the Bonus module.
+   * 
+   * @param {string} technicianName - The name of the technician to check
+   * @param {Sheet} ratesSheet - The Main sheet containing technician data
+   * @return {boolean} True if the technician is eligible, false otherwise
+   */
+  function isTechnicianEligibleForBonus(technicianName, ratesSheet) {
+    if (!technicianName || !ratesSheet) return false;
+    
+    try {
+      // Get the mapping for sheet columns
+      var mapping = getRatesSheetMapping();
+      var positionColumn = mapping.positionColumn;
+      var nameColumn = mapping.nameColumn;
+      var dataStartRow = mapping.dataStartRow;
+      
+      // Find the technician row
+      var techData = ratesSheet.getDataRange().getValues();
+      var techRow = -1;
+      
+      // Search starting at the actual data row
+      for (var i = Math.max(0, dataStartRow - 1); i < techData.length; i++) {
+        var currentName = techData[i][nameColumn - 1] || "";
+        if (typeof currentName === 'string' && 
+            currentName.trim().toLowerCase() === technicianName.toLowerCase()) {
+          techRow = i;
+          break;
+        }
+      }
+      
+      if (techRow === -1) {
+        console.log("Technician not found in rates sheet: " + technicianName);
+        return true; // If not found, assume eligible (safer default)
+      }
+      
+      // Check position - ensure index is valid
+      if (positionColumn - 1 >= techData[techRow].length) {
+        console.log("Position column index out of bounds for " + technicianName);
+        return true; // If position can't be checked, assume eligible
+      }
+      
+      var position = techData[techRow][positionColumn - 1];
+      if (!position) return true; // No position data, assume eligible
+      
+      // Check if position is C1 or CLASS 1 (ineligible)
+      var positionStr = String(position).trim().toUpperCase();
+      var isClass1 = positionStr === "C1" || positionStr === "CLASS 1";
+      
+      // Return true if NOT Class 1 (eligible)
+      return !isClass1;
+    } catch (e) {
+      console.error("Error checking technician eligibility: " + e.message);
+      return true; // On error, default to eligible
+    }
+  }
+
   // Expose helpers on the namespace without overwriting any existing keys.
   Object.assign(Modules.Utilities, {
     getRatesSheetMapping: getRatesSheetMapping,
     columnToLetter: columnToLetter,
     safeOperation: safeOperation,
+    isTechnicianEligibleForBonus: isTechnicianEligibleForBonus
   });
 })();

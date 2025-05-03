@@ -1,324 +1,490 @@
 /**
- * Payroll System - Bonus Main Processor
- * Contains the main functions orchestrating the Bonus calculation and update process.
+ * Cardinal Payroll System - Bonus Main
+ * Contains main functionality for processing bonus payments for technicians.
+ * 
+ * Dependencies:
+ * - src/modules/Bonus/BonusUtilities
+ * - src/core/Constants (for sheet names)
+ * - src/core/Utilities (for mapping functions)
  */
 
-// Setup namespace
+// @ts-nocheck
+
+// Namespace for Bonus module
 var Modules = Modules || {};
 Modules.Bonus = Modules.Bonus || {};
 Modules.Bonus.Main = Modules.Bonus.Main || {};
 
 /**
- * Main processing function for handling Bonus updates for a technician.
- * Gets data, calculates the bonus, and updates the technician sheet.
- * Skips processing for Class 1 technicians.
+ * Processes BONUS entries for a single technician and writes results to their sheet.
  *
- * @param {string} technicianName The name of the technician to process.
- * @param {number} actionRow The row in the Main sheet where the action was triggered.
- * @param {number} actionColumn The column in the Main sheet where the action was triggered.
- * @param {Object} [options={}] Optional configuration object.
- * @param {boolean} [options.suppressPopup=false] Flag to suppress popup notifications.
- * @return {object|null} Result object with entryCount and totalAmount if successful, null otherwise.
+ * Logic:
+ *   1. Qualifying row when
+ *        (a) Technician appears in both Sold By Technician (col F) AND Technician (col G)
+ *            OR
+ *        (b) Sold By Technician field (col F) is blank AND technician appears in the
+ *            Technician column (G) 
+ *   2. Commission taken from column I ($ Bonus).
+ * 
+ * @param {string} technicianName - The name of the technician to update
+ * @param {number} [opt_actionRow] - Optional row in the Main sheet where the action was triggered
+ * @param {number} [opt_actionCol] - Optional column in the Main sheet where the action was triggered
+ * @param {boolean} [opt_suppressPopup] - Whether to suppress the completion popup
+ * @return {number} The total bonus amount processed
  */
-Modules.Bonus.Main.processBonus = function(technicianName, actionRow, actionColumn, options = {}) {
-  const { suppressPopup = false } = options;
-  const ui = SpreadsheetApp.getUi();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let techSheet;
-  let ratesSheet;
-  let spiffBonusSheet;
-  const summaryInfo = [];
+Modules.Bonus.Main.updateForTechnician = function(technicianName, opt_actionRow, opt_actionCol, opt_suppressPopup) {
+  if (!technicianName) return 0;
+  technicianName = String(technicianName).trim();
+  var techLower = technicianName.toLowerCase();
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var bonusSheet = ss.getSheetByName('Spiff/Bonus');
+  var ratesSheet = ss.getSheetByName(
+    typeof Modules !== 'undefined' && Modules.Constants && Modules.Constants.SHEET 
+    ? Modules.Constants.SHEET.MAIN 
+    : 'Main'
+  );
+  var techSheet = ss.getSheetByName(technicianName);
+  var ui = SpreadsheetApp.getUi();
+
+  if (!bonusSheet || !techSheet) {
+    if (!opt_suppressPopup) {
+      ui.alert('Required sheet missing (Spiff/Bonus or technician sheet)');
+    }
+    console.error("Required sheet missing for " + technicianName);
+    return 0;
+  }
+  
+  // Check if technician is Class 1 (ineligible for bonus)
+  if (Modules.Bonus.Utilities.isTechnicianClass1(technicianName, ratesSheet)) {
+    if (!opt_suppressPopup) {
+      ui.alert(technicianName + ' is Class 1 and not eligible for bonus.');
+    }
+    console.log(technicianName + ' is Class 1, skipping bonus processing');
+    return 0;
+  }
+
+  // Process the bonus data and get results
+  var result = Modules.Bonus.Main.processSpiffAndBonusData(techSheet, technicianName, bonusSheet);
+  var totalPay = result.totalAmount || 0;
+  var entries = result.entries || [];
+
+  // Mark action column complete if provided
+  if (ratesSheet && opt_actionRow && opt_actionCol) {
+    try {
+      ratesSheet.getRange(opt_actionRow, opt_actionCol).setValue('Complete');
+    } catch (error) {
+      console.error("Failed to mark action complete: " + error.message);
+    }
+  }
+
+  // Popup summary (only when not suppressed)
+  if (!opt_suppressPopup) {
+    var summary = [];
+    summary.push('BONUS SUMMARY – ' + technicianName);
+    summary.push('');
+    summary.push('Total Bonus Amount: $' + totalPay.toFixed(2));
+    summary.push('Total Entries: ' + entries.length);
+
+    if (entries.length) {
+      summary.push('');
+      summary.push('DETAILS BY ENTRY:');
+      entries.forEach(function(ent, idx) {
+        summary.push('\n  ' + (idx + 1) + ') ' + (ent.customer || 'Unknown Customer'));
+        summary.push('     • Amount: $' + ent.amount.toFixed(2));
+        if (ent.businessUnit || ent.itemName) {
+          var descr = [];
+          if (ent.businessUnit) descr.push(ent.businessUnit);
+          if (ent.itemName) descr.push(ent.itemName);
+          summary.push('     • Item / BU: ' + descr.join(' – '));
+        }
+        if (ent.date) {
+          summary.push('     • Date: ' + Modules.Bonus.Utilities.formatDateSafe(ent.date));
+        }
+        if (ent.soldBy) {
+          summary.push('     • Sold By: ' + ent.soldBy);
+        }
+      });
+    }
+
+    ui.alert(summary.join('\n'));
+  }
+
+  return totalPay;
+};
+
+/**
+ * Core function to process spiff/bonus data for a technician.
+ * This function is used by both updateForTechnician and updateSpiffBonusWithCustomersListAll.
+ *
+ * @param {Sheet} techSheet - The technician's sheet
+ * @param {string} technicianName - The name of the technician
+ * @param {Sheet} spiffBonusSheet - The Spiff/Bonus sheet
+ * @return {Object} Result object with totalAmount, entryCount, and entries
+ */
+Modules.Bonus.Main.processSpiffAndBonusData = function(techSheet, technicianName, spiffBonusSheet) {
+  if (!technicianName || !techSheet || !spiffBonusSheet) {
+    console.error("Missing required parameters for processSpiffAndBonusData");
+    return { totalAmount: 0, entryCount: 0, entries: [] };
+  }
 
   try {
-    // --- 1. Setup and Sheet Validation ---
-    ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
-    spiffBonusSheet = ss.getSheetByName(Modules.Constants.SHEET.SPIFF);
-    techSheet = ss.getSheetByName(technicianName);
-
-    if (!ratesSheet) throw new Error(`Required sheet not found: ${Modules.Constants.SHEET.MAIN}`);
-    if (!spiffBonusSheet) throw new Error(`Required sheet not found: ${Modules.Constants.SHEET.SPIFF}`);
-    if (!techSheet) throw new Error(`Required sheet not found for Technician: ${technicianName}`);
-
-    // Set status to Processing if action row/column provided
-    if (actionRow && actionColumn) {
-      Modules.Shared.SheetUtils.setActionStatus(ratesSheet, actionRow, actionColumn, "Processing...");
-    }
-
-    // --- 2. Check if technician is Class 1 and skip if so ---
-    if (Modules.Bonus.Utilities.isTechnicianClass1(technicianName, ratesSheet)) {
-      console.log(`Skipping Bonus processing for Class 1 technician: ${technicianName}`);
-      
-      // Update summary to 0 and clear section
-      Modules.Bonus.updateTopSummary(techSheet, 0, 0);
-      Modules.Bonus.clearDataSection(techSheet);
-      
-      // Set status to Complete if action row/column provided
-      if (actionRow && actionColumn) {
-        Modules.Shared.SheetUtils.setActionStatus(ratesSheet, actionRow, actionColumn, "Complete");
-      }
-      
-      // Show popup with info about skipping if not suppressed
-      if (!suppressPopup) {
-        ui.alert(`Bonus processing skipped for ${technicianName}.\n\nReason: Class 1 technicians are not eligible for Bonus.`);
-      }
-      
-      return { entryCount: 0, totalAmount: 0 };
-    }
-
-    // --- 3. Get Header Map ---
-    const headerMap = Modules.Bonus.Utilities.getBonusHeaderMap(spiffBonusSheet);
-    if (!headerMap || !headerMap.soldBy || !headerMap.assignedTechnician || 
-        !headerMap.customerName || !headerMap.jobBusinessUnit || 
-        !headerMap.completionDate || !headerMap.bonusAmount) {
-      console.error("Failed to get valid header map from Spiff/Bonus sheet");
-      throw new Error("Could not find expected columns in the Spiff/Bonus sheet");
-    }
-
-    // --- 4. Get all data from Spiff/Bonus sheet ---
-    const spiffBonusData = spiffBonusSheet.getDataRange().getValues();
-
-    // --- 5. Collect customer data for the technician ---
-    const customerData = [];
-    let totalBonusAmount = 0;
-    const tz = Session.getScriptTimeZone() || 'America/New_York';
+    var techLower = String(technicianName).trim().toLowerCase();
     
-    // Filter data for rows where 'Sold By' matches or is empty and 'Assigned Tech' includes this technician
-    for (let i = 1; i < spiffBonusData.length; i++) {
-      const row = spiffBonusData[i];
-      const soldBy = row[headerMap.soldBy - 1] || "";
-      const assignedTech = row[headerMap.assignedTechnician - 1] || "";
-      
-      // Check if this row applies to this technician
-      let isMatch = false;
-      if (soldBy === technicianName && assignedTech.includes(technicianName)) {
-        isMatch = true;
-      } 
-      else if ((soldBy === "" || !soldBy) && assignedTech.includes(technicianName)) {
-        isMatch = true;
-      }
-      
-      // Skip if not a match
-      if (!isMatch) continue;
-      
-      // Extract data using the map
-      const custName = row[headerMap.customerName - 1] || "";
-      const busUnit = row[headerMap.jobBusinessUnit - 1] || "";
-      const dateVal = row[headerMap.completionDate - 1] || "";
-      const notesVal = row[headerMap.itemName - 1] || "";
-      
-      // Extract bonus amount (handle different formats)
-      const bonusAmountRaw = row[headerMap.bonusAmount - 1];
-      let bonusAmt = 0;
-      
-      if (typeof bonusAmountRaw === 'string' && bonusAmountRaw.includes('$')) {
-        bonusAmt = parseFloat(bonusAmountRaw.replace(/[^0-9.-]+/g,''));
-      } else {
-        bonusAmt = parseFloat(bonusAmountRaw || 0);
-      }
-      
-      // Add to customer data if valid amount
-      if (!isNaN(bonusAmt) && bonusAmt > 0) {
-        totalBonusAmount += bonusAmt;
-        
-        customerData.push({
-          customerName: custName,
-          jobBusinessUnit: busUnit,
-          completionDate: dateVal,
-          commission: bonusAmt,
-          notes: notesVal
-        });
-      }
-    }
-    
-    // --- 6. Find customer data section ---
-    const customerHeaderRow = Modules.Bonus.Utilities.findBonusDataSection(techSheet);
-    if (customerHeaderRow <= 0) {
-      console.error(`Could not find Customer section in ${technicianName}'s sheet`);
-      throw new Error(`Could not find Bonus section in ${technicianName}'s sheet`);
-    }
-    
-    // --- 7. Clear existing Bonus rows BEFORE updating summary ---
-    const rowsCleared = Modules.Bonus.clearDataSection(techSheet, customerData);
-    console.log(`Cleared ${rowsCleared} existing bonus rows before updating`);
-    
-    // --- 8. Update technician's top summary AFTER clearing rows ---
-    Modules.Bonus.updateTopSummary(techSheet, totalBonusAmount, customerData.length);
-    
-    // --- 9. Write new Bonus data ---
-    Modules.Bonus.writeDataToSheet(techSheet, customerHeaderRow, customerData);
+    // Map headers → indices
+    var map = Modules.Bonus.Utilities.getHeaderMap(spiffBonusSheet);
 
-    // --- 10. Create summary for popup ---
-    if (!suppressPopup) {
-      summaryInfo.push("Bonus Update for: " + technicianName);
-      summaryInfo.push("Total Calculated Bonus: $" + totalBonusAmount.toFixed(2));
-      summaryInfo.push("Number of Bonus Entries: " + customerData.length);
-      summaryInfo.push("Rows Cleared: " + rowsCleared);
+    // Grab data (including header) once
+    var data = spiffBonusSheet.getDataRange().getValues();
+    if (data.length < 2) return { totalAmount: 0, entryCount: 0, entries: [] }; // nothing
+
+    // Iterate rows, collect qualifying entries
+    var entries = [];
+    var totalPay = 0;
+
+    for (var r = 1; r < data.length; r++) { // skip header row 0
+      var row = data[r];
+      var soldBy = (row[map.soldBy - 1] || '').toString().trim();
+      var primaryTech = (row[map.technician - 1] || '').toString().trim();
+      var assignedStr = (row[map.assignedTechs - 1] || '').toString();
+      var paysTechSpecific = row[map.paysTechSpecific - 1];
       
-      if (customerData.length > 0) {
-        summaryInfo.push("\nBONUS DETAILS:");
-        customerData.forEach(function(entry, index) {
-          const formattedDate = Modules.Bonus.Utilities.formatDate(entry.completionDate, 'MM/dd/yyyy', tz);
-          
-          summaryInfo.push("\nEntry #" + (index + 1) + ":");
-          summaryInfo.push("• Customer: " + (entry.customerName || "N/A"));
-          summaryInfo.push("• Unit: " + (entry.jobBusinessUnit || "N/A"));
-          summaryInfo.push("• Date: " + formattedDate);
-          summaryInfo.push("• Amount: $" + (entry.commission || 0).toFixed(2));
-        });
+      // By default a job *does* pay tech-specific bonus unless explicitly FALSE / 0 / "NO".
+      var paysTechSpecificBonus = true;
+      if (paysTechSpecific !== null && paysTechSpecific !== undefined && paysTechSpecific !== '') {
+        if (typeof paysTechSpecific === 'boolean') {
+          paysTechSpecificBonus = paysTechSpecific;
+        } else if (typeof paysTechSpecific === 'string') {
+          var cleanValue = paysTechSpecific.trim().toUpperCase();
+          paysTechSpecificBonus = !(cleanValue === 'FALSE' || cleanValue === 'NO' || cleanValue === '0');
+        } else if (typeof paysTechSpecific === 'number') {
+          paysTechSpecificBonus = paysTechSpecific !== 0;
+        }
       }
-      
-      ui.alert(summaryInfo.join("\n"));
+
+      var primaryTechMatch = primaryTech.toLowerCase() === techLower;
+      var soldByMatch = soldBy.toLowerCase() === techLower;
+
+      // Log qualification info for debugging
+      if ((soldByMatch && primaryTechMatch) || (!soldBy && primaryTechMatch)) {
+        console.log("Row " + (r+1) + " qualification: Tech:" + technicianName + 
+                   ", Pays Specific:" + paysTechSpecific + 
+                   " (" + (typeof paysTechSpecific) + ")" +
+                   ", Qualifies:" + paysTechSpecificBonus);
+      }
+
+      // Only qualify if "Pays Tech Specific Bonus" is true and primary technician matches
+      var qualifies = paysTechSpecificBonus && ((soldByMatch && primaryTechMatch) || (!soldBy && primaryTechMatch));
+      if (!qualifies) continue;
+
+      var amountRaw = row[map.bonusAmount - 1];
+      var amount = parseFloat(String(amountRaw).replace(/[^0-9.+-]/g, '')) || 0;
+      if (!amount) {
+        console.log("Entry skipped - zero amount: Row " + (r+1) + ", Customer: " + (row[map.customerName - 1] || 'Unknown'));
+        continue;
+      }
+
+      totalPay += amount;
+      entries.push({
+        customer: row[map.customerName - 1] || '',
+        businessUnit: row[map.businessUnit - 1] || '',
+        date: row[map.completionDate - 1] || '',
+        amount: amount,
+        itemName: row[map.itemName - 1] || '',
+        soldBy: soldBy // preserve original sold-by tech name
+      });
     }
 
-    // --- 11. Set final status ---
-    console.log(`Successfully processed Bonus for: ${technicianName}`);
-    if (actionRow && actionColumn) {
-      Modules.Shared.SheetUtils.setActionStatus(ratesSheet, actionRow, actionColumn, 'Complete');
+    // Clear existing bonus data from technician sheet
+    Modules.Bonus.Utilities.clearBonusDataSection(techSheet);
+
+    // Update top summary
+    Modules.Bonus.Utilities.updateTopSummaryBonus(techSheet, totalPay, entries.length);
+
+    // Write detailed entries to technician sheet
+    if (entries.length > 0) {
+      Modules.Bonus.Main.writeToTechSheet(techSheet, entries);
     }
 
-    return { entryCount: customerData.length, totalAmount: totalBonusAmount };
-
+    return {
+      totalAmount: totalPay || 0,
+      entryCount: entries ? entries.length : 0,
+      entries: entries || []
+    };
   } catch (error) {
-    console.error(`Error during Bonus processing for ${technicianName}: ${error.message}`);
-    
-    if (!suppressPopup) {
-      ui.alert(`An error occurred processing Bonus for ${technicianName}: ${error.message}`);
-    }
-    
-    // Attempt to set error status
-    try {
-      if (actionRow && actionColumn && ratesSheet) {
-        Modules.Shared.SheetUtils.setActionStatus(ratesSheet, actionRow, actionColumn, "⚠️ Error");
-      }
-    } catch (e) {
-      console.error("Failed to set error status: " + e.message);
-    }
-    
-    return null; // Indicate failure
+    console.error("Error in processSpiffAndBonusData for " + technicianName + ": " + error.message);
+    // Return calculated values up to the point of error, instead of 0
+    return {
+      totalAmount: totalPay || 0, // Use the calculated totalPay if available
+      entryCount: entries ? entries.length : 0, // Use calculated entries length
+      entries: entries || [] // Use calculated entries array
+    };
   }
 };
 
 /**
- * Processes Bonus for all technicians.
- * Called from the menu handler or the module index.
- * Skips Class 1 technicians.
+ * Compatibility function for updateSpiffBonusWithCustomersListAll
+ * Modified version of updateForTechnician that returns results without UI
+ * 
+ * @param {string} technicianName - The name of the technician
+ * @return {object} Result object with count and amount
  */
-Modules.Bonus.Main.processAllBonus = function() {
-  const ui = SpreadsheetApp.getUi();
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
-  
-  if (!ratesSheet) {
-    ui.alert(`Error: Could not find '${Modules.Constants.SHEET.MAIN}' sheet.`);
-    return;
-  }
-
-  const ratesMapping = Modules.Bonus.Utilities.getRatesSheetMapping();
-  let successCount = 0;
-  let errorCount = 0;
-  let skippedCount = 0;
-  let class1SkippedCount = 0;
-  const techniciansProcessed = [];
-  const errors = [];
-  let totalAmount = 0;
-
-  // Get all sheets in the spreadsheet to check for existence
-  const allSheets = ss.getSheets();
-  const sheetNameSet = new Set(allSheets.map(sheet => sheet.getName()));
-
-  // Gather all technicians
-  const dataRange = ratesSheet.getRange(ratesMapping.dataStartRow, ratesMapping.nameColumn, 
-                                        ratesSheet.getLastRow() - ratesMapping.dataStartRow + 1, 1);
-  const data = dataRange.getValues();
-
-  // Process each technician
-  for (let i = 0; i < data.length; i++) {
-    const techName = data[i][0];
-
-    // Skip empty rows or rows with no technician name
-    if (!techName || typeof techName !== 'string' || techName.trim() === '') {
-      continue;
+function updateSpiffBonusWithCustomersListAll(technicianName) {
+  try {
+    if (!technicianName) throw new Error("No technician name provided");
+    
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var bonusSheet = ss.getSheetByName('Spiff/Bonus');
+    var techSheet = ss.getSheetByName(technicianName);
+    var ratesSheet = ss.getSheetByName(
+      typeof Modules !== 'undefined' && Modules.Constants && Modules.Constants.SHEET 
+      ? Modules.Constants.SHEET.MAIN 
+      : 'Main'
+    );
+    
+    if (!techSheet) {
+      throw new Error("Technician sheet not found");
     }
     
-    const trimmedTechName = techName.trim();
-
-    // Check if the technician has a sheet
-    if (!sheetNameSet.has(trimmedTechName)) {
-      console.log(`Skipping ${trimmedTechName} - no sheet exists`);
-      skippedCount++;
-      continue;
+    if (!bonusSheet) {
+      throw new Error("Spiff/Bonus sheet not found");
     }
+    
+    // Check if technician is Class 1 (ineligible for bonus)
+    if (Modules.Bonus.Utilities.isTechnicianClass1(technicianName, ratesSheet)) {
+      console.log(technicianName + ' is Class 1, skipping bonus processing');
+      return { count: 0, amount: 0 };
+    }
+    
+    // Process the bonus data
+    var result = Modules.Bonus.Main.processSpiffAndBonusData(techSheet, technicianName, bonusSheet);
+    
+    console.log("Bonus processing result for " + technicianName + ": " + 
+                result.entryCount + " entries, $" + (result.totalAmount || 0).toFixed(2));
+    
+    return {
+      count: result.entryCount || 0,
+      amount: result.totalAmount || 0
+    };
+  } catch (error) {
+    console.error("Error in updateSpiffBonusWithCustomersListAll: " + error.message);
+    throw error;
+  }
+}
 
+/**
+ * Processes BONUS for every technician listed on the Main sheet that has an
+ * individual sheet.
+ * 
+ * @param {boolean} [opt_suppressPopup] - Whether to suppress the completion popup
+ * @return {Object} Result object with success status and message
+ */
+Modules.Bonus.Main.runBatch = function(opt_suppressPopup) {
+  var silent = !!opt_suppressPopup;
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var main = ss.getSheetByName(
+    typeof Modules !== 'undefined' && Modules.Constants && Modules.Constants.SHEET 
+    ? Modules.Constants.SHEET.MAIN 
+    : 'Main'
+  );
+  var ui = SpreadsheetApp.getUi();
+  
+  if (!main) {
+    var msgMain = 'Main sheet not found';
+    if (silent) return { ok: false, message: msgMain };
+    ui.alert(msgMain);
+    return { ok: false, message: msgMain };
+  }
+
+  // Try to get sheet mapping from core utilities
+  var map = { nameColumn: 1, actionColumn: 7, dataStartRow: 3 }; // default fallback
+  if (typeof Modules !== 'undefined' && 
+      typeof Modules.Utilities !== 'undefined' && 
+      typeof Modules.Utilities.getRatesSheetMapping === 'function') {
+    map = Modules.Utilities.getRatesSheetMapping();
+  }
+
+  var data = main.getRange(map.dataStartRow, map.nameColumn, main.getLastRow() - map.dataStartRow + 1, 1).getValues();
+  var names = data.map(function(r){return String(r[0]).trim();}).filter(Boolean);
+  var processed = 0;
+  var grandTotal = 0;
+  var techSummaries = [];
+
+  // Get all sheets to check if technician sheets exist
+  var allSheets = ss.getSheets();
+  var sheetNames = allSheets.map(function(sheet) {
+    return sheet.getName();
+  });
+
+  // Cache Spiff/Bonus sheet once
+  var bonusSheet = ss.getSheetByName('Spiff/Bonus');
+
+  // Process each technician - USING FOR LOOP INSTEAD OF FOREACH
+  for (var i = 0; i < names.length; i++) {
+    var name = names[i];
+    
+    // Skip if technician has no sheet
+    if (sheetNames.indexOf(name) === -1) {
+      console.log("Skipping technician with no sheet: " + name);
+      continue; // Skip to next iteration
+    }
+    
+    // Skip if technician is Class 1
+    if (Modules.Bonus.Utilities.isTechnicianClass1(name, main)) {
+      console.log('Skipping Class 1 technician: ' + name);
+      continue; // Skip to next iteration
+    }
+    
     try {
-      // Call the single, refactored update function with options
-      const result = Modules.Bonus.processForTechnician(trimmedTechName, null, null, {
-        suppressPopup: true
-      });
-
-      if (result !== null) {
-        // Check if it was a Class 1 skip (indicated by amount 0 and count 0, but not an error)
-        const isClass1Skip = result.entryCount === 0 && result.totalAmount === 0;
-        
-        if (isClass1Skip) {
-          // This is an approximation - check if they are Class 1
-          if (Modules.Bonus.Utilities.isTechnicianClass1(trimmedTechName, ratesSheet)) {
-            class1SkippedCount++;
-          }
-        }
-
-        // Record success and track amount
-        successCount++;
-        techniciansProcessed.push({
-          name: trimmedTechName,
-          count: result.entryCount || 0,
-          amount: result.totalAmount || 0
-        });
-        totalAmount += (result.totalAmount || 0);
-      } else {
-        // The function returned null, indicating an error occurred
-        console.error(`Error processing Bonus for ${trimmedTechName}`);
-        errorCount++;
-        errors.push(`${trimmedTechName}: Processing error (see logs)`);
+      var techSheet = ss.getSheetByName(name);
+      if (!techSheet) {
+        console.log('Tech sheet missing for ' + name + ', skipped after initial checks');
+        continue; // Skip to next iteration
       }
+
+      // Process and write bonus data
+      var result = Modules.Bonus.Main.processSpiffAndBonusData(techSheet, name, bonusSheet);
+      
+      console.log('[DEBUG for loop] Raw result for ' + name + ': ' + JSON.stringify(result));
+
+      var entryCount = result.entryCount || 0;
+      var bonusAmount = result.totalAmount || 0;
+      
+      console.log('[DEBUG for loop] Parsed values - entryCount: ' + entryCount + ', bonusAmount: ' + bonusAmount);
+
+      // Skip adding to totals when nothing was paid (amount <= 0 or not a finite number)
+      if (entryCount === 0 || !isFinite(bonusAmount) || bonusAmount <= 0) {
+        console.log('[DEBUG for loop] Skipping ' + name + ' with zero or invalid amount');
+        continue; // Skip to next iteration
+      }
+
+      // Log before adding to totals
+      console.log('[DEBUG for loop] Before adding: processed=' + processed + ', grandTotal=' + grandTotal);
+      
+      processed++;
+      grandTotal += bonusAmount;
+      
+      // Log after adding to totals
+      console.log('[DEBUG for loop] After adding: processed=' + processed + ', grandTotal=' + grandTotal);
+
+      techSummaries.push({
+        name: name,
+        entries: entryCount,
+        amount: bonusAmount
+      });
+      
+      console.log('Batch processing: ' + name + ' – ' + entryCount + ' entries, $' + bonusAmount.toFixed(2));
     } catch (error) {
-      console.error(`Unhandled error processing Bonus for ${trimmedTechName}: ${error.message}`);
-      errorCount++;
-      errors.push(`${trimmedTechName}: ${error.message}`);
+      console.error("Error processing bonus for " + name + ": " + error.message);
+      // Continue with next technician
     }
   }
 
-  // Build pretty summary message
-  const summaryMessage = ["BONUS BATCH PROCESSING COMPLETE"];
-  summaryMessage.push("\nSUMMARY:");
-  summaryMessage.push(`• Technicians Processed Successfully: ${successCount}`);
-  summaryMessage.push(`• Technicians Skipped (No Sheet): ${skippedCount}`);
-  summaryMessage.push(`• Technicians Skipped (Class 1): ${class1SkippedCount}`);
-  summaryMessage.push(`• Technicians with Errors: ${errorCount}`);
-  summaryMessage.push(`• Total Bonus Amount Calculated: $${totalAmount.toFixed(2)}`);
+  // Final sanity check
+  console.log('[FINAL DEBUG] processed=' + processed + ', grandTotal=' + grandTotal.toFixed(2) + 
+            ', techSummaries count=' + techSummaries.length);
 
-  // Add technician details section if we have any successful non-zero results
-  const successfulEntries = techniciansProcessed.filter(t => t.count > 0);
-  if (successfulEntries.length > 0) {
-    summaryMessage.push("\nDETAILS BY TECHNICIAN (with entries):");
-    successfulEntries.forEach(tech => {
-      summaryMessage.push(`\n  ${tech.name}:`);
-      summaryMessage.push(`  • Entries: ${tech.count}`);
-      summaryMessage.push(`  • Amount: $${tech.amount.toFixed(2)}`);
+  // Don't recalculate - use the values we've already accumulated
+  if (techSummaries.length === 0) {
+    var noneTech = 'No technician sheets processed.';
+    if (silent) return { ok: false, message: noneTech };
+    ui.alert(noneTech);
+    return { ok: false, message: noneTech };
+  }
+
+  // CRITICAL FIX: Force calculate the grand total from techSummaries to ensure accuracy
+  var calculatedTotal = 0;
+  for (var i = 0; i < techSummaries.length; i++) {
+    calculatedTotal += techSummaries[i].amount;
+  }
+  
+  console.log('CRITICAL CHECK - Original grandTotal: ' + grandTotal.toFixed(2) + 
+             ', Calculated from techSummaries: ' + calculatedTotal.toFixed(2));
+  
+  // Use the calculated total to guarantee accuracy
+  grandTotal = calculatedTotal;
+
+  var msg = [];
+  msg.push('BONUS PROCESSING COMPLETE');
+  msg.push('');
+  msg.push('SUMMARY:');
+  msg.push('• Total Technicians Processed: ' + processed);
+  msg.push('• Total Amount: $' + grandTotal.toFixed(2));
+
+  // Add technician breakdown lines
+  if (techSummaries.length) {
+    msg.push('');
+    msg.push('DETAILS BY TECHNICIAN:');
+    techSummaries.forEach(function(t){
+      msg.push('• ' + t.name + ' — ' + t.entries + ' entr' + (t.entries===1?'y':'ies') + ' — $' + t.amount.toFixed(2));
     });
   }
 
-  // Add errors section if any
-  if (errors.length > 0) {
-    summaryMessage.push("\nERRORS ENCOUNTERED:");
-    errors.forEach(err => summaryMessage.push(`• ${err}`));
+  console.log('[DEBUG] Final processed: ' + processed + ', grandTotal: ' + grandTotal.toFixed(2) + 
+             ', techSummaries: ' + JSON.stringify(techSummaries));
+
+  var summary = msg.join('\n');
+  if (silent) return { ok: true, message: summary };
+  ui.alert(summary);
+  return { ok: true, message: summary };
+};
+
+/**
+ * Helper – append Bonus detail rows to technician sheet (cols E-J)
+ * 
+ * @param {Sheet} sheet - The technician's sheet
+ * @param {Array} entries - The bonus entries to write
+ */
+Modules.Bonus.Main.writeToTechSheet = function(sheet, entries) {
+  if (!sheet || !entries || !entries.length) return;
+  
+  // Find the header row that starts the Bonus detail section by searching
+  // for the text "Customer Name" in column E (within the first ~50 rows).
+  var headerRow = -1;
+  var colE = sheet.getRange(1, 5, 50, 1).getValues();
+  for (var r = 0; r < colE.length; r++) {
+    if (String(colE[r][0]).trim().toLowerCase() === 'customer name') {
+      headerRow = r + 1;
+      break;
+    }
+  }
+  if (headerRow < 0) {
+    console.log('[BONUS] Could not locate detail section on sheet "' + sheet.getName() + '"');
+    return;
   }
 
-  // Show the popup
-  ui.alert(summaryMessage.join("\n"));
+  // Determine the first empty row below the header so that new Bonus entries
+  // are appended – never overwrite previously written data from earlier runs.
+  var startRow = headerRow + 1;
+  var scanRow = startRow;
+  while (scanRow <= sheet.getLastRow() && sheet.getRange(scanRow, 5).getValue() !== '') {
+    scanRow++;
+  }
+  startRow = scanRow;
+
+  // Transform entries into the 6-column structure expected by the technician
+  // template (E → J). We show Business Unit + Item Name together in column F
+  // similar to PBP to keep columns concise.
+  var data = /** @type {any[][]} */ ([]);
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i];
+    var combinedBI = '';
+    if (e.businessUnit && e.itemName) combinedBI = e.businessUnit + ' – ' + e.itemName;
+    else if (e.businessUnit) combinedBI = e.businessUnit;
+    else if (e.itemName) combinedBI = e.itemName;
+
+    data.push([
+      e.customer,                   // Column E – Customer Name
+      combinedBI,                   // Column F – Business Unit / Item
+      Modules.Bonus.Utilities.formatDateSafe(e.date),       // Column G – Completion Date
+      e.amount,                     // Column H – Bonus Amount
+      (e.soldBy ? ('Sold By: ' + e.soldBy) : ''), // Column I – Sold By note
+      'Bonus'                       // Column J – Type label
+    ]);
+  }
+
+  sheet.getRange(startRow, 5, data.length, 6).setValues(data);
+  sheet.getRange(startRow, 8, data.length, 1).setNumberFormat('$#,##0.00');
   
-  return { 
-    success: successCount, 
-    errors: errorCount, 
-    totalAmount: totalAmount 
-  };
-}; 
+  console.log("Wrote " + data.length + " bonus entries to " + sheet.getName() + " starting at row " + startRow);
+};

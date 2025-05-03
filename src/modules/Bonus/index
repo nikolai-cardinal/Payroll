@@ -1,97 +1,214 @@
-// Namespace stub – Bonus
+/**
+ * Cardinal Payroll System - Bonus Module
+ * 
+ * This module handles bonus calculations and updates for technicians.
+ * It exports functionality for processing bonuses for individual technicians
+ * and for batch processing of all eligible technicians.
+ * 
+ * Dependencies:
+ * - src/modules/Bonus/BonusUtilities - Helper utilities for bonus processing
+ * - src/modules/Bonus/BonusMain - Core bonus processing logic
+ * - src/core/Constants - System constants (sheet names, menu labels)
+ * - src/core/Utilities - Core utility functions
+ */
+
+// Establish namespace
 var Modules = Modules || {};
 Modules.Bonus = Modules.Bonus || {};
 
-/**
- * Adds menu entries specific to the Bonus module.
- * @param {GoogleAppsScript.Base.Ui} ui The UI environment.
- */
-Modules.Bonus.addMenuEntries = function(ui) {
-  Logger.log('Bonus: addMenuEntries called');
+// Bridge to connect with SpiffBonus module 
+// This ensures our logic is used when the system calls Modules.SpiffBonus.processAll()
+Modules.SpiffBonus = Modules.SpiffBonus || {};
+Modules.SpiffBonus.processAll = function() {
+  console.log("SpiffBonus.processAll bridge called - delegating to Bonus.processAllBonus");
+  return Modules.Bonus.processAllBonus(false);
+};
+
+// Ensure other SpiffBonus methods exist to prevent errors
+Modules.SpiffBonus.processForTechnician = function(techName) {
+  console.log("SpiffBonus.processForTechnician bridge called - delegating to Bonus.processTechnicianBonus");
+  return Modules.Bonus.processTechnicianBonus(techName);
 };
 
 /**
- * Handles edit events relevant to the Bonus module.
- * Ignores any triggers from Column G in the Main sheet.
- * @param {GoogleAppsScript.Events.SheetsOnEdit} e The edit event object.
- * @return {Object|null} Optional result or status.
+ * Process bonus for a specific technician. Called when 'Bonus' is selected
+ * in the Action column of the Main sheet.
+ * 
+ * @param {string} technicianName - The name of the technician
+ * @param {number} actionRow - The row in the Main sheet where the action was triggered
+ * @param {number} actionColumn - The column in the Main sheet where the action was triggered
+ * @return {number} The total bonus amount processed
  */
-Modules.Bonus.handleEdit = function(e) {
-  // Skip processing if edit is in Column G of Main sheet
-  if (e && e.range) {
-    var sheet = e.range.getSheet();
-    if (sheet.getName() === Modules.Constants.SHEET.MAIN && e.range.getColumn() === 7) {
-      Logger.log('Bonus: Ignoring trigger from Column G in Main sheet as requested');
-      return null;
+Modules.Bonus.processTechnicianBonus = function(technicianName, actionRow, actionColumn) {
+  if (!technicianName) {
+    console.error("Cannot process bonus: No technician name provided");
+    return 0;
+  }
+  
+  // Delegate to the main implementation
+  return Modules.Bonus.Main.updateForTechnician(technicianName, actionRow, actionColumn, false);
+};
+
+/**
+ * Process bonus for all eligible technicians.
+ * Used for batch processing via menu or script trigger.
+ * 
+ * @param {boolean} [suppressPopup=false] - Whether to suppress completion popup
+ * @return {Object} Result object with success status and message
+ */
+Modules.Bonus.processAllBonus = function(suppressPopup) {
+  return Modules.Bonus.Main.runBatch(suppressPopup || false);
+};
+
+/**
+ * Add menu entries for the Bonus module to the given menu builder.
+ * Following the pattern from PBP module with constants support.
+ * 
+ * @param {object} menu - The menu builder object
+ */
+Modules.Bonus.addMenuEntries = function(menu) {
+  if (!menu) return;
+  
+  var menuLabel = "Process All Bonus";
+  
+  // Use constant if available - following PBP module pattern
+  if (typeof Modules !== 'undefined' && 
+      typeof Modules.Constants !== 'undefined' && 
+      typeof Modules.Constants.MENU !== 'undefined') {
+    // First priority: specific constant for bonus
+    if (typeof Modules.Constants.MENU.PROCESS_ALL_BONUS !== 'undefined') {
+      menuLabel = Modules.Constants.MENU.PROCESS_ALL_BONUS;
+    } 
+    // Second priority: reuse PBP menu constant if available
+    else if (typeof Modules.Constants.MENU.PROCESS_ALL_PBP !== 'undefined') {
+      menuLabel = Modules.Constants.MENU.PROCESS_ALL_PBP.replace('PBP', 'Bonus');
     }
   }
   
-  Logger.log('Bonus: handleEdit called for range ' + (e && e.range ? e.range.getA1Notation() : 'N/A'));
-  return null;
+  menu.addItem(menuLabel, 'Modules.Bonus.processAllBonus');
 };
 
 /**
- * Processes all relevant Bonus entries for all technicians.
+ * Handles a specific action from the Action dropdown in the Main sheet.
+ * Called by the central action handler when 'Bonus' is selected.
+ * 
+ * @param {string} action - The selected action (should be 'Bonus')
+ * @param {string} technicianName - The technician's name
+ * @param {number} row - The row where the action was triggered
+ * @param {number} column - The column where the action was triggered
+ * @return {boolean} true if action was handled, false otherwise
  */
-Modules.Bonus.processAll = function() {
-  Logger.log('Bonus: processAll called');
-  return Modules.Bonus.Main.processAllBonus();
-};
-
-/**
- * Processes Bonus entries for a specific technician.
- * @param {string} technicianName The name of the technician to process.
- * @param {number} actionRow - The row in the Main sheet where the action was triggered.
- * @param {number} actionColumn - The column in the Main sheet where the action was triggered.
- * @param {Object} [options={}] Optional configuration object.
- * @return {object|null} Result object with success information or null on failure.
- */
-Modules.Bonus.processForTechnician = function(technicianName, actionRow, actionColumn, options = {}) {
-  if (!technicianName) return null;
+Modules.Bonus.handleAction = function(action, technicianName, row, column) {
+  if (!action || !technicianName) return false;
   
-  Logger.log('Bonus: Processing for technician ' + technicianName);
-  return Modules.Bonus.Main.processBonus(technicianName, actionRow, actionColumn, options);
-};
-
-/**
- * Updates the top summary section in a technician's sheet with Bonus information.
- * @param {Sheet} techSheet - The technician's sheet.
- * @param {number} totalAmount - The total bonus amount.
- * @param {number} entryCount - The number of bonus entries.
- */
-Modules.Bonus.updateTopSummary = function(techSheet, totalAmount, entryCount) {
-  Modules.Bonus.Utilities.updateTopSummaryBonus(techSheet, totalAmount, entryCount);
-};
-
-/**
- * Clears the Bonus data section in a technician's sheet.
- * @param {Sheet} techSheet - The technician's sheet.
- * @param {Array} [newData] - Optional array of new data entries.
- * @return {number} Number of rows cleared.
- */
-Modules.Bonus.clearDataSection = function(techSheet, newData) {
-  return Modules.Bonus.Utilities.clearBonusDataSection(techSheet, newData);
-};
-
-/**
- * Writes Bonus data to a technician's sheet.
- * @param {Sheet} techSheet - The technician's sheet.
- * @param {number} headerRow - The row containing the section header.
- * @param {Array} customerData - Array of customer data entries.
- */
-Modules.Bonus.writeDataToSheet = function(techSheet, headerRow, customerData) {
-  Modules.Bonus.Utilities.writeBonusDataToSheet(techSheet, headerRow, customerData);
-};
-
-// Initialize Legacy compatibility module
-Modules.Bonus.initLegacy = function() {
-  // Load the legacy module - should be automatically loaded by Apps Script
-  console.log('Initializing Bonus Legacy compatibility layer');
+  var bonusAction = "Bonus";
   
-  // Forward legacy functions to make them available through the Bonus namespace
-  Modules.Bonus.updateSpiffBonusWithCustomersList = updateSpiffBonusWithCustomersList;
-  Modules.Bonus.processAllSpiffBonusWithCustomers = processAllSpiffBonusWithCustomers;
-  Modules.Bonus.updateSpiffBonusWithCustomersListAll = updateSpiffBonusWithCustomersListAll;
-  Modules.Bonus.processSpiffAndBonus = processSpiffAndBonus;
-  Modules.Bonus.processSpiffBonusAll = processSpiffBonusAll;
-}; 
+  // Use constant if available (similar to PBP)
+  if (typeof Modules !== 'undefined' && 
+      typeof Modules.Constants !== 'undefined' && 
+      typeof Modules.Constants.ACTION !== 'undefined' &&
+      typeof Modules.Constants.ACTION.BONUS !== 'undefined') {
+    bonusAction = Modules.Constants.ACTION.BONUS;
+  }
+  
+  if (action.trim().toLowerCase() === bonusAction.toLowerCase()) {
+    Modules.Bonus.processTechnicianBonus(technicianName, row, column);
+    return true;
+  }
+  
+  return false;
+};
+
+/**
+ * Checks if a technician is eligible for bonus by verifying they are not Class 1.
+ * 
+ * @param {string} technicianName - The name of the technician to check
+ * @return {boolean} True if eligible, false if not eligible (is Class 1)
+ */
+Modules.Bonus.isEligibleForBonus = function(technicianName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var mainSheet = ss.getSheetByName(
+    typeof Modules !== 'undefined' && Modules.Constants && Modules.Constants.SHEET 
+    ? Modules.Constants.SHEET.MAIN 
+    : 'Main'
+  );
+  
+  if (!mainSheet) {
+    console.error("Cannot check bonus eligibility: Main sheet not found");
+    return false;
+  }
+  
+  // Technician is eligible if they are NOT Class 1
+  return !Modules.Bonus.Utilities.isTechnicianClass1(technicianName, mainSheet);
+};
+
+// Create backward compatibility function aliases
+// These will be called by the old code and delegate to the new structure
+function processBonusForTechnician(technicianName, actionRow, actionColumn) {
+  return Modules.Bonus.processTechnicianBonus(technicianName, actionRow, actionColumn);
+}
+
+function processAllBonuses(suppressPopup) {
+  return Modules.Bonus.processAllBonus(suppressPopup);
+}
+
+/**
+ * Compatibility function for updateSpiffBonusWithCustomersList
+ * Used by other modules or external calls
+ */
+function updateSpiffBonusWithCustomersList(technicianName, actionRow, actionColumn) {
+  console.log("updateSpiffBonusWithCustomersList called for: " + technicianName);
+  return Modules.Bonus.processTechnicianBonus(technicianName, actionRow, actionColumn);
+}
+
+/**
+ * Compatibility function for updateSpiffBonusWithCustomersListAll
+ * Used by batch processing
+ */
+function updateSpiffBonusWithCustomersListAll(technicianName) {
+  if (typeof Modules !== 'undefined' && 
+      typeof Modules.Bonus !== 'undefined' && 
+      typeof Modules.Bonus.Main !== 'undefined') {
+    
+    try {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var bonusSheet = ss.getSheetByName('Spiff/Bonus');
+      var techSheet = ss.getSheetByName(technicianName);
+      
+      if (!techSheet || !bonusSheet) {
+        console.error("Required sheets not found for " + technicianName);
+        return { count: 0, amount: 0 };
+      }
+      
+      // Call the main implementation
+      return Modules.Bonus.Main.processSpiffAndBonusData(techSheet, technicianName, bonusSheet);
+    } catch (error) {
+      console.error("Error in global updateSpiffBonusWithCustomersListAll: " + error.message);
+      return { count: 0, amount: 0 };
+    }
+  } else {
+    console.error("Modules.Bonus.Main not available");
+    return { count: 0, amount: 0 };
+  }
+}
+
+/**
+ * Compatibility function for processSpiffAndBonusData
+ * Used by other processing functions
+ */
+function processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet) {
+  if (typeof Modules !== 'undefined' && 
+      typeof Modules.Bonus !== 'undefined' && 
+      typeof Modules.Bonus.Main !== 'undefined' &&
+      typeof Modules.Bonus.Main.processSpiffAndBonusData === 'function') {
+    return Modules.Bonus.Main.processSpiffAndBonusData(techSheet, technicianName, spiffBonusSheet);
+  } else {
+    console.error("Modules.Bonus.Main.processSpiffAndBonusData not available");
+    return { totalAmount: 0, entryCount: 0, entries: [] };
+  }
+}
+
+// Expose module for testing and debugging
+if (typeof module !== 'undefined') {
+  module.exports = Modules.Bonus;
+}

@@ -1,424 +1,334 @@
 /**
- * Payroll System - Bonus Utilities
- * Contains utility functions for the Bonus module.
+ * Cardinal Payroll System - Bonus Utilities
+ * Contains helper functions for the Bonus module.
+ * 
+ * Dependencies:
+ * - src/core/Constants (for sheet names)
+ * - src/core/Utilities (for sheet mapping)
  */
 
-// Setup namespace
+// Namespace for Bonus module
 var Modules = Modules || {};
 Modules.Bonus = Modules.Bonus || {};
 Modules.Bonus.Utilities = Modules.Bonus.Utilities || {};
 
 /**
- * Returns a standard mapping object for columns in the "Main" sheet.
- * @return {Object} An object with keys for common fields and their 1-based column indices.
+ * Builds a mapping of header → column index (1-based) for the Spiff/Bonus sheet.
+ * Falls back to fixed indices when a header cannot be found.
+ *
+ * @param {Sheet} sheet - The Spiff/Bonus sheet object.
+ * @return {Object<string,number>} Map of lowercase keys to 1-based indices.
  */
-Modules.Bonus.Utilities.getRatesSheetMapping = function() {
-  return {
-    nameColumn: 1,       // Column A: Technician Name
-    positionColumn: 3,   // Column C: Position
-    actionColumn: 7,     // Column G: Action Dropdown
-    dataStartRow: 3      // Row number where the actual technician data begins
+Modules.Bonus.Utilities.getHeaderMap = function(sheet) {
+  var map = {
+    customerName: 2,   // B
+    businessUnit: 3,   // C
+    completionDate: 4, // D
+    invoiceNumber: 5,  // E
+    soldBy: 6,         // F – Sold By Technician
+    technician: 7,     // G – Primary Technician
+    assignedTechs: 8,  // H – Assigned Technicians (comma-separated)
+    bonusAmount: 9,    // I – $ Bonus
+    crossSaleGroup: 10, // J - Cross Sale Group
+    itemName: 11,      // K - Item Name
+    invoiceTotal: 12,  // L - Invoice Total
+    paysTechSpecific: 13 // M - Pays Tech Specific Bonus
   };
-};
 
-/**
- * Gets a mapping of column headers to column indices for the Spiff/Bonus sheet.
- * @param {Sheet} sheet - The Spiff/Bonus sheet.
- * @return {Object} Map of column names to indices.
- */
-Modules.Bonus.Utilities.getBonusHeaderMap = function(sheet) {
-  if (!sheet) return null;
-  
+  if (!sheet) return map;
   try {
-    // Get the header row
     var headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    var headerMap = {};
-    
-    // Map column names to indices (1-indexed)
-    for (var i = 0; i < headerRow.length; i++) {
-      var header = headerRow[i]?.toString().trim().toLowerCase() || "";
+    headerRow.forEach(function(h, idx) {
+      if (!h) return;
+      var key = String(h).trim().toLowerCase();
+      if (key === 'customer name')       map.customerName = idx + 1;
+      else if (key === 'business unit')  map.businessUnit = idx + 1;
+      else if (key === 'completion date')map.completionDate = idx + 1;
+      else if (key === 'invoice number') map.invoiceNumber = idx + 1;
+      else if (key === 'sold by technician' || key === 'sold by') map.soldBy = idx + 1;
+      else if (key === 'technician')      map.technician = idx + 1;
+      else if (key.indexOf('assigned') === 0) map.assignedTechs = idx + 1;
+      else if (key === 'cross sale group') map.crossSaleGroup = idx + 1;
+      else if (key === 'item name')       map.itemName = idx + 1;
+      else if (key.indexOf('invoice total') === 0) map.invoiceTotal = idx + 1;
+      else if (key.indexOf('$ bonus') !== -1 || key === '$ bonus') map.bonusAmount = idx + 1;
+      else if (key === 'pays tech specific bonus') map.paysTechSpecific = idx + 1;
       
-      // Map standard header names and common variations
-      if (header.includes("customer") || header === "cust name" || header === "customer name") {
-        headerMap.customerName = i + 1;
-      }
-      else if (header.includes("business unit") || header === "bu") {
-        headerMap.jobBusinessUnit = i + 1;
-      }
-      else if (header.includes("completion") || header === "date" || header === "completed") {
-        headerMap.completionDate = i + 1;
-      }
-      else if (header.includes("sold by") || header === "sales rep") {
-        headerMap.soldBy = i + 1;
-      }
-      else if (header.includes("assigned") || header === "tech" || header === "technician") {
-        headerMap.assignedTechnician = i + 1;
-      }
-      else if (header.includes("bonus") || header.includes("spiff") || header.includes("commis")) {
-        headerMap.bonusAmount = i + 1;
-      }
-      else if (header.includes("item") || header.includes("description") || header.includes("notes")) {
-        headerMap.itemName = i + 1;
-      }
-    }
-    
-    return headerMap;
+      // Log header mapping for debugging
+      console.log("Header [" + (idx+1) + "]: '" + key + "' -> " + 
+                (key === 'pays tech specific bonus' ? "paysTechSpecific" : 
+                 key === 'customer name' ? "customerName" : 
+                 key === '$ bonus' || key.indexOf('$ bonus') !== -1 ? "bonusAmount" : 
+                 "other column"));
+    });
+    console.log("Spiff/Bonus sheet header mapping: " + JSON.stringify(map));
   } catch (e) {
-    console.error("Error getting header map: " + e.message);
-    return null;
+    console.error("Error mapping Spiff/Bonus headers: " + e.message);
   }
+  return map;
 };
 
 /**
- * Checks if a technician is Class 1 by examining the position column in the Main sheet.
- * @param {string} technicianName - The name of the technician to check.
- * @param {Sheet} ratesSheet - The Main sheet.
- * @return {boolean} True if the technician is Class 1, false otherwise.
+ * Splits a string of technicians (comma / & / and) into a tidy array
+ * 
+ * @param {string} str - The technician names string to parse
+ * @return {Array<string>} Array of technician names
+ */
+Modules.Bonus.Utilities.parseTechnicianNames = function(str) {
+  if (!str) return [];
+  return String(str)
+    .split(/[,\n&]+/)
+    .map(function(s) { return s.trim(); })
+    .filter(Boolean);
+};
+
+/**
+ * Finds the first row in column A matching the given label (case-insensitive).
+ * Returns the 1-based row index or ‑1 when not found.
+ * 
+ * @param {Sheet} sheet - The sheet to search in
+ * @param {string} label - The label to find
+ * @return {number} Row index (1-based) or -1 if not found
+ */
+Modules.Bonus.Utilities.findRowByColA = function(sheet, label) {
+  if (!sheet) return -1;
+  var last = sheet.getLastRow();
+  var colA = sheet.getRange(1, 1, last, 1).getValues();
+  var target = String(label).toLowerCase();
+  for (var r = 0; r < colA.length; r++) {
+    if (String(colA[r][0]).trim().toLowerCase() === target)
+      return r + 1;
+  }
+  return -1;
+};
+
+/**
+ * Insert or delete rows so that exactly `desired` blank rows exist starting at `startRow`.
+ * 
+ * @param {Sheet} sheet - The sheet to modify
+ * @param {number} startRow - The starting row
+ * @param {number} current - Current number of rows
+ * @param {number} desired - Desired number of rows
+ */
+Modules.Bonus.Utilities.adjustRows = function(sheet, startRow, current, desired) {
+  if (desired === current) return;
+  if (desired > current) sheet.insertRowsAfter(startRow + current - 1, desired - current);
+  else                   sheet.deleteRows(startRow, current - desired);
+};
+
+/**
+ * Checks if a technician is Class 1 (ineligible for bonus).
+ * 
+ * @param {string} technicianName - The name of the technician
+ * @param {Sheet} ratesSheet - The Main sheet with technician data
+ * @return {boolean} True if technician is Class 1, false otherwise
  */
 Modules.Bonus.Utilities.isTechnicianClass1 = function(technicianName, ratesSheet) {
+  // Check if Core Utilities module has the eligibility function
+  if (typeof Modules !== 'undefined' && 
+      typeof Modules.Utilities !== 'undefined' && 
+      typeof Modules.Utilities.isTechnicianEligibleForBonus === 'function') {
+    // Invert the result since isTechnicianEligibleForBonus returns true for eligible (non-Class1)
+    // and we want to return true for Class1 (ineligible)
+    return !Modules.Utilities.isTechnicianEligibleForBonus(technicianName, ratesSheet);
+  }
+  
+  // If core function isn't available, use the original implementation
   if (!technicianName || !ratesSheet) return false;
   
   try {
-    // Get mapping to find technician row
-    var ratesMapping = Modules.Bonus.Utilities.getRatesSheetMapping();
+    // Try to use the Core Utilities module for finding column indices
+    var positionColumn = 4; // Default position column if Utilities not available
+    var nameColumn = 1;     // Default name column
+    var dataStartRow = 3;   // Default data start row
     
-    // Find the technician row
-    var techRow = Modules.Bonus.Utilities.findRowWithText(ratesSheet, technicianName, ratesMapping.nameColumn, ratesMapping.dataStartRow);
-    if (techRow <= 0) {
-      console.warn(`isTechnicianClass1: Could not find row for technician ${technicianName}`);
+    // If Core Utilities module is available, use it for consistent sheet mapping
+    if (typeof Modules !== 'undefined' && 
+        typeof Modules.Utilities !== 'undefined' && 
+        typeof Modules.Utilities.getRatesSheetMapping === 'function') {
+      var mapping = Modules.Utilities.getRatesSheetMapping();
+      positionColumn = mapping.positionColumn;
+      nameColumn = mapping.nameColumn;
+      dataStartRow = mapping.dataStartRow;
+    }
+    
+    // Find the technician row using the correct mapping
+    var techData = ratesSheet.getDataRange().getValues();
+    var techRow = -1;
+    
+    // Search starting at the actual data row
+    for (var i = Math.max(0, dataStartRow - 1); i < techData.length; i++) {
+      var currentName = techData[i][nameColumn - 1] || "";
+      if (typeof currentName === 'string' && 
+          currentName.trim().toLowerCase() === technicianName.toLowerCase()) {
+        techRow = i;
+        break;
+      }
+    }
+    
+    if (techRow === -1) {
+      console.log("Technician not found in rates sheet: " + technicianName);
+      return false; // Technician not found
+    }
+    
+    // Check position - ensure index is valid
+    if (positionColumn - 1 >= techData[techRow].length) {
+      console.log("Position column index out of bounds for " + technicianName);
       return false;
     }
     
-    // Get the value in position column
-    var positionValue = ratesSheet.getRange(techRow, ratesMapping.positionColumn).getValue();
+    var position = techData[techRow][positionColumn - 1];
+    if (!position) return false;
     
-    // Check if it contains "Class 1" (case insensitive)
-    if (positionValue && typeof positionValue === 'string' && 
-        positionValue.toString().toLowerCase().includes('class 1')) {
-      console.log(`Technician ${technicianName} is Class 1 - will skip Bonus processing`);
-      return true;
+    // Check if position is C1 or CLASS 1
+    var positionStr = String(position).trim().toUpperCase();
+    var isClass1 = positionStr === "C1" || positionStr === "CLASS 1";
+    
+    if (isClass1) {
+      console.log(technicianName + " is Class 1, position: " + positionStr);
     }
     
-    return false;
+    return isClass1;
   } catch (e) {
-    console.error(`Error in isTechnicianClass1 for ${technicianName}: ${e.message}`);
+    console.error("Error checking if technician is Class 1: " + e.message + " / " + e.stack);
     return false; // Default to not Class 1 in case of error
   }
 };
 
 /**
- * Finds a row containing the specified text.
- * @param {Sheet} sheet - The sheet to search in.
- * @param {string} textToFind - The text to find.
- * @param {number} column - The 1-based column index to search in.
- * @param {number} startRow - The 1-based row index to start searching from.
- * @param {number} endRow - Optional end row for the search (defaults to last row).
- * @param {boolean} allowPartialMatch - Whether to allow partial matches.
- * @return {number} The 1-based row index where the text was found, or -1 if not found.
+ * Clears the data rows in the Bonus section of a technician sheet.
+ * Only clears rows where Type column (J) contains 'Bonus'.
+ * Similar to the clearSpiffDataSection function in PBP module.
+ *
+ * @param {Sheet} sheet - The technician sheet to clear
+ * @return {number} The number of rows cleared
  */
-Modules.Bonus.Utilities.findRowWithText = function(sheet, textToFind, column, startRow, endRow, allowPartialMatch) {
-  if (!sheet || !textToFind || !column || column < 1) {
-    console.error("findRowWithText: Invalid parameters");
-    return -1;
-  }
-  
-  var begin = startRow || 1;
-  var maxRow = endRow || sheet.getLastRow();
-  var isPartialMatch = allowPartialMatch || false;
-  
-  if (begin > maxRow) {
-    console.log(`findRowWithText: Start row (${begin}) is after end row (${maxRow})`);
-    return -1;
-  }
-  
-  // Optimize by getting values in a batch
-  var numRowsToSearch = maxRow - begin + 1;
-  if (numRowsToSearch <= 0) return -1;
-  
-  try {
-    var range = sheet.getRange(begin, column, numRowsToSearch, 1);
-    var values = range.getValues();
-    var searchTextLower = textToFind.toString().trim().toLowerCase();
-    
-    for (var i = 0; i < values.length; i++) {
-      var cellValue = values[i][0];
-      if (cellValue) {
-        var cellLower = cellValue.toString().trim().toLowerCase();
-        
-        if ((isPartialMatch && cellLower.includes(searchTextLower)) || 
-            (!isPartialMatch && cellLower === searchTextLower)) {
-          return begin + i; // Return the 1-based row index
-        }
-      }
-    }
-  } catch (e) {
-    console.error(`findRowWithText: Error getting range or values: ${e.message}`);
-  }
-  
-  return -1; // Not found
-};
-
-/**
- * Finds the row index of the Bonus data section in a technician's sheet.
- * @param {Sheet} sheet - The technician's sheet.
- * @return {number} The 1-based row index of the section header, or -1 if not found.
- */
-Modules.Bonus.Utilities.findBonusDataSection = function(sheet) {
-  if (!sheet) return -1;
-  
-  const possibleHeaders = [
-    "Bonus Section", 
-    "Bonus Data", 
-    "Bonuses", 
-    "Spiffs", 
-    "Spiff/Bonus", 
-    "Spiff Data",
-    "Commissions"
-  ];
-  
-  // Try to find any of the possible headers in Column A
-  for (let i = 0; i < possibleHeaders.length; i++) {
-    const row = Modules.Bonus.Utilities.findRowWithText(
-      sheet, possibleHeaders[i], 1, 1, null, true
-    );
-    if (row > 0) return row;
-  }
-  
-  // Fallback to searching for common headers in other columns
-  for (let i = 0; i < possibleHeaders.length; i++) {
-    for (let col = 2; col <= 5; col++) {
-      const row = Modules.Bonus.Utilities.findRowWithText(
-        sheet, possibleHeaders[i], col, 1, null, true
-      );
-      if (row > 0) return row;
-    }
-  }
-  
-  return -1;
-};
-
-/**
- * Parses a date value into a formatted string.
- * @param {*} dateValue - The date to format (Date object, string, etc.)
- * @param {string} format - The format pattern to use.
- * @param {string} timezone - The timezone to use.
- * @return {string} The formatted date string.
- */
-Modules.Bonus.Utilities.formatDate = function(dateValue, format, timezone) {
-  if (!dateValue) return "";
-  
-  var dateObj = Modules.Bonus.Utilities.tryParseDate(dateValue);
-  if (!dateObj) return dateValue.toString(); // Return original if parsing fails
-  
-  var fmt = format || 'MM/dd/yyyy';
-  var tz = timezone || Session.getScriptTimeZone() || 'America/New_York';
-  
-  try {
-    return Utilities.formatDate(dateObj, tz, fmt);
-  } catch (e) {
-    console.error("Error formatting date: " + e.message);
-    return dateValue.toString(); // Fallback to string representation
-  }
-};
-
-/**
- * Attempts to parse a value into a valid Date object.
- * @param {*} input - The value to parse.
- * @return {Date|null} A valid Date object if parsing succeeds, otherwise null.
- */
-Modules.Bonus.Utilities.tryParseDate = function(input) {
-  if (!input) return null;
-  
-  // If it's already a valid Date object
-  if (input instanceof Date && !isNaN(input.getTime())) {
-    return input;
-  }
-  
-  try {
-    // Try direct parsing
-    var d = new Date(input);
-    if (!isNaN(d.getTime())) return d;
-    
-    // Try common spreadsheet format (e.g., M/D/YYYY)
-    if (typeof input === 'string') {
-      var parts = input.split(/[/\-]/);
-      if (parts.length === 3) {
-        var year = parseInt(parts[2], 10);
-        var month = parseInt(parts[0], 10);
-        var day = parseInt(parts[1], 10);
-        
-        if (year > 1000 && year < 3000 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-          d = new Date(year, month - 1, day);
-          if (!isNaN(d.getTime()) && d.getFullYear() === year && (d.getMonth() + 1) === month && d.getDate() === day) {
-            return d;
-          }
-        }
-      }
-    }
-  } catch(e) {
-    console.log(`tryParseDate: Error parsing input '${input}': ${e.message}`);
-  }
-  
-  return null;
-};
-
-/**
- * Clears the Bonus data section in a technician's sheet.
- * @param {Sheet} sheet - The technician's sheet.
- * @param {Array} newData - Optional array of new data entries.
- * @return {number} Number of rows cleared.
- */
-Modules.Bonus.Utilities.clearBonusDataSection = function(sheet, newData) {
+Modules.Bonus.Utilities.clearBonusDataSection = function(sheet) {
   if (!sheet) return 0;
   
   try {
-    // Find the section header row
-    var sectionHeaderRow = Modules.Bonus.Utilities.findBonusDataSection(sheet);
-    if (sectionHeaderRow <= 0) return 0;
+    // Find rows that contain "Bonus" in column J (Type)
+    var lastRow = sheet.getLastRow();
+    var typeColumn = 10; // Column J
+    var rowsCleared = 0;
     
-    // Look for "Total" row after the data
-    var totalRowOffset = 0;
-    var searchLimit = Math.min(sectionHeaderRow + 50, sheet.getLastRow());
-    for (var r = sectionHeaderRow + 1; r <= searchLimit; r++) {
-      var value = sheet.getRange(r, 1).getValue();
-      if (value && typeof value === 'string' && 
-          value.toString().toLowerCase().includes('total')) {
-        totalRowOffset = r - sectionHeaderRow;
-        break;
+    if (lastRow < 1 || sheet.getLastColumn() < typeColumn) {
+      return 0;
+    }
+    
+    // Get all values in column J
+    var typeValues = sheet.getRange(1, typeColumn, lastRow, 1).getValues();
+    
+    // Clear rows with "Bonus" in column J (only columns E-J)
+    for (var i = 0; i < typeValues.length; i++) {
+      var cellValue = typeValues[i][0];
+      if (cellValue && typeof cellValue === 'string' && 
+          cellValue.toString().trim().toLowerCase() === "bonus") {
+        var row = i + 1; // Convert to 1-based row index
+        sheet.getRange(row, 5, 1, 6).clearContent(); // Clear columns E-J (5-10)
+        rowsCleared++;
       }
     }
     
-    // If no total row found, find the start of the next section
-    if (totalRowOffset === 0) {
-      for (var r = sectionHeaderRow + 1; r <= searchLimit; r++) {
-        // Check for the next section header (bold text in column A)
-        var range = sheet.getRange(r, 1);
-        var value = range.getValue();
-        if (value && typeof value === 'string' && value.trim() !== "" && range.getFontWeight() === "bold") {
-          totalRowOffset = r - sectionHeaderRow - 1;
-          break;
-        }
-      }
-    }
-    
-    // If we still don't have a section end, use a reasonable default
-    if (totalRowOffset === 0) {
-      totalRowOffset = Math.min(10, sheet.getLastRow() - sectionHeaderRow);
-    }
-    
-    // Determine how many rows we need
-    var rowsNeeded = (newData && newData.length > 0) ? newData.length + 2 : 2; // +2 for header and total
-    
-    // Clear the values in the existing section
-    var rangeToClear = sheet.getRange(
-      sectionHeaderRow + 1, 
-      1, 
-      totalRowOffset - 1, 
-      10 // Clear 10 columns to be safe
-    );
-    
-    rangeToClear.clearContent();
-    
-    // Return how many rows we cleared
-    return totalRowOffset - 1;
+    console.log("Cleared " + rowsCleared + " bonus rows in " + sheet.getName());
+    return rowsCleared;
   } catch (e) {
-    console.error("Error clearing Bonus section: " + e.message);
+    console.error("Error clearing bonus data section: " + e.message);
     return 0;
   }
 };
 
 /**
- * Updates the top summary section in a technician's sheet with Bonus information.
- * @param {Sheet} techSheet - The technician's sheet.
- * @param {number} totalAmount - The total bonus amount.
- * @param {number} entryCount - The number of bonus entries.
+ * Updates the top summary section ('Bonus') with amount and count.
+ * Similar to updateTopSummaryInstallPay in PBP module.
+ *
+ * @param {Sheet} sheet - The technician sheet to update
+ * @param {number} amount - The total bonus amount
+ * @param {number} count - The number of bonus entries
  */
-Modules.Bonus.Utilities.updateTopSummaryBonus = function(techSheet, totalAmount, entryCount) {
-  if (!techSheet) return;
+Modules.Bonus.Utilities.updateTopSummaryBonus = function(sheet, amount, count) {
+  if (!sheet) return;
   
+  // Row 11 is the designated "Total Spiff" / Bonus summary row per Technician_Sheet_Mapping.md
+  var summaryRow = 11;
   try {
-    // Find the "Spiff Pay" or "Bonus" cell in the top section (typically column A, rows 1-15)
-    var summaryLabelRow = -1;
-    var searchRange = techSheet.getRange(1, 1, 15, 1);
-    var searchValues = searchRange.getValues();
-    
-    for (var i = 0; i < searchValues.length; i++) {
-      var cellValue = searchValues[i][0];
-      if (cellValue && typeof cellValue === 'string') {
-        var lowerValue = cellValue.toString().toLowerCase();
-        if (lowerValue.includes("spiff") || lowerValue.includes("bonus")) {
-          summaryLabelRow = i + 1; // 1-based row index
-          break;
-        }
-      }
-    }
-    
-    if (summaryLabelRow <= 0) {
-      console.log("Could not find Bonus summary row in top section");
-      return;
-    }
-    
-    // Update the amount cell (typically in column B)
-    techSheet.getRange(summaryLabelRow, 2).setValue(totalAmount);
-    
-    console.log(`Updated top summary Bonus amount: $${totalAmount} (${entryCount} entries)`);
+    // Primary write – B11 for count, C11 for amount
+    sheet.getRange(summaryRow, 2).setValue(count); // B11
+    sheet.getRange(summaryRow, 3).setValue(amount).setNumberFormat('$#,##0.00'); // C11
+    console.log("Updated Bonus summary in B11/C11 with count: " + count + ", amount: $" + amount.toFixed(2));
   } catch (e) {
-    console.error("Error updating Bonus summary: " + e.message);
+    // If the direct write fails (e.g., row structure is different), fall back to searching labels
+    console.error("Primary update in B11/C11 failed: " + e.message + ". Falling back to label search.");
+    try {
+      // Try to locate row labelled "Total Spiff" first, then "Bonus"
+      var bonusRow = Modules.Bonus.Utilities.findRowByColA(sheet, 'Total Spiff');
+      if (bonusRow <= 0) bonusRow = Modules.Bonus.Utilities.findRowByColA(sheet, 'Bonus');
+      if (bonusRow > 0) {
+        sheet.getRange(bonusRow, 2).setValue(count); // Col B
+        sheet.getRange(bonusRow, 3).setValue(amount).setNumberFormat('$#,##0.00'); // Col C
+        console.log("Fallback updated Bonus summary in row " + bonusRow + " with count: " + count + ", amount: $" + amount.toFixed(2));
+      } else {
+        console.log("Bonus summary row not found in sheet: " + sheet.getName());
+      }
+    } catch (fallbackErr) {
+      console.error("Fallback update also failed: " + fallbackErr.message);
+    }
   }
 };
 
 /**
- * Writes Bonus data to a technician's sheet.
- * @param {Sheet} techSheet - The technician's sheet.
- * @param {number} headerRow - The row containing the section header.
- * @param {Array} customerData - Array of customer data entries.
+ * Helper function to format dates consistently across Bonus module.
+ * Mirrors implementation removed from BonusMain.
+ *
+ * @param {Date|string|number} d - The date (or value) to format
+ * @return {string} Formatted date as MM/dd/yyyy or original value if un-parseable
  */
-Modules.Bonus.Utilities.writeBonusDataToSheet = function(techSheet, headerRow, customerData) {
-  if (!techSheet || headerRow <= 0 || !customerData) return;
-  
+Modules.Bonus.Utilities.formatDateSafe = function(d) {
   try {
-    const dataStartRow = headerRow + 1;
-    const dataCount = customerData.length;
-    let totalAmount = 0;
-    
-    // Prepare the column headers in row headerRow+1 (if data exists)
-    if (dataCount > 0) {
-      techSheet.getRange(headerRow, 1, 1, 10).setFontWeight("bold");
-      techSheet.getRange(headerRow + 1, 1, 1, 5).setValues([
-        ["Customer", "Unit", "Date", "Amount", "Notes"]
-      ]).setFontWeight("bold");
+    // If already a Date object, use directly; otherwise attempt to coerce
+    var dateObj;
+    if (d instanceof Date) {
+      dateObj = d;
+    } else if (typeof d === 'number') {
+      // Treat as Google Sheets serial date
+      dateObj = new Date(Math.round((d - 25569) * 86400000));
+    } else if (typeof d === 'string') {
+      var parsed = new Date(d);
+      if (!isNaN(parsed.getTime())) {
+        dateObj = parsed;
+      } else {
+        return String(d || '');
+      }
+    } else {
+      return String(d || '');
     }
-    
-    // Write data rows
-    if (dataCount > 0) {
-      const dataRange = techSheet.getRange(dataStartRow + 1, 1, dataCount, 5);
-      const dataValues = customerData.map(item => {
-        totalAmount += (item.commission || 0);
-        return [
-          item.customerName || "",
-          item.jobBusinessUnit || "",
-          item.completionDate || "",
-          item.commission || 0,
-          item.notes || ""
-        ];
-      });
-      
-      dataRange.setValues(dataValues);
-      
-      // Format the amount column as currency
-      techSheet.getRange(dataStartRow + 1, 4, dataCount, 1).setNumberFormat("$#,##0.00");
-      
-      // Add a total row
-      const totalRow = dataStartRow + 1 + dataCount;
-      techSheet.getRange(totalRow, 1, 1, 5).setValues([
-        ["TOTAL", "", "", totalAmount, ""]
-      ]);
-      techSheet.getRange(totalRow, 1).setFontWeight("bold");
-      techSheet.getRange(totalRow, 4).setNumberFormat("$#,##0.00").setFontWeight("bold");
-    }
-    
-    console.log(`Wrote ${dataCount} Bonus entries to technician sheet`);
+
+    // Format as MM/dd/yyyy
+    var month = (dateObj.getMonth() + 1).toString().padStart(2, '0');
+    var day = dateObj.getDate().toString().padStart(2, '0');
+    var year = dateObj.getFullYear();
+    return month + '/' + day + '/' + year;
   } catch (e) {
-    console.error("Error writing Bonus data: " + e.message);
+    console.error('formatDateSafe error: ' + e.message);
+    return String(d || '');
   }
-}; 
+};
+
+// Create legacy function aliases (if they don't already exist)
+if (typeof Bonus_getHeaderMap === 'undefined') {
+  var Bonus_getHeaderMap = Modules.Bonus.Utilities.getHeaderMap;
+}
+if (typeof Bonus_parseTechnicianNames === 'undefined') {
+  var Bonus_parseTechnicianNames = Modules.Bonus.Utilities.parseTechnicianNames;
+}
+if (typeof Bonus_findRowByColA === 'undefined') {
+  var Bonus_findRowByColA = Modules.Bonus.Utilities.findRowByColA;
+}
+if (typeof Bonus_adjustRows === 'undefined') {
+  var Bonus_adjustRows = Modules.Bonus.Utilities.adjustRows;
+}
+
+// Legacy alias (if needed by external scripts)
+if (typeof Bonus_formatDateSafe === 'undefined') {
+  var Bonus_formatDateSafe = Modules.Bonus.Utilities.formatDateSafe;
+}

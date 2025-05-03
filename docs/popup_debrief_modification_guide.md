@@ -6,7 +6,7 @@
 
 **Desired Goal:** Modify the system so that:
 1.  When the **full payroll** process is executed, only **one single, final summary pop-up** is displayed at the very end of the entire batch run. This pop-up should summarize the overall results of the batch process.
-2.  When **individual payroll stages** are run for a single technician (e.g., by selecting "PBP" or "Timesheet" from the Action column in the 'Hourly + Spiff Pay' sheet), their respective **summary pop-ups should still be displayed** as they were originally.
+2.  When **individual payroll stages** are run for a single technician (e.g., by selecting "PBP" or "Timesheet" from the Action column in the 'Main' sheet), their respective **summary pop-ups should still be displayed** as they were originally.
 
 This retains the detailed feedback for individual runs while streamlining the user experience for the full batch process.
 

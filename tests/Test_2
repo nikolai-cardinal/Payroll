@@ -1,29 +1,79 @@
+// BonusUtilities
+// Minimal helper functions shared by BonusMain – kept small and independent.
+
 /**
- * Menu
- * Adds custom menu items on spreadsheet open.
+ * Builds a mapping of header → column index (1-based) for the Spiff/Bonus sheet.
+ * Falls back to fixed indices documented in Bonus_Sheet_Structure.md when a
+ * header cannot be found.  Keeps implementation tiny.
+ *
+ * @param {Sheet} sheet  The Spiff/Bonus sheet object.
+ * @return {Object<string,number>} Map of lowercase keys to 1-based indices.
  */
-
-function onOpen() {
-  const ui = SpreadsheetApp.getUi();
-  // Main payroll utilities menu.
-  ui.createMenu('🚚 Installation Tools')
-    .addItem('Run Payroll', 'runFullPayroll')
-    .addItem('All TimeSheet', 'processAllTimesheets')
-    .addItem('All PBP', 'PBPMain_runBatch')
-    .addItem('All Yard Signs', 'YardSignMain_runBatch')
-    .addItem('All Bonus', 'Bonus_runBatch')
-    .addToUi();
-
-  // Stand-alone technician-sheet menu.
-  ui.createMenu('🗂 Technician Sheets')
-    .addItem('New Sheet', 'createNewTechnicianSheet')
-    .addItem('All New Sheets', 'createAllNewTechnicianSheets')
-    .addToUi();
-
-  // Approval Monitor menu
-  if (typeof initApprovalMonitor === 'function') {
-    try { initApprovalMonitor(); } catch (err) {
-      Logger.log('Approval Monitor init failed: ' + err);
-    }
+function Bonus_getHeaderMap(sheet) {
+    var map = {
+      customerName: 1,   // A
+      businessUnit: 2,   // B
+      completionDate: 3, // C
+      invoiceNumber: 4,  // D
+      soldBy: 5,         // E – Sold By Technician
+      technician: 6,     // F – Primary Technician
+      assignedTechs: 7,  // G – Assigned Technicians (comma-separated)
+      crossSaleGroup: 8, // H
+      itemName: 9,       // I
+      invoiceTotal: 10,  // J
+      bonusAmount: 11    // K – $ Bonus
+    };
+  
+    if (!sheet) return map;
+    try {
+      var headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      headerRow.forEach(function (h, idx) {
+        if (!h) return;
+        var key = String(h).trim().toLowerCase();
+        if (key === 'customer name')       map.customerName = idx + 1;
+        else if (key === 'business unit')  map.businessUnit = idx + 1;
+        else if (key === 'completion date')map.completionDate = idx + 1;
+        else if (key === 'invoice number') map.invoiceNumber = idx + 1;
+        else if (key === 'sold by technician' || key === 'sold by') map.soldBy = idx + 1;
+        else if (key === 'technician')      map.technician = idx + 1;
+        else if (key.indexOf('assigned') === 0) map.assignedTechs = idx + 1;
+        else if (key === 'cross sale group') map.crossSaleGroup = idx + 1;
+        else if (key === 'item name')       map.itemName = idx + 1;
+        else if (key.indexOf('invoice total') === 0) map.invoiceTotal = idx + 1;
+        else if (key.indexOf('bonus') !== -1) map.bonusAmount = idx + 1;
+      });
+    } catch (ignore) {}
+    return map;
   }
-} 
+  
+  /** Splits a string of technicians (comma / & / and) into a tidy array */
+  function Bonus_parseTechnicianNames(str) {
+    if (!str) return [];
+    return String(str)
+      .split(/[,\n&]+/)
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+  }
+  
+  /**
+   * Finds the first row in column A matching the given label (case-insensitive).
+   * Returns the 1-based row index or ‑1 when not found.
+   */
+  function Bonus_findRowByColA(sheet, label) {
+    if (!sheet) return -1;
+    var last = sheet.getLastRow();
+    var colA = sheet.getRange(1, 1, last, 1).getValues();
+    var target = String(label).toLowerCase();
+    for (var r = 0; r < colA.length; r++) {
+      if (String(colA[r][0]).trim().toLowerCase() === target)
+        return r + 1;
+    }
+    return -1;
+  }
+  
+  /** Insert or delete rows so that exactly `desired` blank rows exist starting at `startRow`. */
+  function Bonus_adjustRows(sheet, startRow, current, desired) {
+    if (desired === current) return;
+    if (desired > current) sheet.insertRowsAfter(startRow + current - 1, desired - current);
+    else                   sheet.deleteRows(startRow, current - desired);
+  }

@@ -12,15 +12,13 @@ Modules.Menu = Modules.Menu || {};
    */
   Modules.Menu.addMenuEntries = function(menu) {
     menu
-      .addItem('All Payroll', 'runFullPayroll')
+      .addItem('Payroll', 'payrollPrompt')
       .addSeparator()
-      .addItem('Individual Payroll', 'runIndividualPayroll')
-      .addSeparator()
-      .addItem('All Spiff/Bonus', 'processAllSpiffBonusWithCustomers')
-      .addItem('All PBP', 'processAllPBPGlobal')
-      .addItem('All Yard Signs', 'menuProcessAllYardSigns')
-      .addItem('All Timesheet', 'processAllTimesheets')
-      .addItem('All Lead Set', 'processAllLeadSets');
+      .addItem('Bonus', 'bonusPrompt')
+      .addItem('PBP', 'processAllPBPGlobal')
+      .addItem('Yard Signs', 'menuProcessAllYardSigns')
+      .addItem('Timesheet', 'processAllTimesheets')
+      .addItem('Lead Set', 'processAllLeadSets');
   };
 
   /**
