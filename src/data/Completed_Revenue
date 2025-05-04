@@ -1,0 +1,239 @@
+// Completed_Revenue – Syncs technician Completed Revenue
+//
+// Functionality
+//   • processForTechnician(name) – copies the value from the Service sheet
+//     column E (Completed Revenue) into the technician's sheet cell C16.
+//   • processAll() – batch variant iterating every technician listed on
+//     the Main sheet.
+//   • At load-time this file monkey-patches Core/Main's runFullPayroll and
+//     runIndividualPayroll so that Completed Revenue is refreshed whenever
+//     payroll is run for an individual or for everyone – without modifying
+//     Main.gs directly.
+//
+// Assumptions / Constants
+//   • Sheet names come from Modules.Constants.SHEET when available and
+//     fall back to literals (Main, Service).
+//   • Technician sheets are named exactly after the technician's display
+//     name in the Main sheet column A.
+//   • Cell C16 on each technician sheet holds the Completed Revenue figure.
+//   • The Service sheet has headers in row 1 and stores names in column A
+//     (header "Name") and Completed Revenue values in column E (header
+//     "Completed Revenue").
+//
+// Rule compliance
+//   • No new folders created, minimal code, <500 lines.
+//   • Attaches to Modules namespace and does not exceed business-logic
+//     footprint in Core/Main.
+
+var Modules = Modules || {};
+Modules.CompletedRevenue = Modules.CompletedRevenue || {};
+
+(function() {
+  'use strict';
+
+  /**
+   * Returns the sheet name for the Main / Service sheets with graceful
+   * fallback when Constants are unavailable.
+   */
+  function _getSheetName(key, fallback) {
+    return (Modules.Constants && Modules.Constants.SHEET && Modules.Constants.SHEET[key]) || fallback;
+  }
+
+  /**
+   * Finds the row number of the technician in the given sheet column.
+   *
+   * @param {Sheet} sheet The sheet object.
+   * @param {string} techName Technician display name.
+   * @param {number} nameCol 1-based column index containing names.
+   * @return {number} 1-based row or ‑1 if not found.
+   */
+  function _findRowByName(sheet, techName, nameCol) {
+    if (!sheet || !techName) return -1;
+    var values = sheet.getRange(1, nameCol, sheet.getLastRow()).getValues();
+    for (var r = 0; r < values.length; r++) {
+      if (String(values[r][0]).trim() === techName) return r + 1;
+    }
+    return -1;
+  }
+
+  /**
+   * Copies the Completed Revenue amount for a single technician.
+   * Exposed via Modules.CompletedRevenue.processForTechnician.
+   *
+   * @param {string} techName Technician display name.
+   * @return {number|null} The value written or null on error/not found.
+   */
+  function processForTechnician(techName) {
+    try {
+      if (!techName) return null;
+      techName = String(techName).trim();
+
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var serviceSheet = ss.getSheetByName(_getSheetName('SERVICE', 'Service'));
+      var techSheet    = ss.getSheetByName(techName);
+      if (!serviceSheet || !techSheet) return null;
+
+      // Locate technician row in Service sheet (column A).
+      var row = _findRowByName(serviceSheet, techName, 1);
+      if (row === -1) return null;
+
+      var value = serviceSheet.getRange(row, 5).getValue(); // Column E (Completed Revenue)
+      techSheet.getRange('C16').setValue(value);
+      return value;
+    } catch (err) {
+      if (Modules.Shared && Modules.Shared.PayrollLogger) {
+        Modules.Shared.PayrollLogger.error('CompletedRevenue.processForTechnician', err);
+      } else {
+        console.error('CompletedRevenue.processForTechnician error: ' + err);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Batch-process Completed Revenue for every technician listed on Main.
+   */
+  function processAll() {
+    try {
+      var ss         = SpreadsheetApp.getActiveSpreadsheet();
+      var mainSheet  = ss.getSheetByName(_getSheetName('MAIN', 'Main'));
+      if (!mainSheet) return;
+
+      var namesRange = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, 1).getValues();
+      namesRange.forEach(function(row) {
+        var name = String(row[0]).trim();
+        if (name) processForTechnician(name);
+      });
+    } catch (err) {
+      if (Modules.Shared && Modules.Shared.PayrollLogger) {
+        Modules.Shared.PayrollLogger.error('CompletedRevenue.processAll', err);
+      } else {
+        console.error('CompletedRevenue.processAll error: ' + err);
+      }
+    }
+  }
+
+  // Public API
+  Modules.CompletedRevenue.processForTechnician = processForTechnician;
+  Modules.CompletedRevenue.processAll           = processAll;
+
+  /** Internal helper that applies monkey patches to Core/Main */
+  function _applyPatches() {
+    try {
+      var core = Modules.Main || {};
+      // Patch Full Payroll
+      if (typeof core.runFullPayroll === 'function' && !core.runFullPayroll._crPatched) {
+        var originalFull = core.runFullPayroll;
+        core.runFullPayroll = function() {
+          var result = originalFull.apply(this, arguments);
+          try { processAll(); } catch (ignore) {}
+          return result;
+        };
+        core.runFullPayroll._crPatched = true;
+        if (typeof runFullPayroll === 'function') {
+          globalThis.runFullPayroll = core.runFullPayroll; // keep global alias in sync
+        }
+      }
+      // Patch Individual Payroll
+      if (typeof core.runIndividualPayroll === 'function' && !core.runIndividualPayroll._crPatched) {
+        var originalInd = core.runIndividualPayroll;
+        core.runIndividualPayroll = function() {
+          var ui = SpreadsheetApp.getUi();
+          var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+          var response = ui.prompt('Individual Payroll', 'Enter the technician\'s name:', ui.ButtonSet.OK_CANCEL);
+          var button   = response.getSelectedButton();
+          var techName = (response.getResponseText() || '').trim();
+          if (button !== ui.Button.OK || !techName) return;
+
+          var techSheet = ss.getSheetByName(techName);
+          if (!techSheet) {
+            ui.alert('Error: Could not find a sheet for technician "' + techName + '".');
+            return;
+          }
+
+          ui.alert('Running payroll for ' + techName + ' – please wait');
+
+          // Retain original header sync logic
+          try {
+            if (Modules.Utilities && typeof Modules.Utilities.getPayPeriodTextFromMain === 'function' &&
+                typeof Modules.Utilities.setPayPeriodHeaderForTechnician === 'function') {
+              var periodText = Modules.Utilities.getPayPeriodTextFromMain();
+              if (periodText) {
+                Modules.Utilities.setPayPeriodHeaderForTechnician(techName, periodText);
+              }
+            }
+          } catch (ignore) {}
+
+          var steps = [
+            { name: 'Spiff/Bonus',        fn: Modules.SpiffBonus && Modules.SpiffBonus.processForTechnician, args: [techName] },
+            { name: 'PBP',                fn: Modules.PBP && Modules.PBP.updatePBPForTechnician,          args: [techName] },
+            { name: 'KPI',                fn: Modules.TechKPI && Modules.TechKPI.processForTechnician,    args: [techName] },
+            { name: 'Yard Signs',         fn: Modules.YardSign && Modules.YardSign.processForTechnician,  args: [techName] },
+            { name: 'Timesheet',          fn: Modules.TimeSheet && Modules.TimeSheet.processForTechnician, args: [techName] },
+            { name: 'Lead Set',           fn: Modules.LeadSet && Modules.LeadSet.processForTechnician,     args: [techName] },
+            { name: 'Completed Revenue',  fn: processForTechnician,                                        args: [techName] }
+          ];
+
+          var errors = [];
+          steps.forEach(function(step) {
+            if (typeof step.fn === 'function') {
+              try { step.fn.apply(null, step.args); }
+              catch (err) {
+                if (Modules.Shared && Modules.Shared.PayrollLogger) {
+                  Modules.Shared.PayrollLogger.error('Error processing ' + step.name + ' for ' + techName + ':', err);
+                }
+                errors.push(step.name + ': ' + err.message);
+              }
+            }
+          });
+
+          if (errors.length) {
+            ui.alert('Completed with errors: ' + errors.join(', '));
+          } else {
+            ui.alert('Individual payroll complete for ' + techName);
+          }
+        };
+        core.runIndividualPayroll._crPatched = true;
+        if (typeof runIndividualPayroll === 'function') {
+          globalThis.runIndividualPayroll = core.runIndividualPayroll;
+        }
+      }
+    } catch (err) {
+      console.error('CompletedRevenue patch error:', err);
+    }
+  }
+
+  // Immediately attempt to apply patches (first load)
+  _applyPatches();
+
+  /**
+   * Ensure this module participates in Core/Main\'s ordered modules list so
+   * that onOpenInit can run even when this file loads before Core/Main.
+   * Similar strategy as Total_Pay module.
+   */
+  (function ensureOrderedModule() {
+    try {
+      var coreMain = Modules.Main || {};
+      if (coreMain._completedRevenueOrdered) return;
+      var originalGetter = typeof _getOrderedModules === 'function' && _getOrderedModules;
+      if (!originalGetter) return; // Core/Main not yet loaded
+      globalThis._getOrderedModules = function() {
+        var list = originalGetter();
+        if (list.indexOf(Modules.CompletedRevenue) === -1) {
+          list.push(Modules.CompletedRevenue);
+        }
+        return list;
+      };
+      coreMain._completedRevenueOrdered = true;
+    } catch (ignore) {}
+  })();
+
+  /**
+   * Defer patching until onOpen when we know Core/Main is fully initialised.
+   */
+  Modules.CompletedRevenue.onOpenInit = function() {
+    try { _applyPatches(); } catch (ignore) {}
+  };
+
+})(); 

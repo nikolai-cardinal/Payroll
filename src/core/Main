@@ -12,6 +12,7 @@ function _getOrderedModules() {
     Modules.TimeSheet,
     Modules.SpiffBonus,
     Modules.PBP,
+    Modules.TechKPI,
     Modules.YardSign,
     Modules.LeadSet,
     Modules.NewTechnician,
@@ -98,6 +99,7 @@ function runFullPayroll() {
   var steps = [
     { fn: Modules.SpiffBonus && Modules.SpiffBonus.processAll },
     { fn: Modules.PBP && Modules.PBP.processAllPBP },
+    { fn: Modules.TechKPI && Modules.TechKPI.processAll },
     { fn: Modules.YardSign && Modules.YardSign.processAll },
     { fn: Modules.TimeSheet && Modules.TimeSheet.processAll },
     { fn: Modules.LeadSet && Modules.LeadSet.processAll },
@@ -165,6 +167,7 @@ function runIndividualPayroll() {
   var steps = [
     { name: 'Spiff/Bonus', fn: Modules.SpiffBonus && Modules.SpiffBonus.processForTechnician, args: [techName] },
     { name: 'PBP', fn: Modules.PBP && Modules.PBP.updatePBPForTechnician, args: [techName] },
+    { name: 'KPI', fn: Modules.TechKPI && Modules.TechKPI.processForTechnician, args: [techName] },
     { name: 'Yard Signs', fn: Modules.YardSign && Modules.YardSign.processForTechnician, args: [techName] },
     { name: 'Timesheet', fn: Modules.TimeSheet && Modules.TimeSheet.processForTechnician, args: [techName] },
     { name: 'Lead Set', fn: Modules.LeadSet && Modules.LeadSet.processForTechnician, args: [techName] },

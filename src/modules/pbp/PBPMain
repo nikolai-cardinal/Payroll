@@ -92,8 +92,15 @@ function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn,
 
       if (technicianRowData) {
         const title = technicianRowData.position;
-        // Using shared utility instead of direct function call
-        const techInfo = Modules.Shared.TechnicianUtils.getTechnicianClassAndRole(title);
+        // Resolve technician class & role with safe fallbacks.
+        var _getClassAndRole = (Modules.Shared && Modules.Shared.TechnicianUtils &&
+                               typeof Modules.Shared.TechnicianUtils.getTechnicianClassAndRole === 'function')
+                              ? Modules.Shared.TechnicianUtils.getTechnicianClassAndRole
+                              : (typeof getClassAndRoleFromTitle === 'function'
+                                  ? getClassAndRoleFromTitle
+                                  : function() { return { class: 0, role: 'None', isEligible: false }; });
+
+        const techInfo = _getClassAndRole(title);
 
         if (techInfo.class === 1) {
           console.log(`Skipping PBP processing for Class 1 technician: ${technicianName}`);

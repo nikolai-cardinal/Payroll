@@ -6,6 +6,45 @@
  */
 
 /**
+ * Module registration & wrappers – integrates KPI pull into the shared Modules namespace.
+ */
+var Modules = Modules || {};
+Modules.TechKPI = Modules.TechKPI || {};
+
+/**
+ * Processes KPI for a single technician. Delegates to pullTechnicianKPI.
+ * @param {string} techName Technician display name.
+ * @return {number} Average percentage written to sheet.
+ */
+Modules.TechKPI.processForTechnician = function(techName) {
+  return pullTechnicianKPI(techName);
+};
+
+/**
+ * Batch-process KPI for every technician listed in Main sheet column A (starting row 2).
+ */
+Modules.TechKPI.processAll = function() {
+  try {
+    var ss        = SpreadsheetApp.getActiveSpreadsheet();
+    var mainName  = (Modules.Constants && Modules.Constants.SHEET && Modules.Constants.SHEET.MAIN) || 'Main';
+    var mainSheet = ss.getSheetByName(mainName);
+    if (!mainSheet) return;
+
+    var names = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, 1).getValues();
+    names.forEach(function(row) {
+      var name = String(row[0]).trim();
+      if (name) pullTechnicianKPI(name);
+    });
+  } catch (err) {
+    if (Modules.Shared && Modules.Shared.PayrollLogger) {
+      Modules.Shared.PayrollLogger.error('TechKPI.processAll error:', err);
+    } else {
+      console.error('TechKPI.processAll error: ' + err);
+    }
+  }
+};
+
+/**
  * Pulls technician KPI percentage from external "Data" sheet for the active tech.
  * @param {string} techName The technician's exact display name.
  * @return {number} Average percentage or 0 if no data found.
@@ -250,4 +289,26 @@ function updateTechnicianKPI(techName) {
     console.error(`Error in updateTechnicianKPI: ${error.message}`);
     return 0;
   }
-} 
+}
+
+// -----------------------------------------------------------------------------
+// Runtime patch – inject TechKPI into Core/Main's ordered delegation list.
+// -----------------------------------------------------------------------------
+(function() {
+  try {
+    var coreMain = Modules.Main || {};
+    if (coreMain._techKpiPatched) return; // Prevent double patching
+
+    var originalGetter = typeof _getOrderedModules === 'function' && _getOrderedModules;
+    if (!originalGetter) return; // Core/Main not loaded yet
+
+    globalThis._getOrderedModules = function() {
+      var list = originalGetter();
+      if (list.indexOf(Modules.TechKPI) === -1) {
+        list.push(Modules.TechKPI); // Append to maintain existing precedence
+      }
+      return list;
+    };
+    coreMain._techKpiPatched = true;
+  } catch (ignore) {}
+})(); 
