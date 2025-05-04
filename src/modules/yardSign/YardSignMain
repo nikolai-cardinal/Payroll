@@ -316,10 +316,11 @@ function updateYardSignForTechnician(techName, row, column, skipStatusUpdate, su
 }
 
 /**
-* Processes yard signs for all technicians with existing sheets
+* Processes yard signs for all technicians with existing sheets.
+* If a technicianList array is provided, only those technicians will be processed (after verifying sheet existence).
 * No approval required, no "Sheet not found" errors
 */
-function processAllYardSigns() {
+function processAllYardSigns(technicianList) {
   initYardSign(); // Ensure initialization
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
@@ -333,6 +334,12 @@ function processAllYardSigns() {
   if (!ratesSheet) {
     ui.alert('Error: Main sheet not found.');
     return;
+  }
+
+  // If a technician list was provided, normalise to lower-case trimmed set for quick lookup
+  var limitToTechs = null;
+  if (Array.isArray(technicianList) && technicianList.length > 0) {
+    limitToTechs = new Set(technicianList.map(function(n){return String(n).trim().toLowerCase();}));
   }
 
   // Get technician names and classes from the rates sheet (Columns A, C, and E)
@@ -354,6 +361,11 @@ function processAllYardSigns() {
     var techName = data[i][0];
     // Skip empty rows
     if (!techName || techName.toString().trim() === '') {
+      continue;
+    }
+    
+    // If we have a technician filter list, skip those not included
+    if (limitToTechs && !limitToTechs.has(String(techName).trim().toLowerCase())) {
       continue;
     }
     

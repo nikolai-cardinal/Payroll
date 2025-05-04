@@ -408,7 +408,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
  * Menu handler for processing all technician timesheets
  * Ignores action column status completely
  */
-function processAllTimesheets() {
+function processAllTimesheets(technicianList) {
   try {
     var ui = SpreadsheetApp.getUi();
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -433,6 +433,12 @@ function processAllTimesheets() {
       return name && typeof name === 'string' && name.trim() !== '';
     });
     
+    // If a list was provided, filter technicianNames to those present in the list
+    if (Array.isArray(technicianList) && technicianList.length > 0) {
+      var filterSet = new Set(technicianList.map(function(n){return String(n).trim().toLowerCase();}));
+      technicianNames = technicianNames.filter(function(n){ return filterSet.has(String(n).trim().toLowerCase()); });
+    }
+
     if (technicianNames.length === 0) {
       ui.alert('No technicians found in Main sheet.');
       return;

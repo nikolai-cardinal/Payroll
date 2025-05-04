@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" />
+    <meta charset="UTF-8" />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+    <style>
+      /* Professional styling for payroll progress window with company colors */
+      :root {
+        /* Company color palette from screenshot */
+        --red: #C8102E;      /* PMS 186 CP - #C8102E */
+        --navy: #1D252D;     /* PMS 433 CP - #1D252D */
+        --teal: #00B0B9;     /* PMS 7466 CP - #00B0B9 */
+        --orange: #FF671F;   /* PMS 165 CP - #FF671F */
+        
+        --text-light: #ffffff;
+        --text-dark: #202124;
+        --bg-light: #f8f9fa;
+        --border-color: #dadce0;
+      }
+      
+      html, body {
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        font-family: 'Roboto', Arial, sans-serif;
+        font-size: 14px;
+        box-sizing: border-box;
+        background-color: var(--bg-light);
+        color: var(--text-dark);
+        overflow: hidden;
+        position: relative;
+      }
+      
+      .container {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+        max-width: 100%;
+        position: relative;
+        z-index: 1;
+      }
+      
+      .header {
+        padding: 16px 24px;
+        background-color: var(--red);
+        color: var(--text-light);
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      
+      .header h1 {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      
+      .progress-bar-container {
+        height: 8px;
+        background-color: var(--bg-light);
+        border-radius: 0;
+        overflow: hidden;
+        width: 100%;
+      }
+      
+      .progress-bar {
+        height: 100%;
+        background-color: var(--teal);
+        transition: width 0.3s ease;
+        width: 0%;
+      }
+      
+      .log-container {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 16px 16px;
+        background-color: white;
+        margin: 0;
+        position: relative;
+      }
+      
+      .log-entry {
+        padding: 8px 12px;
+        margin: 6px 0;
+        border-left: 4px solid transparent;
+        display: flex;
+        align-items: flex-start;
+        transition: background-color 0.2s;
+        font-size: 14px;
+        border-radius: 4px;
+      }
+      
+      .log-entry:hover {
+        background-color: #f1f3f4;
+      }
+      
+      .log-entry .timestamp {
+        color: #5f6368;
+        font-size: 13px;
+        margin-right: 12px;
+        min-width: 70px;
+        flex-shrink: 0;
+      }
+      
+      .log-entry .message {
+        flex: 1;
+        word-break: break-word;
+      }
+      
+      .log-entry.running { border-left-color: var(--navy); }
+      .log-entry.starting { border-left-color: var(--orange); }
+      .log-entry.complete { border-left-color: var(--teal); }
+      
+      .footer {
+        padding: 12px 16px;
+        background-color: var(--navy);
+        color: var(--text-light);
+        text-align: center;
+        position: sticky;
+        bottom: 0;
+        z-index: 10;
+        box-shadow: 0 -2px 5px rgba(0,0,0,0.1);
+      }
+      
+      .status-icon {
+        margin-right: 10px;
+        width: 16px;
+        height: 16px;
+        display: inline-block;
+        vertical-align: middle;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      
+      .icon-running { background-color: var(--navy); }
+      .icon-starting { background-color: var(--orange); }
+      .icon-complete { background-color: var(--teal); }
+      
+      #status {
+        background-color: #333;
+        color: var(--text-light);
+        padding: 6px 12px;
+        border-radius: 16px;
+        font-weight: 500;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      
+      .status-complete {
+        background-color: #333 !important;
+      }
+      
+      /* Embedded panel for summaries */
+      .summary-panel {
+        background-color: white;
+        border-radius: 8px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        margin: 16px 0;
+        padding: 16px;
+        border-left: 4px solid var(--teal);
+        position: relative;
+      }
+      
+      .summary-panel h3 {
+        margin: 0 0 4px;
+        color: var(--navy);
+        font-size: 16px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      
+      .summary-panel .summary-details p {
+        margin-top: 8px;
+        margin-bottom: 4px;
+        font-weight: 500;
+      }
+      
+      .summary-panel ul {
+        padding-left: 20px;
+        margin: 8px 0;
+        list-style-type: disc;
+      }
+      
+      .summary-panel li {
+        margin-bottom: 6px;
+        line-height: 1.4;
+      }
+      
+      /* Modal overlay - for inline popups */
+      .modal-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(0,0,0,0.5);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+      }
+      
+      .modal-content {
+        background-color: white;
+        border-radius: 8px;
+        padding: 20px;
+        width: 80%;
+        max-width: 400px;
+        max-height: 80%;
+        overflow-y: auto;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      }
+      
+      .modal-content h2 {
+        margin-top: 0;
+        color: var(--navy);
+        font-size: 18px;
+      }
+      
+      .modal-content .btn {
+        background-color: var(--teal);
+        color: white;
+        border: none;
+        border-radius: 20px;
+        padding: 8px 24px;
+        font-size: 14px;
+        cursor: pointer;
+        margin-top: 16px;
+        display: block;
+        margin-left: auto;
+      }
+      
+      .modal-content .btn:hover {
+        opacity: 0.9;
+      }
+      
+      /* Responsive adjustments */
+      @media (max-width: 480px) {
+        .header h1 {
+          font-size: 18px;
+        }
+        
+        .header {
+          padding: 12px 16px;
+        }
+        
+        .log-entry {
+          font-size: 13px;
+          padding: 6px 8px;
+        }
+        
+        .log-entry .timestamp {
+          min-width: 60px;
+          font-size: 12px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>Payroll Processing</h1>
+        <div id="status">Initializing...</div>
+      </div>
+      
+      <div class="progress-bar-container">
+        <div id="progress-bar" class="progress-bar"></div>
+      </div>
+      
+      <div id="log" class="log-container">
+        <div class="log-entry">
+          <span class="timestamp"></span>
+          <span class="message">Initializing payroll system...</span>
+        </div>
+      </div>
+      
+      <div class="footer">
+        <div id="summary">Elapsed time: 0s</div>
+      </div>
+    </div>
+    
+    <!-- Modal overlay for popups contained in the sidebar -->
+    <div id="modal-overlay" class="modal-overlay">
+      <div class="modal-content">
+        <h2 id="modal-title">Processing Complete</h2>
+        <div id="modal-body">
+          <!-- Content will be dynamically generated -->
+        </div>
+        <button class="btn" id="modal-close">OK</button>
+      </div>
+    </div>
+
+    <script>
+      /* Client-side polling to fetch progress log every second with improved rendering */
+      (function () {
+        var container = document.getElementById('log');
+        var progressBar = document.getElementById('progress-bar');
+        var statusElement = document.getElementById('status');
+        var summaryElement = document.getElementById('summary');
+        var modalOverlay = document.getElementById('modal-overlay');
+        var modalTitle = document.getElementById('modal-title');
+        var modalBody = document.getElementById('modal-body');
+        var modalClose = document.getElementById('modal-close');
+        var lastLen = 0;
+        var startTime = Date.now();
+        var isComplete = false;
+        var summaryPanels = {};
+        // Aggregated totals for final payroll summary
+        var totalTechProcessed = 0;
+        var totalAmountProcessed = 0;
+        
+        // Set up modal close button
+        modalClose.addEventListener('click', function() {
+          modalOverlay.style.display = 'none';
+        });
+        
+        // Show a popup within the sidebar
+        function showModal(title, content) {
+          modalTitle.textContent = title;
+          modalBody.innerHTML = content;
+          modalOverlay.style.display = 'flex';
+        }
+        
+        // Insert a summary panel directly into the log
+        function insertSummaryPanel(id, title, content, anchorTs) {
+          // Check if we already inserted this summary to avoid duplicates
+          if (summaryPanels[id]) return;
+          
+          var panel = document.createElement('div');
+          panel.className = 'summary-panel';
+          // Consistent header with status icon matching "complete" color
+          panel.innerHTML = '<h3><span class="status-icon icon-complete"></span>' + title + '</h3>' + content;
+          
+          // If an anchor timestamp is provided, try to place the panel
+          // immediately after the corresponding log entry. Fallback to
+          // appending at the end if the anchor isn't found.
+          if (anchorTs) {
+            var anchor = container.querySelector('.log-entry[data-ts="' + anchorTs + '"]');
+            if (anchor && anchor.parentNode) {
+              anchor.parentNode.insertBefore(panel, anchor.nextSibling);
+            } else {
+              container.appendChild(panel);
+            }
+          } else {
+            container.appendChild(panel);
+          }
+          container.scrollTop = container.scrollHeight;
+          summaryPanels[id] = true;
+        }
+        
+        // Helper to identify log entry types and apply appropriate styling
+        function getEntryType(msg) {
+          var lowerMsg = msg.toLowerCase();
+          
+          // Check for completion messages first
+          if (lowerMsg.includes('complete')) {
+            return 'complete';
+          }
+          
+          // Check for starting messages
+          if (lowerMsg.includes('starting')) {
+            return 'starting';
+          }
+          
+          // Check for running or processing messages
+          if (lowerMsg.includes('running') || 
+              lowerMsg.includes('processing') || 
+              lowerMsg.includes('found') || 
+              lowerMsg.includes('initializing')) {
+            return 'running';
+          }
+          
+          // Default type if no match
+          return '';
+        }
+        
+        // Check for patterns that might indicate a processing completion with summary data
+        function checkForCompletionSummary(entries) {
+          if (entries.length < 2) return false;
+          
+          // Look at the most recent entries
+          var recentEntries = entries.slice(-10); // Increased from 5 to 10 to look back further
+          
+          for (var i = 0; i < recentEntries.length; i++) {
+            var entry = recentEntries[i];
+            var msg = entry.msg.toLowerCase();
+            
+            // Check for completion messages - improved pattern matching
+            if (msg.includes('complete') && 
+                (msg.includes('pbp') || 
+                 msg.includes('kpi') || 
+                 msg.includes('call by call score') || 
+                 msg.includes('yard') || 
+                 msg.includes('yard signs') || 
+                 msg.includes('bonus') || 
+                 msg.includes('payroll') ||
+                 msg.includes('timesheet') ||
+                 msg.includes('lead set'))) {
+              
+              // Extract proper title from the message
+              var title = entry.msg.trim();
+              
+              // Standardize titles to match format in screenshot
+              if (title.toLowerCase().includes('bonus complete')) {
+                title = 'Bonus complete';
+              } else if (title.toLowerCase().includes('pbp complete')) {
+                title = 'PBP complete';
+              } else if (title.toLowerCase().includes('call by call score complete') || 
+                         title.toLowerCase().includes('kpi complete')) {
+                title = 'Call By Call Score complete';
+              } else if (title.toLowerCase().includes('yard signs complete')) {
+                title = 'Yard Signs complete';
+              } else if (title.toLowerCase().includes('timesheet complete')) {
+                title = 'Timesheet complete';
+              } else if (title.toLowerCase().includes('lead set complete')) {
+                title = 'Lead Set complete';
+              } else if (title.toLowerCase().includes('full payroll complete')) {
+                title = 'Full payroll complete';
+              }
+              
+              // Parse actual data from the message
+              var techCount = 0;        // Number of technicians / records processed
+              var amount    = 0;        // Dollar amount when applicable
+              var percentage = 0;       // Percentage for KPI / Call-By-Call
+              var isCallByCall = msg.includes('call by call score') || msg.includes('kpi');
+
+              // Examine up to 20 previous messages for numeric details (increased from 15)
+              for (var j = Math.max(0, i - 20); j < i; j++) {
+                if (j >= recentEntries.length) continue;
+                var prevMsg = recentEntries[j].msg.toLowerCase();
+
+                // ---- Technician / record count --------------------------------------------------
+                // Matches "5 technicians", "10 techs", "7 records processed", etc.
+                var techMatch = prevMsg.match(/(\d{1,3}(?:,?\d{3})*)\s*(technicians?|techs?|records|entries|processed)/i) ||
+                                prevMsg.match(/found\s*(\d{1,3}(?:,?\d{3})*)/i);
+                if (techMatch && !isNaN(techMatch[1])) {
+                  techCount = parseInt(techMatch[1].replace(/,/g, ''), 10);
+                }
+
+                // ---- Dollar amount or total lines ---------------------------------------------
+                // Prefer values with a $ symbol
+                var dollarMatch = prevMsg.match(/\$\s*([0-9,]+(?:\.\d+)?)/);
+                if (dollarMatch) {
+                  amount = parseFloat(dollarMatch[1].replace(/,/g, ''));
+                } else if (/(amount|total|bonus|pbp|spiff|payroll)/i.test(prevMsg) &&
+                           !/(technician|techs?)/i.test(prevMsg)) {
+                  // Capture numbers that follow keywords when no $ present
+                  var altMatch = prevMsg.match(/(?:amount|total|bonus|pbp|spiff|payroll)[^0-9]*([0-9]+(?:\.\d+)?)/i);
+                  if (altMatch) {
+                    amount = parseFloat(altMatch[1].replace(/,/g, ''));
+                  }
+                }
+
+                // ---- Percentage (only relevant for Call-By-Call) ------------------------------
+                var percentMatch = prevMsg.match(/([0-9]+(\.\d+)?)\s*%/);
+                if (percentMatch) {
+                  percentage = parseFloat(percentMatch[1]);
+                }
+              }
+
+              // Set default values when no data is found
+              if (techCount === 0) {
+                // Look at specific completion types to set appropriate defaults
+                if (msg.includes('yard signs') || msg.includes('lead set') || msg.includes('timesheet')) {
+                  // Default for these types when no explicit count is found
+                  techCount = 0;  // Default to 0 for these specific types as shown in the screenshot
+                } else if (msg.includes('bonus') || msg.includes('pbp') || msg.includes('call by call score')) {
+                  // Default for these when no explicit count is found
+                  techCount = 1;  // Default to 1 for these if unknown
+                }
+              }
+
+              // Intelligent fallbacks ------------------------------------------------------------
+              if (isCallByCall && percentage === 0 && amount > 0) {
+                percentage = amount;   // sometimes percentage is logged without "%" symbol
+                amount = 0;
+              }
+              
+              // Round dollar and percentage for display
+              var amountDisplay = amount > 0 ? amount.toFixed(2) : 'N/A';
+              var percentageDisplay = percentage > 0 ? percentage.toFixed(1) : 'N/A';
+              
+              var content = '<div class="summary-details">';
+              content += '<p><strong>SUMMARY:</strong></p>';
+              content += '<ul>';
+              content += '<li>Technicians Processed: ' + techCount + '</li>';
+              
+              if (isCallByCall) {
+                content += '<li>Average Score: ' + percentageDisplay + '%</li>';
+              } else {
+                content += '<li>Total Amount: $' + amountDisplay + '</li>';
+              }
+              
+              content += '</ul>';
+              content += '</div>';
+              
+              // Generate a unique ID based on the entry
+              var summaryId = 'summary-' + entry.ts;
+              
+              // ---------------- Aggregate running totals (excluding final summary) --------------
+              if (!msg.includes('full payroll complete') && !summaryPanels[summaryId]) {
+                if (techCount > 0) totalTechProcessed += techCount;
+                if (!isCallByCall && amount > 0) totalAmountProcessed += parseFloat(amount);
+              }
+              
+              // For the final payroll summary, override content with aggregated stats
+              if (msg.includes('full payroll complete')) {
+                var elapsedSecTotal = Math.floor((Date.now() - startTime) / 1000);
+                var minTotal = Math.floor(elapsedSecTotal / 60);
+                var secTotal = elapsedSecTotal % 60;
+                var timeStrTotal = (minTotal > 0 ? minTotal + 'm ' : '') + secTotal + 's';
+
+                var finalContent = '<div class="summary-details">';
+                finalContent += '<p><strong>SUMMARY:</strong></p>';
+                finalContent += '<ul>';
+                finalContent += '<li>Total Technicians Processed: ' + totalTechProcessed + '</li>';
+                finalContent += '<li>Total Amount: $' + totalAmountProcessed.toFixed(2) + '</li>';
+                finalContent += '<li>Total Processing Time: ' + timeStrTotal + '</li>';
+                finalContent += '</ul>';
+                finalContent += '</div>';
+
+                content = finalContent;
+              }
+              
+              // REMOVED: Always insert a summary panel for completion entries
+              // insertSummaryPanel(summaryId, title, content, entry.ts);
+              
+              // Show as modal popup if major completion
+              if (msg.includes('full payroll complete') || msg.includes('batch processing complete')) {
+                showModal(title, content);
+              }
+              
+              return true;
+            }
+          }
+          
+          return false;
+        }
+        
+        // Update the progress bar based on completion status
+        function updateProgressBar(list) {
+          if (!list || !list.length) return;
+          
+          var completedSteps = 0;
+          var totalSteps = 0;
+          
+          // Count completed steps by analyzing messages
+          list.forEach(function(entry) {
+            var msg = entry.msg.toLowerCase();
+            if (msg.includes('complete')) completedSteps++;
+            if (msg.includes('starting')) totalSteps++;
+          });
+          
+          // Ensure we have at least some steps
+          totalSteps = Math.max(totalSteps, 6); // Default to 6 steps if fewer detected
+          
+          // Calculate progress percentage (max 100%)
+          var progress = Math.min(Math.round((completedSteps / totalSteps) * 100), 100);
+          progressBar.style.width = progress + '%';
+          
+          // Update status text
+          if (progress >= 100) {
+            statusElement.textContent = 'Complete';
+            statusElement.classList.add('status-complete');
+          } else {
+            statusElement.textContent = 'Processing: ' + progress + '%';
+            statusElement.classList.remove('status-complete');
+          }
+          
+          // Calculate and show elapsed time
+          var elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+          var minutes = Math.floor(elapsedSec / 60);
+          var seconds = elapsedSec % 60;
+          var timeStr = (minutes > 0 ? minutes + 'm ' : '') + seconds + 's';
+          
+          summaryElement.textContent = 'Elapsed time: ' + timeStr;
+          
+          // Check if we should show a completion summary
+          checkForCompletionSummary(list);
+        }
+
+        function render(list) {
+          if (!Array.isArray(list) || list.length === lastLen) return;
+          
+          var frag = document.createDocumentFragment();
+          for (var i = lastLen; i < list.length; i++) {
+            var entry = list[i];
+            var time = new Date(entry.ts).toLocaleTimeString();
+            var type = getEntryType(entry.msg);
+            
+            var div = document.createElement('div');
+            div.className = 'log-entry ' + type;
+            // Tag with timestamp for anchor-based summary placement
+            div.setAttribute('data-ts', entry.ts);
+            
+            var timeSpan = document.createElement('span');
+            timeSpan.className = 'timestamp';
+            timeSpan.textContent = time;
+            
+            var statusIcon = document.createElement('span');
+            statusIcon.className = 'status-icon icon-' + (type || 'running');
+            
+            var msgSpan = document.createElement('span');
+            msgSpan.className = 'message';
+            // Standardize message formatting to match screenshot
+            var formattedMsg = entry.msg
+              .replace(/Spiff\/Bonus/g, "Bonus")
+              .replace(/\bKPI\b/g, "Call By Call Score")
+              .replace(/\bPBP\b/gi, "PBP")
+              .trim();
+            
+            msgSpan.textContent = formattedMsg;
+            
+            div.appendChild(timeSpan);
+            div.appendChild(statusIcon);
+            div.appendChild(msgSpan);
+            frag.appendChild(div);
+          }
+          
+          if (lastLen === 0) container.innerHTML = ''; // clear placeholder
+          container.appendChild(frag);
+          container.scrollTop = container.scrollHeight;
+          lastLen = list.length;
+          
+          // Update progress visualization
+          updateProgressBar(list);
+        }
+
+        function poll() {
+          google.script.run.withSuccessHandler(render)
+                           .Modules_Shared_Progress_get();
+        }
+
+        poll();
+        setInterval(poll, 1000);
+      })();
+    </script>
+  </body>
+</html> 

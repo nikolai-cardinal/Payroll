@@ -1,0 +1,98 @@
+/**
+ * Progress – shared progress logging helper for the modeless payroll sidebar.
+ * (Renamed file without .gs extension as requested)
+ */
+
+/* global CacheService, SpreadsheetApp, HtmlService */
+
+var Modules = Modules || {};
+Modules.Shared = Modules.Shared || {};
+
+(function (ns) {
+  if (ns.Progress) return; // idempotent
+
+  var CACHE_KEY = 'progress_log';
+  var cache = CacheService.getDocumentCache();
+
+  function read() {
+    try { return JSON.parse(cache.get(CACHE_KEY) || '[]'); }
+    catch (e) { return []; }
+  }
+
+  function clear() { cache.remove(CACHE_KEY); }
+
+  function log(msg) {
+    var list = read();
+    list.push({ ts: Date.now(), msg: String(msg) });
+    cache.put(CACHE_KEY, JSON.stringify(list), 21600);
+  }
+
+  function get() { return read(); }
+
+  ns.Progress = Object.freeze({ clear: clear, log: log, get: get });
+})(Modules.Shared);
+
+function Modules_Shared_Progress_get() {
+  return (Modules.Shared && Modules.Shared.Progress && Modules.Shared.Progress.get()) || [];
+}
+
+function showProgressSidebar() {
+  var flagKey = 'progress_sidebar_open';
+  var cache = CacheService.getDocumentCache();
+
+  // Only open if not already shown recently (5 minutes window)
+  if (!cache.get(flagKey)) {
+    var html;
+    try {
+      // Try camel-cased name first (matches repository file)
+      html = HtmlService.createHtmlOutputFromFile('ProgressSidebar')
+          .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    } catch (e) {
+      // Fallback to spaced name if script file was renamed inside the IDE
+      html = HtmlService.createHtmlOutputFromFile('Progress Sidebar')
+          .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    }
+
+    html.setTitle('Payroll Progress');
+    
+    // Set a larger size for the dialog
+    html.setWidth(700);
+    html.setHeight(600);
+    
+    // Use sidebar instead of modeless dialog to avoid center positioning
+    // This will position the panel on the right side of the screen
+    SpreadsheetApp.getUi().showSidebar(html);
+    
+    // Set a shorter cache time since we're using sidebar now
+    cache.put(flagKey, '1', 180); // 3 minutes TTL
+  }
+}
+
+/**
+ * Auto-restore sidebar after refresh. Can be called by onOpen trigger in the main file.
+ * This function should be called from the spreadsheet's onOpen trigger.
+ */
+function restoreProgressSidebar() {
+  // Check if we're in edit mode, not just viewing
+  var ui = SpreadsheetApp.getUi();
+  try {
+    // Try to make a trivial edit to test edit access
+    var ss = SpreadsheetApp.getActive();
+    var sheet = ss.getActiveSheet();
+    var cell = sheet.getRange('A1');
+    var oldValue = cell.getValue();
+    cell.setValue(oldValue); 
+    
+    // If we got here, we have edit access, so show the sidebar
+    showProgressSidebar();
+  } catch (e) {
+    // In view-only mode or other error, don't show automatically
+    console.log('Not showing progress sidebar automatically: ' + e.message);
+  }
+}
+
+// Export functions for module use
+if (Modules && Modules.Shared) {
+  Modules.Shared.showProgressSidebar = showProgressSidebar;
+  Modules.Shared.restoreProgressSidebar = restoreProgressSidebar;
+} 

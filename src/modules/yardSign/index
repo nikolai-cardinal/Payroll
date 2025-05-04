@@ -40,14 +40,13 @@ Modules.YardSign.handleEdit = function(e) {
 /**
  * Processes all relevant entries for the Yard Sign module.
  */
-Modules.YardSign.processAll = function() {
-  console.log('YardSign: processAll called');
-  
-  // Call the function that handles processing all yard signs
+Modules.YardSign.processAll = function(technicianList) {
+  console.log('YardSign: processAll called' + (Array.isArray(technicianList) ? ' with technician list length: ' + technicianList.length : '')); 
+  // Delegate to whichever implementation exists, passing the list when accepted.
   if (typeof processAllYardSigns === 'function') {
-    processAllYardSigns();
+    processAllYardSigns(technicianList);
   } else if (Modules.YardSign.Main && typeof Modules.YardSign.Main.processAllYardSigns === 'function') {
-    Modules.YardSign.Main.processAllYardSigns();
+    Modules.YardSign.Main.processAllYardSigns(technicianList);
   } else {
     console.error('YardSign: No valid processAllYardSigns function found');
   }

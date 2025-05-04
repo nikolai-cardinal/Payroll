@@ -31,9 +31,9 @@ function addLeadSetMenuItem(menu) {
  * Menu entry point for processing all lead sets.
  * Triggered when the user selects All Lead Set from the menu.
  */
-function menuProcessAllLeadSet() {
+function menuProcessAllLeadSet(technicianList) {
   Modules.LeadSet.Utilities.handleErrorsWithUI(() => {
-    processAllLeadSet();
+    processAllLeadSet(technicianList);
   }, "Processing Lead Sets");
 }
 
@@ -41,7 +41,7 @@ function menuProcessAllLeadSet() {
  * Main entry point for processing all lead sets.
  * Handles the batch processing of lead sets for all technicians.
  */
-function processAllLeadSet() {
+function processAllLeadSet(technicianList) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ui = SpreadsheetApp.getUi();
   
@@ -52,7 +52,7 @@ function processAllLeadSet() {
   }
   
   Modules.LeadSet.Utilities.updateStatus("Processing lead sets...");
-  const result = Modules.LeadSet.Utilities.processLeadDataForAllTechs(ss, leadSetSheet);
+  const result = Modules.LeadSet.Utilities.processLeadDataForAllTechs(ss, leadSetSheet, technicianList);
   Modules.LeadSet.Utilities.updateStatus("Lead set processing complete");
   
   Modules.LeadSet.Utilities.displayProcessingResults(ui, result);

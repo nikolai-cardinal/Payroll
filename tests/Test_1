@@ -1,212 +1,314 @@
-// BonusMain – minimal implementation replicating Spiff Bonus logic described
-// Depends on BonusUtilities located in the same folder.
+/**
+ * Call-By-Call_% - Technician KPI Data Pull
+ * 
+ * This script handles pulling technician KPI percentage data from an external Google Sheet
+ * and writing it to each technician's individual tab during payroll processing.
+ */
 
 /**
- * Processes BONUS entries for a single technician and writes results to their sheet.
- *
- * Logic (adapted to new Spiff/Bonus sheet layout):
- *   1. Qualifying row when
- *        (a) Technician appears in both Sold By (col E) AND Technician (col F)
- *            OR
- *        (b) Sold By is blank AND technician appears in Technician (F) *or* in
- *            Assigned Technicians (G)
- *   2. Commission taken from column K ($ Bonus).
+ * Module registration & wrappers – integrates KPI pull into the shared Modules namespace.
  */
-function Bonus_updateForTechnician(technicianName, opt_actionRow, opt_actionCol, opt_suppressPopup) {
-    if (!technicianName) return;
-    technicianName = String(technicianName).trim();
-    var techLower = technicianName.toLowerCase();
-  
-    var ss          = SpreadsheetApp.getActiveSpreadsheet();
-    var bonusSheet  = ss.getSheetByName('Spiff/Bonus');
-    var ratesSheet  = ss.getSheetByName('Main'); // renamed sheet (was "Hourly + Spiff Pay")
-    var techSheet   = ss.getSheetByName(technicianName);
-    var ui          = SpreadsheetApp.getUi();
-  
-    if (!bonusSheet || !techSheet) {
-      ui.alert('Required sheet missing (Spiff/Bonus or technician sheet)');
-      return;
-    }
-  
-    // Map headers → indices ------------------------------------------------------
-    var map = Bonus_getHeaderMap(bonusSheet);
-  
-    // Grab data (including header) once -----------------------------------------
-    var data = bonusSheet.getDataRange().getValues();
-    if (data.length < 2) return; // nothing
-  
-    // Iterate rows, collect qualifying entries ----------------------------------
-    var entries   = [];
-    var totalPay  = 0;
-  
-    for (var r = 1; r < data.length; r++) { // skip header row 0
-      var row = data[r];
-      var soldBy        = (row[map.soldBy - 1]       || '').toString().trim();
-      var primaryTech   = (row[map.technician - 1]    || '').toString().trim();
-      var assignedStr   = (row[map.assignedTechs - 1] || '').toString();
-  
-      var assignmentMatch = primaryTech.toLowerCase() === techLower ||
-                            Bonus_parseTechnicianNames(assignedStr).some(function(n){return n.toLowerCase() === techLower;});
-      var soldByMatch     = soldBy.toLowerCase() === techLower;
-  
-      var qualifies = (soldByMatch && assignmentMatch) || (!soldBy && assignmentMatch);
-      if (!qualifies) continue;
-  
-      var amountRaw = row[map.bonusAmount - 1];
-      var amount = parseFloat(String(amountRaw).replace(/[^0-9.+-]/g, '')) || 0;
-      if (!amount) continue;
-  
-      totalPay += amount;
-      entries.push({
-        customer:       row[map.customerName - 1]   || '',
-        businessUnit:   row[map.businessUnit - 1]   || '',
-        date:           row[map.completionDate - 1] || '',
-        amount:         amount,
-        itemName:       row[map.itemName - 1]       || '',
-        soldBy:         soldBy                               // preserve original sold-by tech name
-      });
-    }
-  
-    // --- Update technician sheet ------------------------------------------------
-    // 1. Update summary (row with label "Bonus") — A13 in template
-    var bonusRow = Bonus_findRowByColA(techSheet, 'Bonus');
-    if (bonusRow > 0) {
-      techSheet.getRange(bonusRow, 2).setValue(entries.length); // column B – quantity
-      techSheet.getRange(bonusRow, 3).setValue(totalPay);       // column C – total amount
-    }
-  
-    // 2. Append detailed lines to technician sheet (columns E:J) ---------------
-    if (entries.length) {
-      _Bonus_writeToTechSheet(techSheet, entries);
-    }
-  
-    // 3. Mark action column complete if provided --------------------------------
-    if (ratesSheet && opt_actionRow && opt_actionCol) {
-      try {
-        ratesSheet.getRange(opt_actionRow, opt_actionCol).setValue('Complete');
-      } catch (ignore) {}
-    }
-  
-    // Popup summary (only when not suppressed) ----------------------------------
-    if (!opt_suppressPopup) {
-      ui.alert('Bonus processed for ' + technicianName + '. Total: $' + totalPay.toFixed(2) + ' (' + entries.length + ' entries)');
-    }
-  
-    return totalPay;
-  }
-  
-  /**
-   * Processes BONUS for every technician listed on the Main sheet that has an
-   * individual sheet.
-   */
-  function Bonus_runBatch(opt_suppressPopup) {
-    var silent = !!opt_suppressPopup;
-    var ss   = SpreadsheetApp.getActiveSpreadsheet();
-    var main = ss.getSheetByName('Main');
-    if (!main) {
-      var msgMain = 'Main sheet not found';
-      if (silent) return { ok:false, message:msgMain };
-      return SpreadsheetApp.getUi().alert(msgMain);
-    }
-  
-    var map = { nameColumn: 1, actionColumn: 7, dataStartRow: 3 }; // mirrors getRatesSheetMapping fallback
-    var data = main.getRange(map.dataStartRow, map.nameColumn, main.getLastRow() - map.dataStartRow + 1, 1).getValues();
-  
-    var names = data.map(function(r){return String(r[0]).trim();}).filter(Boolean);
-    var processed = 0,
-        total = 0,
-        details = [];
-  
-    names.forEach(function(name){
-      if (!ss.getSheetByName(name)) return; // skip if no individual sheet
-      var pay = Bonus_updateForTechnician(name, null, null, true) || 0;
-      processed++;
-      total += pay;
-      details.push({name:name, total:pay});
+var Modules = Modules || {};
+Modules.TechKPI = Modules.TechKPI || {};
+
+/**
+ * Processes KPI for a single technician. Delegates to pullTechnicianKPI.
+ * @param {string} techName Technician display name.
+ * @return {number} Average percentage written to sheet.
+ */
+Modules.TechKPI.processForTechnician = function(techName) {
+  return pullTechnicianKPI(techName);
+};
+
+/**
+ * Batch-process KPI for every technician listed in Main sheet column A (starting row 2).
+ */
+Modules.TechKPI.processAll = function() {
+  try {
+    var ss        = SpreadsheetApp.getActiveSpreadsheet();
+    var mainName  = (Modules.Constants && Modules.Constants.SHEET && Modules.Constants.SHEET.MAIN) || 'Main';
+    var mainSheet = ss.getSheetByName(mainName);
+    if (!mainSheet) return;
+
+    var names = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, 1).getValues();
+    names.forEach(function(row) {
+      var name = String(row[0]).trim();
+      if (name) pullTechnicianKPI(name);
     });
-  
-    var ui = SpreadsheetApp.getUi();
-  
-    if (!processed) {
-      var noneTech = 'No technician sheets processed.';
-      if (silent) return { ok:false, message:noneTech };
-      return ui.alert(noneTech);
+  } catch (err) {
+    if (Modules.Shared && Modules.Shared.PayrollLogger) {
+      Modules.Shared.PayrollLogger.error('TechKPI.processAll error:', err);
+    } else {
+      console.error('TechKPI.processAll error: ' + err);
     }
-  
-    var msg = [
-      'BONUS PROCESSING COMPLETE',
-      '',
-      'Total Technicians Processed: ' + processed,
-      'Total Paid: $' + total.toFixed(2),
-      '',
-      'DETAILS BY TECHNICIAN:'
-    ];
-  
-    details.forEach(function(d){
-      msg.push('\n' + d.name + ': $' + d.total.toFixed(2));
-    });
-  
-    var summary = msg.join('\n');
-    if (silent) return { ok:true, message:summary };
-    ui.alert(summary);
   }
-  
-  // -----------------------------------------------------------------------------
-  // Helper – append Bonus detail rows to technician sheet (cols E-J) -----------
-  // ----------------------------------------------------------------------------
-  function _Bonus_writeToTechSheet(sheet, entries) {
-    // Find the header row that starts the Bonus detail section by searching
-    // for the text "Customer Name" in column E (within the first ~50 rows).
-    var headerRow = -1;
-    var colE = sheet.getRange(1, 5, 50, 1).getValues();
-    for (var r = 0; r < colE.length; r++) {
-      if (String(colE[r][0]).trim().toLowerCase() === 'customer name') {
-        headerRow = r + 1;
-        break;
+};
+
+/**
+ * Pulls technician KPI percentage from external "Data" sheet for the active tech.
+ * @param {string} techName The technician's exact display name.
+ * @return {number} Average percentage or 0 if no data found.
+ */
+function pullTechnicianKPI(techName) {
+  try {
+    // Open external sheet in read-only mode - no changes are made to the external data
+    const extSS = SpreadsheetApp.openById('1wRbNnKsiD2xEs6CFFFKOuFQnTxQUt8jvcJsowoDfssg');
+    const dataSh = extSS.getSheetByName('Data');
+    
+    // This creates a local copy of the data and doesn't modify the original sheet
+    const data = dataSh.getDataRange().getValues();
+    
+    // 1. Get pay period range from active payroll file
+    const payrollSS = SpreadsheetApp.getActiveSpreadsheet();
+    // Ensure Constants are available (legacy file may run before namespace init)
+    var mainSheetName = (Modules.Constants && Modules.Constants.SHEET && Modules.Constants.SHEET.MAIN) || 'Main';
+    const periodStr = payrollSS.getSheetByName(mainSheetName)
+                         .getRange('F1').getDisplayValue(); // ex "3/22 - 3/30"
+    
+    const { start, end } = parseDateRange(periodStr);
+    
+    console.log(`Date range: ${start.toDateString()} to ${end.toDateString()}`);
+    
+    // 2. Set column indexes (zero-based)
+    const DATE_COL = 13; // column N
+    const PCT_COL = 15;  // column P
+    const TECH_COL = 0;  // column A - technician names are in column A
+    
+    // 3. Calculate average percentage for the technician in the date range
+    // All operations below are performed on the local copy, not on the original sheet
+    let sum = 0, count = 0;
+    let matchedRows = [];
+    let skippedZeros = 0;
+    
+    for (let i = 1; i < data.length; i++) {
+      const row = data[i];
+      const rowDate = new Date(row[DATE_COL]);
+      
+      // Skip rows with invalid dates
+      if (isNaN(rowDate.getTime())) continue;
+      
+      if (rowDate >= start && rowDate <= end && row[TECH_COL] === techName) {
+        // Convert percentage value to a proper decimal value (0.XX)
+        // This only affects our local copy for calculation purposes
+        const rawValue = row[PCT_COL];
+        let pct = parsePercentage(rawValue);
+        
+        matchedRows.push({
+          date: rowDate.toDateString(),
+          rawValue: rawValue,
+          parsedValue: pct
+        });
+        
+        // Only include non-zero, valid percentages in the average
+        if (!isNaN(pct) && pct > 0) { 
+          sum += pct; 
+          count++; 
+        } else if (!isNaN(pct) && pct === 0) {
+          skippedZeros++;
+        }
       }
     }
-    if (headerRow < 0) {
-      Logger.log('[BONUS] Could not locate detail section on sheet "' + sheet.getName() + '"');
-      return;
+    
+    // Log the matched rows for debugging
+    console.log(`Found ${matchedRows.length} matching rows for ${techName} in date range`);
+    console.log(`Skipped ${skippedZeros} rows with zero values`);
+    if (matchedRows.length > 0) {
+      console.log("Sample values:", JSON.stringify(matchedRows.slice(0, 3)));
     }
-  
-    // Determine the first empty row below the header so that new Bonus entries
-    // are appended – never overwrite previously written data from earlier runs.
-    var startRow = headerRow + 1;
-    var scanRow  = startRow;
-    while (scanRow <= sheet.getLastRow() && sheet.getRange(scanRow, 5).getValue() !== '') {
-      scanRow++;
+    
+    // 4. Calculate average and write to technician sheet
+    const avg = count ? sum / count : 0;
+    console.log(`Sum: ${sum}, Count: ${count}, Average: ${avg}`);
+    
+    // The only write operation happens here - to the technician's sheet in the active spreadsheet
+    // No changes are made to the external sheet
+    const techSh = payrollSS.getSheetByName(techName);
+    if (techSh) {
+      techSh.getRange('B15').setValue(avg);
+      console.log(`Updated KPI percentage for ${techName}: ${avg}`);
+      
+      // Check if KPI percentage is above 90% (0.9 in decimal form)
+      // If so, add $100 bonus in cell C15
+      if (avg > 0.9) {
+        techSh.getRange('C15').setValue(100);
+        console.log(`Added $100 bonus in C15 for ${techName} (${avg * 100}% > 90%)`);
+      } else {
+        // Clear any previous bonus if percentage dropped below threshold
+        techSh.getRange('C15').setValue(0);
+        console.log(`No bonus applied for ${techName} (${avg * 100}% < 90%)`);
+      }
+    } else {
+      console.warn(`Technician sheet not found for ${techName}`);
     }
-    startRow = scanRow;
+    
+    return avg;
+  } catch (error) {
+    console.error(`Error in pullTechnicianKPI: ${error.message}`);
+    return 0;
+  }
+}
+
+/**
+ * Parses percentage values from different formats.
+ * @param {any} value The percentage value to parse
+ * @return {number} The percentage as a decimal (0.XX)
+ */
+function parsePercentage(value) {
+  // Handle null or undefined values
+  if (value === null || value === undefined) return 0;
   
-    // Transform entries into the 6-column structure expected by the technician
-    // template (E → J). We show Business Unit + Item Name together in column F
-    // similar to PBP to keep columns concise.
-    var data = entries.map(function (e) {
-      var combinedBI = '';
-      if (e.businessUnit && e.itemName)      combinedBI = e.businessUnit + ' – ' + e.itemName;
-      else if (e.businessUnit)               combinedBI = e.businessUnit;
-      else if (e.itemName)                   combinedBI = e.itemName;
-  
-      return [
-        e.customer,                   // Column E – Customer Name
-        combinedBI,                   // Column F – Business Unit / Item
-        _Bonus_fmtDate(e.date),       // Column G – Completion Date
-        e.amount,                     // Column H – Bonus Amount
-        (e.soldBy ? ('Sold By: ' + e.soldBy) : ''), // Column I – Sold By note
-        'Bonus'                       // Column J – Type label
-      ];
-    });
-  
-    sheet.getRange(startRow, 5, data.length, 6).setValues(data);
-    sheet.getRange(startRow, 8, data.length, 1).setNumberFormat('$#,##0.00');
-  
-    // Update summary quantity & total (row labelled "Bonus" – handled earlier)
+  // If it's already a number
+  if (typeof value === 'number') {
+    // If the number is > 1, assume it's a percentage and divide by 100
+    if (value > 1) return value / 100;
+    return value; 
   }
   
-  function _Bonus_fmtDate(d) {
-    if (d instanceof Date) {
-      return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+  // If it's a string, handle various formats
+  if (typeof value === 'string') {
+    // Remove any % sign and whitespace
+    value = value.replace('%', '').trim();
+    // Parse as a float
+    const parsed = parseFloat(value);
+    
+    if (!isNaN(parsed)) {
+      // If the number is > 1, assume it's a percentage and divide by 100
+      if (parsed > 1) return parsed / 100;
+      return parsed;
     }
-    return d;
   }
+  
+  // Cannot parse, return NaN
+  return NaN;
+}
+
+/**
+ * Parses date range string (e.g. "3/22 - 3/30" or "04_13_25 - 04_19_25") into start and end Date objects.
+ * @param {string} rangeStr The date range string.
+ * @return {Object} Object containing start and end Date objects.
+ */
+function parseDateRange(rangeStr) {
+  try {
+    const [startStr, endStr] = rangeStr.split('-').map(p => p.trim());
+    const year = new Date().getFullYear();
+    
+    // Parse date strings to handle multiple formats
+    let start, end;
+    
+    // Format detection and parsing
+    if (startStr.includes('_') && endStr.includes('_')) {
+      // Handle underscore format: "MM_DD_YY"
+      start = parseUnderscoreDate(startStr, year);
+      end = parseUnderscoreDate(endStr, year);
+    } else {
+      // Handle slash format: "M/DD"
+      start = new Date(`${startStr}/${year}`);
+      end = new Date(`${endStr}/${year}`);
+    }
+    
+    // Verify we have valid dates
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      console.error(`Failed to parse dates: startStr="${startStr}", endStr="${endStr}"`);
+      throw new Error("Invalid date format");
+    }
+    
+    // Set times to beginning/end of day for safe comparisons
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+    
+    console.log(`Parsed date range: ${start.toDateString()} to ${end.toDateString()}`);
+    return { start, end };
+  } catch (error) {
+    console.error(`Error parsing date range: ${error.message}`);
+    // Return current date as fallback
+    const today = new Date();
+    return { start: today, end: today };
+  }
+}
+
+/**
+ * Parses a date string with underscores (MM_DD_YY) into a Date object.
+ * @param {string} dateStr The date string in MM_DD_YY format.
+ * @param {number} fullYear The full 4-digit year.
+ * @return {Date} The parsed Date object.
+ */
+function parseUnderscoreDate(dateStr, fullYear) {
+  // Split the components
+  const parts = dateStr.split('_');
+  if (parts.length < 3) {
+    throw new Error(`Invalid underscore date format: ${dateStr}`);
+  }
+  
+  const month = parseInt(parts[0], 10) - 1; // JavaScript months are 0-based
+  const day = parseInt(parts[1], 10);
+  
+  // Handle 2-digit year vs 4-digit year
+  let year;
+  if (parts[2].length === 2) {
+    // If we have a 2-digit year like "25", we need to convert to full year
+    year = 2000 + parseInt(parts[2], 10);
+  } else {
+    year = parseInt(parts[2], 10);
+  }
+  
+  return new Date(year, month, day);
+}
+
+/**
+ * Finds the index of the technician column in the header row.
+ * This function is no longer used since we're directly using column A (index 0).
+ * @param {Array} headerRow The header row from the data sheet.
+ * @return {number} The column index or -1 if not found.
+ */
+function findTechnicianColumn(headerRow) {
+  for (let i = 0; i < headerRow.length; i++) {
+    const headerText = headerRow[i].toString().trim().toLowerCase();
+    if (headerText === 'technician') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Hook function to integrate with the payroll system.
+ * This is the main function that will be called during payroll processing.
+ * @param {string} techName The technician's name.
+ * @return {number} The calculated average percentage.
+ */
+function updateTechnicianKPI(techName) {
+  if (!techName) {
+    console.error("No technician name provided to updateTechnicianKPI");
+    return 0;
+  }
+  
+  try {
+    console.log(`Running KPI data pull for ${techName}`);
+    return pullTechnicianKPI(techName);
+  } catch (error) {
+    console.error(`Error in updateTechnicianKPI: ${error.message}`);
+    return 0;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Runtime patch – inject TechKPI into Core/Main's ordered delegation list.
+// -----------------------------------------------------------------------------
+(function() {
+  try {
+    var coreMain = Modules.Main || {};
+    if (coreMain._techKpiPatched) return; // Prevent double patching
+
+    var originalGetter = typeof _getOrderedModules === 'function' && _getOrderedModules;
+    if (!originalGetter) return; // Core/Main not loaded yet
+
+    globalThis._getOrderedModules = function() {
+      var list = originalGetter();
+      if (list.indexOf(Modules.TechKPI) === -1) {
+        list.push(Modules.TechKPI); // Append to maintain existing precedence
+      }
+      return list;
+    };
+    coreMain._techKpiPatched = true;
+  } catch (ignore) {}
+})(); 

@@ -551,14 +551,22 @@ function getAllTechniciansFromLeadSet(leadSetSheet) {
  * Processes lead data for all technicians.
  * @param {SpreadsheetApp.Spreadsheet} ss - The active spreadsheet.
  * @param {SpreadsheetApp.Sheet} leadSetSheet - The Lead Set sheet.
+ * @param {Array} technicianList - List of technician names to process.
  * @return {Object} Object containing count of technicians and leads processed.
  */
-function processLeadDataForAllTechs(ss, leadSetSheet) {
+function processLeadDataForAllTechs(ss, leadSetSheet, technicianList) {
   // Get all technician names from the Lead Set sheet
   const leadsAllTechs = getAllTechniciansFromLeadSet(leadSetSheet);
   
   // Get all technician sheets
   const techSheets = getTechnicianSheets(ss);
+  
+  // If a technician list is provided, restrict techSheets accordingly
+  let filteredTechSheets = techSheets;
+  if (Array.isArray(technicianList) && technicianList.length > 0) {
+    const filterSet = new Set(technicianList.map(function(n){return String(n).trim().toLowerCase();}));
+    filteredTechSheets = techSheets.filter(function(name){ return filterSet.has(name.toLowerCase()); });
+  }
   
   let results = {
     technicians: 0,
@@ -569,7 +577,7 @@ function processLeadDataForAllTechs(ss, leadSetSheet) {
   };
   
   // Process technicians that have sheets
-  for (const techName of techSheets) {
+  for (const techName of filteredTechSheets) {
     updateStatus(`Processing ${techName}...`);
     
     // Call back to LeadSetMain for this function
@@ -587,7 +595,7 @@ function processLeadDataForAllTechs(ss, leadSetSheet) {
   
   // Identify technicians in the Lead Set sheet without their own sheet
   for (const techName of leadsAllTechs) {
-    if (!techSheets.includes(techName)) {
+    if (!filteredTechSheets.includes(techName)) {
       results.skipped.push(techName);
       Logger.log(`Skipped ${techName}: No sheet exists`);
     }

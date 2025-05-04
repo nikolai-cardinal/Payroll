@@ -19,9 +19,17 @@ Modules.Bonus = Modules.Bonus || {};
 // Bridge to connect with SpiffBonus module 
 // This ensures our logic is used when the system calls Modules.SpiffBonus.processAll()
 Modules.SpiffBonus = Modules.SpiffBonus || {};
-Modules.SpiffBonus.processAll = function() {
+Modules.SpiffBonus.processAll = function(technicianList) {
   console.log("SpiffBonus.processAll bridge called - delegating to Bonus.processAllBonus");
-  return Modules.Bonus.processAllBonus(false);
+  
+  // If no technician list provided, we'll create a filtered list in processAllBonus
+  if (Array.isArray(technicianList) && technicianList.length > 0) {
+    console.log("Processing bonus with provided technician list, length: " + technicianList.length);
+  } else {
+    console.log("No technician list provided, will filter by sheet existence");
+  }
+  
+  return Modules.Bonus.processAllBonus(false, technicianList);
 };
 
 // Ensure other SpiffBonus methods exist to prevent errors
@@ -54,10 +62,11 @@ Modules.Bonus.processTechnicianBonus = function(technicianName, actionRow, actio
  * Used for batch processing via menu or script trigger.
  * 
  * @param {boolean} [suppressPopup=false] - Whether to suppress completion popup
+ * @param {Array} [technicianList] - Optional list of technicians to process
  * @return {Object} Result object with success status and message
  */
-Modules.Bonus.processAllBonus = function(suppressPopup) {
-  return Modules.Bonus.Main.runBatch(suppressPopup || false);
+Modules.Bonus.processAllBonus = function(suppressPopup, technicianList) {
+  return Modules.Bonus.Main.runBatch(suppressPopup || false, technicianList);
 };
 
 /**
@@ -148,8 +157,8 @@ function processBonusForTechnician(technicianName, actionRow, actionColumn) {
   return Modules.Bonus.processTechnicianBonus(technicianName, actionRow, actionColumn);
 }
 
-function processAllBonuses(suppressPopup) {
-  return Modules.Bonus.processAllBonus(suppressPopup);
+function processAllBonuses(suppressPopup, technicianList) {
+  return Modules.Bonus.processAllBonus(suppressPopup, technicianList);
 }
 
 /**

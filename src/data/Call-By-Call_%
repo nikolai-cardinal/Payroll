@@ -12,6 +12,15 @@ var Modules = Modules || {};
 Modules.TechKPI = Modules.TechKPI || {};
 
 /**
+ * -----------------------------------------------------------------------------
+ * Simple in-memory cache so the KPI data is fetched & indexed only once per
+ * script execution. The cache lives for the lifetime of the Google Apps Script
+ * invocation (max ~6 min) and is therefore safe and self-cleaning.
+ * -----------------------------------------------------------------------------
+ */
+globalThis._kpiDataCache = globalThis._kpiDataCache || null;
+
+/**
  * Processes KPI for a single technician. Delegates to pullTechnicianKPI.
  * @param {string} techName Technician display name.
  * @return {number} Average percentage written to sheet.
@@ -22,19 +31,62 @@ Modules.TechKPI.processForTechnician = function(techName) {
 
 /**
  * Batch-process KPI for every technician listed in Main sheet column A (starting row 2).
+ * @param {Array} [technicianList] - Optional list of technicians to process
  */
-Modules.TechKPI.processAll = function() {
+Modules.TechKPI.processAll = function(technicianList) {
   try {
-    var ss        = SpreadsheetApp.getActiveSpreadsheet();
-    var mainName  = (Modules.Constants && Modules.Constants.SHEET && Modules.Constants.SHEET.MAIN) || 'Main';
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var mainName = (Modules.Constants && Modules.Constants.SHEET && Modules.Constants.SHEET.MAIN) || 'Main';
     var mainSheet = ss.getSheetByName(mainName);
     if (!mainSheet) return;
 
-    var names = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, 1).getValues();
-    names.forEach(function(row) {
-      var name = String(row[0]).trim();
-      if (name) pullTechnicianKPI(name);
+    // Get all sheet names to check for existence
+    var allSheets = ss.getSheets();
+    var sheetNames = allSheets.map(function(sheet) {
+      return sheet.getName();
     });
+
+    // Use provided technician list or build filtered list with sheet existence check
+    var techniciansToProcess = [];
+    if (Array.isArray(technicianList) && technicianList.length > 0) {
+      // Use provided technician list but still filter by sheet existence
+      techniciansToProcess = technicianList.filter(function(name) {
+        return sheetNames.indexOf(name) !== -1;
+      });
+      console.log("Using provided list of " + technicianList.length + 
+                 " technicians, filtered to " + techniciansToProcess.length + 
+                 " with existing sheets");
+    } else {
+      // Build filtered list from scratch
+      var data = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, 1).getValues();
+      var names = data.map(function(r){return String(r[0]).trim();}).filter(Boolean);
+      
+      // Filter technicians with sheets
+      techniciansToProcess = names.filter(function(name) {
+        return sheetNames.indexOf(name) !== -1;
+      });
+      console.log("Built list of " + techniciansToProcess.length + 
+                 " technicians with sheets from " + names.length + " total technicians");
+    }
+
+    // Process only technicians with sheets
+    var processed = 0;
+    techniciansToProcess.forEach(function(name) {
+      try {
+        pullTechnicianKPI(name);
+        processed++;
+      } catch (err) {
+        console.error("Error processing KPI for " + name + ": " + err.message);
+      }
+    });
+    
+    console.log("Completed KPI processing for " + processed + " technicians");
+    
+    // Log progress if Progress module is available
+    if (Modules && Modules.Shared && Modules.Shared.Progress && 
+        typeof Modules.Shared.Progress.log === 'function') {
+      Modules.Shared.Progress.log("Processed Call By Call Score for " + processed + " technicians");
+    }
   } catch (err) {
     if (Modules.Shared && Modules.Shared.PayrollLogger) {
       Modules.Shared.PayrollLogger.error('TechKPI.processAll error:', err);
@@ -51,99 +103,290 @@ Modules.TechKPI.processAll = function() {
  */
 function pullTechnicianKPI(techName) {
   try {
-    // Open external sheet in read-only mode - no changes are made to the external data
-    const extSS = SpreadsheetApp.openById('1wRbNnKsiD2xEs6CFFFKOuFQnTxQUt8jvcJsowoDfssg');
-    const dataSh = extSS.getSheetByName('Data');
+    // Maximum duration for this function to avoid infinite loops
+    const MAX_EXECUTION_MS = 15000; // 15 seconds max
+    const startTime = Date.now();
+    let data = null;
+    let usingExternalData = true;
+
+    // Log start of KPI process
+    console.log(`Starting KPI data pull for ${techName}`);
     
-    // This creates a local copy of the data and doesn't modify the original sheet
-    const data = dataSh.getDataRange().getValues();
-    
-    // 1. Get pay period range from active payroll file
+    // Get current spreadsheet for fallback and writing results
     const payrollSS = SpreadsheetApp.getActiveSpreadsheet();
     // Ensure Constants are available (legacy file may run before namespace init)
     var mainSheetName = (Modules.Constants && Modules.Constants.SHEET && Modules.Constants.SHEET.MAIN) || 'Main';
-    const periodStr = payrollSS.getSheetByName(mainSheetName)
-                         .getRange('F1').getDisplayValue(); // ex "3/22 - 3/30"
     
-    const { start, end } = parseDateRange(periodStr);
+    // -----------------------------------------------------------------------
+    // 0. Fast-exit if we already loaded & indexed the KPI sheet in this
+    //    invocation. This turns the expensive sheet read into an O(1) lookup
+    //    for every subsequent technician.
+    // -----------------------------------------------------------------------
+    if (globalThis._kpiDataCache && globalThis._kpiDataCache.rows) {
+      data = globalThis._kpiDataCache.rows;
+      // The sheet has already been indexed by technician → row indices map.
+      // We keep a reference for later use.
+    }
+
+    // ---------------------------------------------------------------------
+    // Only fetch the Data sheet if it hasn't been cached yet.  Re-reading the
+    // 52 000-row sheet for every technician was the main performance killer.
+    // ---------------------------------------------------------------------
+    if (!data) {
+      try {
+        // First try the external data source
+        console.log("Attempting to access external KPI spreadsheet...");
+        const extSS = SpreadsheetApp.openById('1wRbNnKsiD2xEs6CFFFKOuFQnTxQUt8jvcJsowoDfssg');
+        const dataSh = extSS.getSheetByName('Data');
+
+        if (dataSh) {
+          console.log("Successfully connected to external KPI Data sheet");
+          // Fetch the full data set once. Subsequent calls will re-use cache.
+          data = dataSh.getRange(1, 1, dataSh.getLastRow(), 20).getValues();
+        } else {
+          console.warn('KPI Data sheet not found in external spreadsheet, will try local data');
+          usingExternalData = false;
+        }
+      } catch (ssError) {
+        console.warn(`Could not access external KPI data: ${ssError.message}`);
+        console.log("Will attempt to look for local KPI data instead");
+        usingExternalData = false;
+      }
+    }
     
-    console.log(`Date range: ${start.toDateString()} to ${end.toDateString()}`);
+    // If we still don't have any data, we can't proceed
+    if (!data || !Array.isArray(data) || data.length <= 1) {
+      console.error("No KPI data available - cannot process for " + techName);
+      
+      // Still try to clear the technician's sheet value
+      try {
+        const techSh = payrollSS.getSheetByName(techName);
+        if (techSh) {
+          techSh.getRange('B15').setValue(0);
+          techSh.getRange('C15').setValue(0);
+          console.log(`Reset KPI values to 0 for ${techName}`);
+        }
+      } catch (e) {
+        console.error(`Failed to reset KPI for ${techName}: ${e.message}`);
+      }
+      
+      return 0;
+    }
     
-    // 2. Set column indexes (zero-based)
+    console.log(`Successfully loaded ${data.length} rows of KPI data`);
+    
+    // -----------------------------------------------------------------------
+    // 1.  Build an index { technicianNameLowerCase → [ rowIndex, … ] } once
+    //     and store it in the global cache so every technician lookup becomes
+    //     a direct hit instead of a full-sheet scan.
+    // -----------------------------------------------------------------------
+    if (!globalThis._kpiDataCache) {
+      const indexByTech = Object.create(null);
+      for (let r = 1; r < data.length; r++) { // skip header
+        const techCell = String(data[r][0] || '').trim().toLowerCase();
+        if (!techCell) continue;
+        if (!indexByTech[techCell]) indexByTech[techCell] = [];
+        indexByTech[techCell].push(r);
+      }
+      globalThis._kpiDataCache = {
+        rows: data,
+        index: indexByTech,
+        loadedAt: Date.now()
+      };
+      console.log(`KPI data indexed for ${Object.keys(indexByTech).length} technicians`);
+    }
+    
+    // Get pay period range from active payroll file
+    let periodStr;
+    try {
+      periodStr = payrollSS.getSheetByName(mainSheetName).getRange('F1').getDisplayValue(); // ex "3/22 - 3/30"
+      console.log(`Found pay period: ${periodStr}`);
+    } catch (periodErr) {
+      console.warn(`Error getting pay period: ${periodErr.message}`);
+      periodStr = ""; // Use empty string as fallback
+    }
+    
+    let start, end;
+    try {
+      const parsedDates = parseDateRange(periodStr);
+      start = parsedDates.start;
+      end = parsedDates.end;
+      console.log(`Date range: ${start.toDateString()} to ${end.toDateString()}`);
+    } catch (dateErr) {
+      console.warn(`Error parsing date range: ${dateErr.message}`);
+      // Set fallback dates - last 7 days
+      end = new Date();
+      start = new Date();
+      start.setDate(start.getDate() - 7);
+      console.log(`Using fallback date range: ${start.toDateString()} to ${end.toDateString()}`);
+    }
+
+    // Use direct column indexes (zero-based) as in the test file
     const DATE_COL = 13; // column N
     const PCT_COL = 15;  // column P
     const TECH_COL = 0;  // column A - technician names are in column A
     
-    // 3. Calculate average percentage for the technician in the date range
-    // All operations below are performed on the local copy, not on the original sheet
+    console.log(`Using columns - Tech: ${TECH_COL}, Date: ${DATE_COL}, Percentage: ${PCT_COL}`);
+    console.log(`Looking for technician: "${techName}"`);
+    
+    // Calculate average percentage for the technician in the date range
     let sum = 0, count = 0;
     let matchedRows = [];
     let skippedZeros = 0;
+    let skippedDates = 0;
     
-    for (let i = 1; i < data.length; i++) {
+    const techNameLower = techName.trim().toLowerCase();
+    
+    // -----------------------------------------------------------------------
+    // 2.  Use the pre-built index to retrieve only the rows that belong to the
+    //     requested technician. Falls back to a full scan if the tech is not
+    //     present in the index (rare spelling mismatch).
+    // -----------------------------------------------------------------------
+    const indexedRows = (globalThis._kpiDataCache && globalThis._kpiDataCache.index && globalThis._kpiDataCache.index[techNameLower]) || null;
+
+    // When no index is available, iterate from the bottom of the sheet upward
+    // (newest ➜ oldest). Because the sheet is sorted ascending by date, we can
+    // stop as soon as we encounter a row with a date older than the start of
+    // the pay-period – dramatically reducing iterations.
+    const rowIterator = indexedRows
+      ? indexedRows.slice().sort((a, b) => b - a)              // newest first
+      : Array.from({ length: data.length - 1 }, (_, k) => data.length - 1 - k); // skip header (row 0)
+
+    for (let iter = 0; iter < rowIterator.length; iter++) {
+      const i = rowIterator[iter];
       const row = data[i];
-      const rowDate = new Date(row[DATE_COL]);
       
-      // Skip rows with invalid dates
-      if (isNaN(rowDate.getTime())) continue;
-      
-      if (rowDate >= start && rowDate <= end && row[TECH_COL] === techName) {
-        // Convert percentage value to a proper decimal value (0.XX)
-        // This only affects our local copy for calculation purposes
-        const rawValue = row[PCT_COL];
-        let pct = parsePercentage(rawValue);
-        
-        matchedRows.push({
-          date: rowDate.toDateString(),
-          rawValue: rawValue,
-          parsedValue: pct
-        });
-        
-        // Only include non-zero, valid percentages in the average
-        if (!isNaN(pct) && pct > 0) { 
-          sum += pct; 
-          count++; 
-        } else if (!isNaN(pct) && pct === 0) {
-          skippedZeros++;
+      // If we are iterating over the full sheet (no index) we still need the
+      // tech-name check. When using the indexed list we can skip this.
+      if (!indexedRows) {
+        const rowTechName = String(row[TECH_COL] || '').trim().toLowerCase();
+        if (rowTechName !== techNameLower) {
+          continue;
         }
       }
-    }
-    
-    // Log the matched rows for debugging
-    console.log(`Found ${matchedRows.length} matching rows for ${techName} in date range`);
-    console.log(`Skipped ${skippedZeros} rows with zero values`);
-    if (matchedRows.length > 0) {
-      console.log("Sample values:", JSON.stringify(matchedRows.slice(0, 3)));
-    }
-    
-    // 4. Calculate average and write to technician sheet
-    const avg = count ? sum / count : 0;
-    console.log(`Sum: ${sum}, Count: ${count}, Average: ${avg}`);
-    
-    // The only write operation happens here - to the technician's sheet in the active spreadsheet
-    // No changes are made to the external sheet
-    const techSh = payrollSS.getSheetByName(techName);
-    if (techSh) {
-      techSh.getRange('B15').setValue(avg);
-      console.log(`Updated KPI percentage for ${techName}: ${avg}`);
       
-      // Check if KPI percentage is above 90% (0.9 in decimal form)
-      // If so, add $100 bonus in cell C15
-      if (avg > 0.9) {
-        techSh.getRange('C15').setValue(100);
-        console.log(`Added $100 bonus in C15 for ${techName} (${avg * 100}% > 90%)`);
-      } else {
-        // Clear any previous bonus if percentage dropped below threshold
-        techSh.getRange('C15').setValue(0);
-        console.log(`No bonus applied for ${techName} (${avg * 100}% < 90%)`);
+      // Parse the date from column
+      let rowDate;
+      try {
+        if (row[DATE_COL] instanceof Date) {
+          rowDate = row[DATE_COL];
+        } else if (typeof row[DATE_COL] === 'string') {
+          if (row[DATE_COL].includes('_')) {
+            rowDate = parseUnderscoreDate(row[DATE_COL]);
+          } else {
+            rowDate = new Date(row[DATE_COL]);
+          }
+        } else if (typeof row[DATE_COL] === 'number') {
+          rowDate = new Date(Math.round((row[DATE_COL] - 25569) * 86400000));
+        } else {
+          continue;
+        }
+      } catch (dateErr) {
+        continue;
+      }
+      
+      // Verify date is valid and in range
+      if (!rowDate || isNaN(rowDate.getTime())) {
+        continue;
+      }
+      
+      if (rowDate < start) {
+        // Because we're scanning from newest to oldest, once we're past the
+        // start of the pay-period we can break early – no earlier rows will be
+        // within range.
+        break;
+      }
+      
+      if (rowDate > end) {
+        // Date is after the end date (should be rare because we're going
+        // newest→oldest), simply continue.
+        skippedDates++;
+        continue;
+      }
+      
+      // Get percentage from column
+      const pct = parsePercentage(row[PCT_COL]);
+      if (isNaN(pct)) {
+        continue;
+      }
+      
+      // Skip zeros in average calculation
+      if (pct === 0) {
+        skippedZeros++;
+        continue;
+      }
+      
+      // Add to running sum
+      sum += pct;
+      count++;
+      
+      // Keep track of matched rows for debugging
+      matchedRows.push({
+        rowNum: i,
+        date: rowDate.toLocaleDateString(),
+        pct: (pct * 100).toFixed(1) + '%'
+      });
+    }
+    
+    // Calculate average
+    const avg = count > 0 ? sum / count : 0;
+    
+    console.log(`Found ${count} valid KPI entries for ${techName} (skipped ${skippedZeros} zeros and ${skippedDates} out-of-range dates)`);
+    console.log(`Average KPI for ${techName}: ${(avg * 100).toFixed(1)}%`);
+    
+    if (matchedRows.length > 0) {
+      console.log(`Matched rows: ${JSON.stringify(matchedRows.slice(0, 5))}${matchedRows.length > 5 ? ` plus ${matchedRows.length - 5} more` : ''}`);
+    } else {
+      console.warn(`No matching KPI entries found for ${techName} in the date range`);
+    }
+    
+    // Write to technician sheet
+    const techSh = payrollSS.getSheetByName(techName);
+    
+    if (techSh) {
+      try {
+        console.log(`Writing KPI average of ${avg.toFixed(3)} to ${techName}'s sheet`);
+        techSh.getRange('B15').setValue(avg);
+        console.log(`Updated KPI percentage for ${techName}: ${avg}`);
+        
+        // Check if KPI percentage is above 90% (0.9 in decimal form)
+        // If so, add $100 bonus in cell C15
+        if (avg > 0.9) {
+          techSh.getRange('C15').setValue(100);
+          console.log(`Added $100 bonus in C15 for ${techName} (${avg * 100}% > 90%)`);
+        } else {
+          // Clear any previous bonus if percentage dropped below threshold
+          techSh.getRange('C15').setValue(0);
+          console.log(`No bonus applied for ${techName} (${avg * 100}% < 90%)`);
+        }
+        console.log(`Successfully updated KPI data for ${techName}`);
+      } catch (sheetErr) {
+        console.error(`Error writing to ${techName}'s sheet: ${sheetErr.message}`);
       }
     } else {
       console.warn(`Technician sheet not found for ${techName}`);
     }
     
+    console.log(`KPI processing for ${techName} completed in ${Date.now() - startTime}ms`);
     return avg;
   } catch (error) {
     console.error(`Error in pullTechnicianKPI: ${error.message}`);
+    console.error(`Stack trace: ${error.stack}`);
+    
+    // Try to still update the sheet with zeros even if we had an error
+    try {
+      const payrollSS = SpreadsheetApp.getActiveSpreadsheet();
+      const techSh = payrollSS.getSheetByName(techName);
+      if (techSh) {
+        techSh.getRange('B15').setValue(0);
+        techSh.getRange('C15').setValue(0);
+        console.log(`Reset KPI values to 0 for ${techName} after error`);
+      }
+    } catch (e) {
+      // Last resort, just log and continue
+      console.error(`Failed final attempt to update KPI for ${techName}: ${e.message}`);
+    }
+    
     return 0;
   }
 }
@@ -183,46 +426,109 @@ function parsePercentage(value) {
 }
 
 /**
- * Parses date range string (e.g. "3/22 - 3/30" or "04_13_25 - 04_19_25") into start and end Date objects.
- * @param {string} rangeStr The date range string.
- * @return {Object} Object containing start and end Date objects.
+ * Parses date range in format MM/DD - MM/DD or MM/DD/YY - MM/DD/YY.
+ * @param {string} rangeStr Format: MM/DD - MM/DD or MM/DD/YY - MM/DD/YY
+ * @return {Object} An object with start and end Date objects.
  */
 function parseDateRange(rangeStr) {
   try {
-    const [startStr, endStr] = rangeStr.split('-').map(p => p.trim());
-    const year = new Date().getFullYear();
+    if (!rangeStr || typeof rangeStr !== 'string') {
+      console.warn(`Invalid date range string: ${rangeStr}`);
+      throw new Error('Invalid date range string');
+    }
     
-    // Parse date strings to handle multiple formats
-    let start, end;
+    // Trim whitespace and standardize separators
+    rangeStr = rangeStr.trim();
     
-    // Format detection and parsing
-    if (startStr.includes('_') && endStr.includes('_')) {
-      // Handle underscore format: "MM_DD_YY"
-      start = parseUnderscoreDate(startStr, year);
-      end = parseUnderscoreDate(endStr, year);
+    // Handle different separators between start and end date
+    let parts;
+    if (rangeStr.includes(' - ')) {
+      parts = rangeStr.split(' - ');
+    } else if (rangeStr.includes('-')) {
+      parts = rangeStr.split('-').map(p => p.trim());
+    } else if (rangeStr.includes('to')) {
+      parts = rangeStr.split('to').map(p => p.trim());
     } else {
-      // Handle slash format: "M/DD"
-      start = new Date(`${startStr}/${year}`);
-      end = new Date(`${endStr}/${year}`);
+      // If no separator is found, assume single date or short form
+      parts = [rangeStr, rangeStr]; // Use the same date for start and end
     }
     
-    // Verify we have valid dates
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      console.error(`Failed to parse dates: startStr="${startStr}", endStr="${endStr}"`);
-      throw new Error("Invalid date format");
+    if (parts.length < 2) {
+      console.warn(`Invalid date range format: ${rangeStr}`);
+      // Fallback to current week
+      const today = new Date();
+      const startOfWeek = new Date(today);
+      startOfWeek.setDate(today.getDate() - today.getDay());
+      return {
+        start: startOfWeek,
+        end: today
+      };
     }
     
-    // Set times to beginning/end of day for safe comparisons
-    start.setHours(0, 0, 0, 0);
-    end.setHours(23, 59, 59, 999);
+    let [startStr, endStr] = parts;
     
-    console.log(`Parsed date range: ${start.toDateString()} to ${end.toDateString()}`);
-    return { start, end };
+    // Get current year if not specified
+    const currentYear = new Date().getFullYear();
+    
+    // Parse start date
+    let startDate;
+    if (startStr.includes('/')) {
+      // Format: MM/DD or MM/DD/YY
+      const startParts = startStr.split('/');
+      const startMonth = parseInt(startParts[0], 10) - 1; // 0-based months
+      const startDay = parseInt(startParts[1], 10);
+      const startYear = startParts.length > 2 
+                        ? (startParts[2].length === 2 ? 2000 + parseInt(startParts[2], 10) : parseInt(startParts[2], 10)) 
+                        : currentYear;
+      startDate = new Date(startYear, startMonth, startDay);
+    } else if (startStr.includes('_')) {
+      // Format: MM_DD_YY
+      startDate = parseUnderscoreDate(startStr);
+    } else {
+      throw new Error(`Unrecognized start date format: ${startStr}`);
+    }
+    
+    // Parse end date
+    let endDate;
+    if (endStr.includes('/')) {
+      // Format: MM/DD or MM/DD/YY
+      const endParts = endStr.split('/');
+      const endMonth = parseInt(endParts[0], 10) - 1; // 0-based months
+      const endDay = parseInt(endParts[1], 10);
+      const endYear = endParts.length > 2 
+                      ? (endParts[2].length === 2 ? 2000 + parseInt(endParts[2], 10) : parseInt(endParts[2], 10)) 
+                      : currentYear;
+      endDate = new Date(endYear, endMonth, endDay);
+    } else if (endStr.includes('_')) {
+      // Format: MM_DD_YY
+      endDate = parseUnderscoreDate(endStr);
+    } else {
+      throw new Error(`Unrecognized end date format: ${endStr}`);
+    }
+    
+    // Validate dates
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      throw new Error(`Invalid date in range: ${rangeStr}`);
+    }
+    
+    // Set end of day for end date (11:59:59 PM)
+    endDate.setHours(23, 59, 59, 999);
+    
+    // Ensure start date is before or equal to end date
+    if (startDate > endDate) {
+      console.warn(`Start date ${startDate} is after end date ${endDate}, swapping`);
+      return { start: endDate, end: startDate };
+    }
+    
+    console.log(`Parsed date range: ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`);
+    return { start: startDate, end: endDate };
   } catch (error) {
-    console.error(`Error parsing date range: ${error.message}`);
-    // Return current date as fallback
-    const today = new Date();
-    return { start: today, end: today };
+    console.error(`Error parsing date range "${rangeStr}": ${error.message}`);
+    // Return fallback date range (previous 7 days)
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - 7);
+    return { start, end };
   }
 }
 

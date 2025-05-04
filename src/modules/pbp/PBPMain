@@ -238,8 +238,9 @@ function pbpMain_updatePBPForTechnician(technicianName, actionRow, actionColumn,
 /**
 * Processes PBP for all technicians listed in the Main sheet.
 * Called from the Technician Tools menu or the module index.
+* @param {Array<string>} [technicianList] Optional list of technicians to process (only those with sheets)
 */
-function pbpMain_processAllPBP() {
+function pbpMain_processAllPBP(technicianList) {
   const ui = SpreadsheetApp.getUi();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ratesSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN); // Use Constant
@@ -256,35 +257,48 @@ function pbpMain_processAllPBP() {
     return;
   }
 
-  // Use local mapping
-  const ratesMapping = _getRatesSheetMappingPBP();
+  // Use provided technician list or build filtered list with sheet existence check
+  let techniciansToProcess = technicianList || [];
+  if (!technicianList || technicianList.length === 0) {
+    // Get all sheet names to check for existence efficiently
+    const allSheets = ss.getSheets();
+    const sheetNameSet = new Set(allSheets.map(sheet => sheet.getName())); // Use Set for faster lookups
+    
+    // Use local mapping
+    const ratesMapping = _getRatesSheetMappingPBP();
 
-  // Get all sheet names to check for existence efficiently
-  const allSheetNames = ss.getSheets().map(sheet => sheet.getName());
-  const sheetNameSet = new Set(allSheetNames); // Use Set for faster lookups
+    // Fetch full data once (name + exempt status, etc.)
+    const allRatesData = ratesSheet.getDataRange().getValues();
+    
+    // Build filtered list of technicians with sheets
+    for (let i = ratesMapping.dataStartRow - 1; i < allRatesData.length; i++) {
+      const row = allRatesData[i];
+      const techName = row[ratesMapping.nameColumn - 1];
+      const exemptFlag = row[ratesMapping.exemptColumn - 1];
 
-  // Fetch full data once (name + exempt status, etc.)
-  const allRatesData = ratesSheet.getDataRange().getValues();
-
-  // Process each technician row starting from dataStartRow (convert to zero-based index)
-  for (let i = ratesMapping.dataStartRow - 1; i < allRatesData.length; i++) {
-    const row = allRatesData[i];
-    const techName = row[ratesMapping.nameColumn - 1];
-    const exemptFlag = row[ratesMapping.exemptColumn - 1];
-
-    // Skip blank names or exempt employees
-    if (!techName || typeof techName !== 'string' || techName.trim() === '' || String(exemptFlag).trim().toLowerCase() === 'exempt') {
-      continue;
+      // Skip blank names or exempt employees
+      if (!techName || typeof techName !== 'string' || techName.trim() === '' || String(exemptFlag).trim().toLowerCase() === 'exempt') {
+        continue;
+      }
+      const trimmedTechName = techName.trim();
+      
+      // Only add technicians who have sheets
+      if (sheetNameSet.has(trimmedTechName)) {
+        techniciansToProcess.push(trimmedTechName);
+      } else {
+        console.log(`Skipping ${trimmedTechName} - no sheet exists`);
+        skippedCount++;
+      }
     }
-    const trimmedTechName = techName.trim();
+  }
 
-    // Check if the technician has a sheet
-    if (!sheetNameSet.has(trimmedTechName)) {
-      console.log(`Skipping ${trimmedTechName} - no sheet exists`);
-      skippedCount++;
-      continue;
-    }
-
+  // Log the number of technicians that will be processed
+  console.log(`Processing PBP for ${techniciansToProcess.length} technicians with sheets`);
+  
+  // Now process only technicians in our filtered list
+  for (let i = 0; i < techniciansToProcess.length; i++) {
+    const trimmedTechName = techniciansToProcess[i];
+    
     try {
       const result = pbpMain_updatePBPForTechnician(trimmedTechName, null, null, {
         skipStatusUpdate: true,

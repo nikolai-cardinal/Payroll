@@ -21,12 +21,7 @@ function _getOrderedModules() {
   });
 }
 
-/**
- * Spreadsheet onOpen trigger.
- * Builds the root menu and lets each module perform optional init work.
- *
- * @param {GoogleAppsScript.Events.SheetsOnOpen} e
- */
+// onOpen trigger – builds root menu & delegates module init
 function onOpen(e) {
   var ui = SpreadsheetApp.getUi();
   if (Modules.Menu && typeof Modules.Menu.buildRootMenu === 'function') {
@@ -49,14 +44,18 @@ function onOpen(e) {
       }
     }
   });
+  
+  // Restore progress sidebar if needed
+  try {
+    if (Modules.Shared && typeof Modules.Shared.restoreProgressSidebar === 'function') {
+      Modules.Shared.restoreProgressSidebar();
+    }
+  } catch (err) {
+    console.error('Failed to restore progress sidebar:', err);
+  }
 }
 
-/**
- * Spreadsheet onEdit trigger.
- * Delegates the edit event to each module until one claims responsibility.
- *
- * @param {GoogleAppsScript.Events.SheetsOnEdit} e
- */
+// onEdit trigger – delegates to modules sequentially
 function onEdit(e) {
   if (_isProcessingEdit) return;
   _isProcessingEdit = true;
@@ -75,13 +74,49 @@ function onEdit(e) {
   }
 }
 
-/**
- * Convenience batch action to run all module processes sequentially.
- * Exposed via the UI so payroll admins can execute everything in one click.
- */
+// runFullPayroll – batch process all modules sequentially
 function runFullPayroll() {
-  var ui = SpreadsheetApp.getUi();
-  ui.alert('Running full payroll – please wait');
+  // Prepare progress sidebar
+  if (Modules && Modules.Shared && Modules.Shared.Progress) {
+    Modules.Shared.Progress.clear();
+  }
+  if (typeof showProgressSidebar === 'function') {
+    showProgressSidebar();
+  }
+  
+  // Log start of process to progress panel instead of showing popup
+  if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+    Modules.Shared.Progress.log('Running full payroll...');
+  }
+
+  // Get available technician sheets and filter technicians list
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var mainName = (Modules.Constants && Modules.Constants.SHEET && Modules.Constants.SHEET.MAIN) || 'Main';
+  var mainSheet = ss.getSheetByName(mainName);
+  var allSheets = ss.getSheets();
+  var availableTechSheets = {};
+  
+  // Build lookup map of sheet names
+  allSheets.forEach(function(sheet) {
+    availableTechSheets[sheet.getName()] = true;
+  });
+  
+  // Get technician names from Main sheet
+  var technicians = [];
+  if (mainSheet) {
+    var names = mainSheet.getRange(2, 1, mainSheet.getLastRow() - 1, 1).getValues();
+    names.forEach(function(row) {
+      var techName = String(row[0]).trim();
+      if (techName && availableTechSheets[techName]) {
+        technicians.push(techName);
+      }
+    });
+  }
+  
+  // Log the number of technicians that will be processed
+  if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+    Modules.Shared.Progress.log('Found ' + technicians.length + ' technicians with sheets to process');
+  }
 
   // NEW: Update Pay Period header on all technician sheets before processing
   try {
@@ -97,32 +132,95 @@ function runFullPayroll() {
   }
 
   var steps = [
-    { fn: Modules.SpiffBonus && Modules.SpiffBonus.processAll },
-    { fn: Modules.PBP && Modules.PBP.processAllPBP },
-    { fn: Modules.TechKPI && Modules.TechKPI.processAll },
-    { fn: Modules.YardSign && Modules.YardSign.processAll },
-    { fn: Modules.TimeSheet && Modules.TimeSheet.processAll },
-    { fn: Modules.LeadSet && Modules.LeadSet.processAll },
+    { name: 'Spiff/Bonus', fn: Modules.SpiffBonus && Modules.SpiffBonus.processAll },
+    { name: 'PBP', fn: Modules.PBP && Modules.PBP.processAllPBP },
+    { name: 'KPI', fn: Modules.TechKPI && Modules.TechKPI.processAll },
+    { name: 'Yard Signs', fn: Modules.YardSign && Modules.YardSign.processAll },
+    { name: 'Timesheet', fn: Modules.TimeSheet && Modules.TimeSheet.processAll },
+    { name: 'Lead Set', fn: Modules.LeadSet && Modules.LeadSet.processAll },
   ];
 
   steps.forEach(function (s) {
-    if (typeof s.fn === 'function') {
-      try {
-        s.fn();
-      } catch (err) {
-        Modules.Shared.PayrollLogger.error(err);
+    if (typeof s.fn !== 'function') return;
+
+    // Log start
+    if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+      Modules.Shared.Progress.log('Starting ' + s.name);
+    }
+
+    try {
+      // Special handling for KPI module to prevent infinite loop
+      if (s.name === 'KPI') {
+        try {
+          // Set a timeout to ensure KPI step completes
+          var kpiStartTime = Date.now();
+          var kpiTimeout = 20000; // 20 seconds max for KPI processing
+          
+          // Override processing for KPI to only run for technicians with sheets
+          if (Modules.TechKPI && typeof Modules.TechKPI.processForTechnician === 'function') {
+            technicians.forEach(function(techName) {
+              if (availableTechSheets[techName]) {
+                try {
+                  Modules.TechKPI.processForTechnician(techName);
+                } catch (techErr) {
+                  console.error('Error processing KPI for ' + techName + ': ' + techErr.message);
+                }
+              }
+            });
+          } else {
+            // Fallback to standard function if technician-specific version not available
+            s.fn();
+          }
+          
+          console.log('KPI module completed successfully in ' + (Date.now() - kpiStartTime) + 'ms');
+        } catch (kpiErr) {
+          console.error('Error in KPI module: ' + kpiErr.message);
+          throw kpiErr; // Rethrow to be caught by outer handler
+        } finally {
+          // Always ensure KPI completion is logged
+          if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+            Modules.Shared.Progress.log('KPI complete');
+          }
+        }
+      } else {
+        // For other modules, pass the technician list so they can filter if possible
+        if (s.fn.length >= 1) {
+          // Function accepts arguments - pass the technician list
+          s.fn(technicians);
+        } else {
+          // Standard processing for other modules
+          s.fn();
+        }
+        
+        // Log completion
+        if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+          Modules.Shared.Progress.log(s.name + ' complete');
+        }
+      }
+    } catch (err) {
+      Modules.Shared.PayrollLogger.error(err);
+      if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+        Modules.Shared.Progress.log(s.name + ' encountered error');
       }
     }
   });
 
-  ui.alert('Full payroll complete');
+  // Log full payroll completion to progress panel
+  if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+    Modules.Shared.Progress.log('Full payroll complete');
+  }
 }
 
-/**
- * Displays a popup to enter a technician name, then runs payroll for that specific technician.
- * Processes all modules for the individual technician.
- */
+// runIndividualPayroll – process payroll for a single technician
 function runIndividualPayroll() {
+  // Prepare progress sidebar
+  if (Modules && Modules.Shared && Modules.Shared.Progress) {
+    Modules.Shared.Progress.clear();
+  }
+  if (typeof showProgressSidebar === 'function') {
+    showProgressSidebar();
+  }
+
   var ui = SpreadsheetApp.getUi();
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   
@@ -148,7 +246,10 @@ function runIndividualPayroll() {
     return;
   }
   
-  ui.alert('Running payroll for ' + techName + ' – please wait');
+  // Log start message to progress panel instead of showing popup
+  if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+    Modules.Shared.Progress.log('Running payroll for ' + techName + '...');
+  }
   
   // NEW: Update Pay Period header on the specific technician sheet
   try {
@@ -177,22 +278,34 @@ function runIndividualPayroll() {
   var successCount = 0;
   
   steps.forEach(function(step) {
-    if (typeof step.fn === 'function') {
-      try {
-        step.fn.apply(null, step.args);
-        successCount++;
-      } catch (err) {
-        Modules.Shared.PayrollLogger.error('Error processing ' + step.name + ' for ' + techName + ':', err);
-        errors.push(step.name + ': ' + err.message);
+    if (typeof step.fn !== 'function') return;
+
+    if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+      Modules.Shared.Progress.log('Starting ' + step.name + ' for ' + techName);
+    }
+
+    try {
+      step.fn.apply(null, step.args);
+      successCount++;
+      if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+        Modules.Shared.Progress.log(step.name + ' complete for ' + techName);
+      }
+    } catch (err) {
+      Modules.Shared.PayrollLogger.error('Error processing ' + step.name + ' for ' + techName + ':', err);
+      errors.push(step.name + ': ' + err.message);
+      if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+        Modules.Shared.Progress.log(step.name + ' encountered error for ' + techName);
       }
     }
   });
   
-  // Show completion message
-  if (errors.length > 0) {
-    ui.alert('Completed with errors: ' + errors.join(', '));
-  } else {
-    ui.alert('Individual payroll complete for ' + techName);
+  // Show completion message in progress panel instead of alert popup
+  if (Modules && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+    if (errors.length > 0) {
+      Modules.Shared.Progress.log('Completed with errors: ' + errors.join(', '));
+    } else {
+      Modules.Shared.Progress.log('Individual payroll complete for ' + techName);
+    }
   }
 }
 

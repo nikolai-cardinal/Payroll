@@ -398,18 +398,20 @@ function approveAllTechnicians() {
   // One refresh at the end
   refreshApprovalMenu();
 
-  // Show summary dialog
-  var userResp = SpreadsheetApp.getUi().alert('Bulk Approval Summary', results.join('\n'), SpreadsheetApp.getUi().ButtonSet.OK);
+  // Log summary to the non-blocking Progress panel instead of showing a modal alert
+  if (typeof Modules !== 'undefined' && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
+    Modules.Shared.Progress.log('Bulk Approval Summary:\n' + results.join('\n'));
+  }
 
-  // After user clicks OK, upload consolidated reports
-  if (userResp === SpreadsheetApp.getUi().Button.OK) {
-    if (typeof sendBulkReportUploads === 'function') {
-      try { sendBulkReportUploads(); } catch (e) {
-        console.error('Error sending bulk report uploads: ' + e.message);
-      }
-    } else {
-      console.warn('sendBulkReportUploads function not found. Report upload skipped.');
+  // Immediately upload consolidated reports (no user click required)
+  if (typeof sendBulkReportUploads === 'function') {
+    try {
+      sendBulkReportUploads();
+    } catch (e) {
+      console.error('Error sending bulk report uploads: ' + e.message);
     }
+  } else {
+    console.warn('sendBulkReportUploads function not found. Report upload skipped.');
   }
 }
 

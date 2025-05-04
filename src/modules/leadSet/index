@@ -38,14 +38,12 @@ Modules.LeadSet.handleEdit = function(e) {
 /**
  * Processes all relevant entries for the Lead Set module.
  */
-Modules.LeadSet.processAll = function() {
+Modules.LeadSet.processAll = function(technicianList) {
   // Call the correct function name that's implemented in LeadSetMain
   if (typeof menuProcessAllLeadSet === 'function') {
-    menuProcessAllLeadSet();
-  } else if (typeof Modules.LeadSet.Main && typeof Modules.LeadSet.Main.menuProcessAllLeadSet === 'function') {
-    Modules.LeadSet.Main.menuProcessAllLeadSet();
-  } else if (typeof Modules.LeadSet.Main && typeof Modules.LeadSet.Main.processAllLeadSet === 'function') {
-    Modules.LeadSet.Main.processAllLeadSet();
+    menuProcessAllLeadSet(technicianList);
+  } else if (Modules.LeadSet.Main && typeof Modules.LeadSet.Main.processAllLeadSet === 'function') {
+    Modules.LeadSet.Main.processAllLeadSet(technicianList);
   } else {
     console.error('Cannot find Lead Set processing function');
   }
@@ -70,5 +68,5 @@ Modules.LeadSet.processForTechnician = function(technicianName) {
 // Export functions for direct access if needed
 function addMenuEntries(menu) { return Modules.LeadSet.addMenuEntries(menu); }
 function handleEdit(e) { return Modules.LeadSet.handleEdit(e); }
-function processAll() { Modules.LeadSet.processAll(); }
+function processAll(technicianList) { Modules.LeadSet.processAll(technicianList); }
 function processForTechnician(technicianName) { return Modules.LeadSet.processForTechnician(technicianName); } 

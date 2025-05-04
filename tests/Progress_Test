@@ -1,0 +1,53 @@
+// Test suite for Progress helper (runs inside Apps Script)
+/* global Modules, Logger */
+
+function testProgress_clear() {
+  var Progress = Modules && Modules.Shared && Modules.Shared.Progress;
+  if (!Progress) {
+    throw new Error('Modules.Shared.Progress not found');
+  }
+  // Pre-populate log
+  Progress.clear();
+  Progress.log('dummy');
+  if (Progress.get().length !== 1) {
+    throw new Error('log() failed to append message');
+  }
+  // Act
+  Progress.clear();
+  if (Progress.get().length !== 0) {
+    throw new Error('clear() did not remove log entries');
+  }
+  Logger.log('✓ testProgress_clear passed');
+}
+
+function testProgress_log() {
+  var Progress = Modules.Shared.Progress;
+  Progress.clear();
+  Progress.log('first');
+  Progress.log('second');
+  var list = Progress.get();
+  if (list.length !== 2) throw new Error('Expected 2 log entries');
+  if (list[0].msg !== 'first' || list[1].msg !== 'second') {
+    throw new Error('Logged messages do not match');
+  }
+  Logger.log('✓ testProgress_log passed');
+}
+
+function testProgress_get() {
+  var Progress = Modules.Shared.Progress;
+  Progress.clear();
+  var messages = ['a', 'b', 'c'];
+  messages.forEach(Progress.log);
+  var list = Progress.get();
+  if (list.length !== messages.length) {
+    throw new Error('get() did not return all messages');
+  }
+  Logger.log('✓ testProgress_get passed');
+}
+
+function runProgressTests() {
+  testProgress_clear();
+  testProgress_log();
+  testProgress_get();
+  Logger.log('All Progress tests passed.');
+} 

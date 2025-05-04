@@ -277,9 +277,10 @@ function updateSpiffBonusWithCustomersListAll(technicianName) {
  * individual sheet.
  * 
  * @param {boolean} [opt_suppressPopup] - Whether to suppress the completion popup
+ * @param {Array} [technicianList] - Optional list of technicians to process
  * @return {Object} Result object with success status and message
  */
-Modules.Bonus.Main.runBatch = function(opt_suppressPopup) {
+Modules.Bonus.Main.runBatch = function(opt_suppressPopup, technicianList) {
   var silent = !!opt_suppressPopup;
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var main = ss.getSheetByName(
@@ -304,30 +305,45 @@ Modules.Bonus.Main.runBatch = function(opt_suppressPopup) {
     map = Modules.Utilities.getRatesSheetMapping();
   }
 
-  var data = main.getRange(map.dataStartRow, map.nameColumn, main.getLastRow() - map.dataStartRow + 1, 1).getValues();
-  var names = data.map(function(r){return String(r[0]).trim();}).filter(Boolean);
-  var processed = 0;
-  var grandTotal = 0;
-  var techSummaries = [];
-
-  // Get all sheets to check if technician sheets exist
+  // Get all sheet names to check for existence
   var allSheets = ss.getSheets();
   var sheetNames = allSheets.map(function(sheet) {
     return sheet.getName();
   });
 
+  // Use provided technician list or build filtered list with sheet existence check
+  var techniciansToProcess = [];
+  if (Array.isArray(technicianList) && technicianList.length > 0) {
+    // Use provided technician list but still filter by sheet existence
+    techniciansToProcess = technicianList.filter(function(name) {
+      return sheetNames.indexOf(name) !== -1;
+    });
+    console.log("Using provided list of " + technicianList.length + 
+               " technicians, filtered to " + techniciansToProcess.length + 
+               " with existing sheets");
+  } else {
+    // Build filtered list from scratch
+    var data = main.getRange(map.dataStartRow, map.nameColumn, main.getLastRow() - map.dataStartRow + 1, 1).getValues();
+    var names = data.map(function(r){return String(r[0]).trim();}).filter(Boolean);
+    
+    // Filter technicians with sheets
+    techniciansToProcess = names.filter(function(name) {
+      return sheetNames.indexOf(name) !== -1;
+    });
+    console.log("Built list of " + techniciansToProcess.length + 
+               " technicians with sheets from " + names.length + " total technicians");
+  }
+
+  var processed = 0;
+  var grandTotal = 0;
+  var techSummaries = [];
+  
   // Cache Spiff/Bonus sheet once
   var bonusSheet = ss.getSheetByName('Spiff/Bonus');
 
-  // Process each technician - USING FOR LOOP INSTEAD OF FOREACH
-  for (var i = 0; i < names.length; i++) {
-    var name = names[i];
-    
-    // Skip if technician has no sheet
-    if (sheetNames.indexOf(name) === -1) {
-      console.log("Skipping technician with no sheet: " + name);
-      continue; // Skip to next iteration
-    }
+  // Process only technicians with sheets - USING FOR LOOP INSTEAD OF FOREACH
+  for (var i = 0; i < techniciansToProcess.length; i++) {
+    var name = techniciansToProcess[i];
     
     // Skip if technician is Class 1
     if (Modules.Bonus.Utilities.isTechnicianClass1(name, main)) {

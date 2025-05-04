@@ -54,6 +54,16 @@ function createNewTechnicianSheet(techName, suppressPopup) {
   var newSheet = template.copyTo(ss);
   newSheet.setName(techName);
 
+  // Apply distinct tab color for technician sheets
+  try {
+    newSheet.setTabColor('#57bb8a'); // Consistent green shade for easy identification
+  } catch (err) {
+    // Fails gracefully on very old Sheets versions that might not support coloring.
+    if (Modules.Shared && Modules.Shared.PayrollLogger) {
+      Modules.Shared.PayrollLogger.error('Unable to set tab color for ' + techName + ':', err);
+    }
+  }
+
   // Fetch mapping helpers - with fallback
   var ratesMap = (Modules && Modules.Utilities && typeof Modules.Utilities.getRatesSheetMapping === 'function') ? 
                   Modules.Utilities.getRatesSheetMapping() : getFallbackRatesSheetMapping();
