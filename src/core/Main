@@ -217,6 +217,208 @@ function bonusPrompt() {
   }
 }
 
+// Prompt user to run PBP for everyone or an individual technician.
+function pbpPrompt() {
+  var ui = SpreadsheetApp.getUi();
+  var choice = ui.alert(
+    'PBP',
+    'Run PBP for EVERYONE (Yes) or an INDIVIDUAL technician (No)?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (choice === ui.Button.YES) {
+    // Run PBP for all technicians
+    if (typeof processAllPBPGlobal === 'function') {
+      processAllPBPGlobal();
+    } else if (Modules.PBP && typeof Modules.PBP.processAllPBP === 'function') {
+      Modules.PBP.processAllPBP();
+    } else if (typeof pbpMain_processAllPBP === 'function') {
+      pbpMain_processAllPBP();
+    }
+  } else if (choice === ui.Button.NO) {
+    var resp = ui.prompt('Individual PBP', 'Enter the technician\'s name:', ui.ButtonSet.OK_CANCEL);
+    if (resp.getSelectedButton() !== ui.Button.OK) return;
+    var techName = resp.getResponseText().trim();
+    if (!techName) return;
+
+    // Process PBP for individual technician
+    var functionFound = false;
+    
+    try {
+      if (Modules.PBP && typeof Modules.PBP.updatePBPForTechnician === 'function') {
+        Modules.PBP.updatePBPForTechnician(techName);
+        functionFound = true;
+      } else if (Modules.PBP && typeof Modules.PBP.processForTechnician === 'function') {
+        Modules.PBP.processForTechnician(techName);
+        functionFound = true;
+      } else if (Modules.PBP && typeof Modules.PBP.processPBPForTechnician === 'function') {
+        Modules.PBP.processPBPForTechnician(techName);
+        functionFound = true;
+      } else if (typeof updatePBPForTechnician === 'function') {
+        updatePBPForTechnician(techName);
+        functionFound = true;
+      } else {
+        // Log what functions are available for debugging
+        var availableFunctions = [];
+        if (Modules.PBP) {
+          for (var key in Modules.PBP) {
+            if (typeof Modules.PBP[key] === 'function') {
+              availableFunctions.push(key);
+            }
+          }
+        }
+        Modules.Shared.PayrollLogger.info('Available PBP functions: ' + availableFunctions.join(', '));
+        
+        if (!functionFound) {
+          throw new Error('No valid PBP processing function found for individual technician');
+        }
+      }
+    } catch (err) {
+      Modules.Shared.PayrollLogger.error('Error processing PBP for ' + techName + ': ' + err);
+      ui.alert('Error processing PBP', 
+               'Could not process PBP for technician "' + techName + '". Error: ' + err.message, 
+               ui.ButtonSet.OK);
+    }
+  }
+}
+
+// Prompt user to run Lead Set for everyone or an individual technician.
+function leadSetPrompt() {
+  var ui = SpreadsheetApp.getUi();
+  var choice = ui.alert(
+    'Lead Set',
+    'Run Lead Set for EVERYONE (Yes) or an INDIVIDUAL technician (No)?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (choice === ui.Button.YES) {
+    // Batch processing – try wrappers then module methods
+    if (typeof processAllLeadSets === 'function') {
+      processAllLeadSets();
+    } else if (Modules.LeadSet && typeof Modules.LeadSet.processAll === 'function') {
+      Modules.LeadSet.processAll();
+    } else if (Modules.LeadSet && typeof Modules.LeadSet.processAllLeadSets === 'function') {
+      Modules.LeadSet.processAllLeadSets();
+    } else if (Modules.LeadSet && Modules.LeadSet.Main && typeof Modules.LeadSet.Main.processAllLeadSets === 'function') {
+      Modules.LeadSet.Main.processAllLeadSets();
+    } else {
+      ui.alert('Error', 'No valid Lead Set batch processing function found.', ui.ButtonSet.OK);
+    }
+  } else if (choice === ui.Button.NO) {
+    var resp = ui.prompt('Individual Lead Set', 'Enter the technician\'s name:', ui.ButtonSet.OK_CANCEL);
+    if (resp.getSelectedButton() !== ui.Button.OK) return;
+    var techName = resp.getResponseText().trim();
+    if (!techName) return;
+
+    var functionFound = false;
+    try {
+      if (Modules.LeadSet && typeof Modules.LeadSet.processForTechnician === 'function') {
+        Modules.LeadSet.processForTechnician(techName);
+        functionFound = true;
+      } else if (Modules.LeadSet && typeof Modules.LeadSet.updateLeadSetForTechnician === 'function') {
+        // Some implementations may attach this directly on the module
+        Modules.LeadSet.updateLeadSetForTechnician(techName);
+        functionFound = true;
+      } else if (Modules.LeadSet && Modules.LeadSet.Main && typeof Modules.LeadSet.Main.updateLeadSetForTechnician === 'function') {
+        // Core implementation in LeadSetMain
+        Modules.LeadSet.Main.updateLeadSetForTechnician(null, null, techName, null, null, false);
+        functionFound = true;
+      } else if (typeof processLeadSetForTechnician === 'function') {
+        processLeadSetForTechnician(techName);
+        functionFound = true;
+      } else {
+        // Attempt introspection for dev debugging
+        var available = [];
+        if (Modules.LeadSet) {
+          for (var key in Modules.LeadSet) {
+            if (typeof Modules.LeadSet[key] === 'function') {
+              available.push(key);
+            }
+          }
+        }
+        Modules.Shared && Modules.Shared.PayrollLogger && Modules.Shared.PayrollLogger.info('Available LeadSet functions: ' + available.join(', '));
+      }
+
+      if (!functionFound) {
+        throw new Error('No valid Lead Set processing function found for individual technician');
+      }
+
+      // Show simple completion message – assume underlying function shows detailed summary if implemented
+      ui.alert('Lead Set processing complete for ' + techName);
+    } catch (err) {
+      if (Modules.Shared && Modules.Shared.PayrollLogger) {
+        Modules.Shared.PayrollLogger.error('Error processing Lead Set for ' + techName + ':', err);
+      }
+      ui.alert('Error processing Lead Set',
+               'Could not process Lead Set for technician "' + techName + '". Error: ' + err.message,
+               ui.ButtonSet.OK);
+    }
+  }
+}
+
+function timesheetPrompt() {
+  var ui = SpreadsheetApp.getUi();
+  var choice = ui.alert(
+    'Timesheet',
+    'Process Timesheet for EVERYONE (Yes) or an INDIVIDUAL technician (No)?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (choice === ui.Button.YES) {
+    // Batch processing
+    try {
+      if (typeof processAllTimesheets === 'function') {
+        processAllTimesheets();
+      } else if (Modules.TimeSheet && typeof Modules.TimeSheet.processAll === 'function') {
+        Modules.TimeSheet.processAll();
+      } else if (Modules.TimeSheet && Modules.TimeSheet.Main && typeof Modules.TimeSheet.Main.processAllTimesheets === 'function') {
+        Modules.TimeSheet.Main.processAllTimesheets();
+      } else {
+        ui.alert('Error', 'No valid Timesheet batch processing function found.', ui.ButtonSet.OK);
+      }
+    } catch (err) {
+      if (Modules.Shared && Modules.Shared.PayrollLogger) {
+        Modules.Shared.PayrollLogger.error('Error processing all timesheets:', err);
+      }
+      ui.alert('Error processing Timesheets', err && err.message ? err.message : err, ui.ButtonSet.OK);
+    }
+  } else if (choice === ui.Button.NO) {
+    var resp = ui.prompt('Individual Timesheet', 'Enter the technician\'s name:', ui.ButtonSet.OK_CANCEL);
+    if (resp.getSelectedButton() !== ui.Button.OK) return;
+    var techName = (resp.getResponseText() || '').trim();
+    if (!techName) return;
+
+    try {
+      var functionFound = false;
+      if (Modules.TimeSheet && typeof Modules.TimeSheet.processForTechnician === 'function') {
+        Modules.TimeSheet.processForTechnician(techName);
+        functionFound = true;
+      } else if (typeof updateHoursForTechnician === 'function') {
+        updateHoursForTechnician(techName, null, null, true, false);
+        functionFound = true;
+      } else if (Modules.TimeSheet && Modules.TimeSheet.Main && typeof Modules.TimeSheet.Main.processTimesheetForTechnician === 'function') {
+        Modules.TimeSheet.Main.processTimesheetForTechnician(techName);
+        functionFound = true;
+      }
+
+      if (!functionFound) {
+        ui.alert('Error', 'No valid Timesheet processing function found for technician "' + techName + '".', ui.ButtonSet.OK);
+      } else {
+        // Underlying functions are expected to show their own summary popups.
+        // Still provide a lightweight confirmation for consistency.
+        ui.alert('Timesheet processing complete for ' + techName);
+      }
+    } catch (err) {
+      if (Modules.Shared && Modules.Shared.PayrollLogger) {
+        Modules.Shared.PayrollLogger.error('Error processing timesheet for ' + techName + ':', err);
+      }
+      ui.alert('Error processing Timesheet',
+               'Could not process timesheet for technician "' + techName + '". Error: ' + (err && err.message ? err.message : err),
+               ui.ButtonSet.OK);
+    }
+  }
+}
+
 Modules.Main = {
   onOpen: onOpen,
   onEdit: onEdit,
@@ -224,4 +426,7 @@ Modules.Main = {
   runIndividualPayroll: runIndividualPayroll,
   payrollPrompt: payrollPrompt,
   bonusPrompt: bonusPrompt,
+  pbpPrompt: pbpPrompt,
+  leadSetPrompt: leadSetPrompt,
+  timesheetPrompt: timesheetPrompt,
 }; 

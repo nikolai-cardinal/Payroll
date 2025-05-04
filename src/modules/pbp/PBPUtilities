@@ -873,62 +873,59 @@ function pbpMain_processAllPBP() {
   console.log("PBP: processAll called");
   
   var ui = SpreadsheetApp.getUi();
-  var response = ui.alert("Process PBP for all technicians?", 
-                         "This will update PBP data for all eligible technicians. Continue?", 
-                         ui.ButtonSet.YES_NO);
   
-  if (response === ui.Button.YES) {
-    try {
-      // Check if we have a dedicated function for processing all PBP
-      if (typeof Modules !== 'undefined' && 
-          typeof Modules.PBP !== 'undefined' && 
-          typeof Modules.PBP.processAllPBP === 'function') {
-        
-        // Use the dedicated module function if available
-        Modules.PBP.processAllPBP();
-      } else {
-        // Fallback to a simpler implementation using existing functions
-        var ss = SpreadsheetApp.getActiveSpreadsheet();
-        var technicians = getAllEligibleTechnicians();
-        
-        if (technicians.length === 0) {
-          ui.alert("No eligible technicians found for PBP processing.");
-          return;
-        }
-        
-        var successCount = 0;
-        var errors = [];
-        
-        for (var i = 0; i < technicians.length; i++) {
-          try {
-            // If there's a specific function for processing a single technician's PBP, call it
-            if (typeof Modules.PBP.processPBPForTechnician === 'function') {
-              Modules.PBP.processPBPForTechnician(technicians[i]);
-            } else {
-              // Otherwise just clear and let the next run populate data
-              var techSheet = ss.getSheetByName(technicians[i]);
-              if (techSheet) {
-                Modules.PBP.clearInstallDataSection(techSheet);
-              }
-            }
-            successCount++;
-          } catch (error) {
-            console.error("Error processing PBP for " + technicians[i] + ": " + error.message);
-            errors.push(technicians[i] + ": " + error.message);
-          }
-        }
-        
-        // Show summary
-        var message = "PBP PROCESSING COMPLETE\n\nProcessed " + successCount + " technicians.";
-        if (errors.length > 0) {
-          message += "\n\nErrors:\n" + errors.join("\n");
-        }
-        ui.alert(message);
+  // Removed confirmation popup to avoid duplicate prompt
+  
+  try {
+    // Check if we have a dedicated function for processing all PBP
+    if (typeof Modules !== 'undefined' && 
+        typeof Modules.PBP !== 'undefined' && 
+        typeof Modules.PBP.processAllPBP === 'function') {
+      
+      // Use the dedicated module function if available
+      Modules.PBP.processAllPBP();
+    } else {
+      // Fallback to a simpler implementation using existing functions
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var technicians = getAllEligibleTechnicians();
+      
+      if (technicians.length === 0) {
+        ui.alert("No eligible technicians found for PBP processing.");
+        return;
       }
-    } catch (e) {
-      console.error("Error in pbpMain_processAllPBP: " + e.message);
-      ui.alert("Error processing PBP: " + e.message);
+      
+      var successCount = 0;
+      var errors = [];
+      
+      for (var i = 0; i < technicians.length; i++) {
+        try {
+          // If there's a specific function for processing a single technician's PBP, call it
+          if (typeof Modules.PBP.processPBPForTechnician === 'function') {
+            Modules.PBP.processPBPForTechnician(technicians[i]);
+          } else {
+            // Otherwise just clear and let the next run populate data
+            var techSheet = ss.getSheetByName(technicians[i]);
+            if (techSheet) {
+              Modules.PBP.clearInstallDataSection(techSheet);
+            }
+          }
+          successCount++;
+        } catch (error) {
+          console.error("Error processing PBP for " + technicians[i] + ": " + error.message);
+          errors.push(technicians[i] + ": " + error.message);
+        }
+      }
+      
+      // Show summary
+      var message = "PBP PROCESSING COMPLETE\n\nProcessed " + successCount + " technicians.";
+      if (errors.length > 0) {
+        message += "\n\nErrors:\n" + errors.join("\n");
+      }
+      ui.alert(message);
     }
+  } catch (e) {
+    console.error("Error in pbpMain_processAllPBP: " + e.message);
+    ui.alert("Error processing PBP: " + e.message);
   }
 }
 

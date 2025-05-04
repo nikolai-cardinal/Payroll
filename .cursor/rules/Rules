@@ -20,3 +20,4 @@
 20. Pay special attention to code in src/core/Proxies as it contains backward-compatibility wrappers that may hide the actual implementation location.
 21. Module dependencies should always be clearly documented at the top of each file, especially for shared utilities and helpers.
 22. NEVER add duplicate menu items. Before adding any menu entry in a module's `addMenuEntries` function, check src/core/Menu to ensure it's not already defined there. If core Menu already defines an entry (like 'All PBP'), the module should NOT add a similar entry (like 'Process PBP').
+23. When delegating to module functionality from `Main` or elsewhere, search and consider functions in sub-namespaces (e.g. `Modules.<Module>.Main.*`) as valid targets. Always include these nested implementations in your fallback chain to avoid "No valid function found" errors.

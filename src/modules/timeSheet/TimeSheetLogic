@@ -135,7 +135,7 @@ function getTechnicianSheetMappingForTimesheet(sheet) {
         ptoHoursRow: 8,
         totalHourlyPayRow: 9,
         totalSalesPayRow: 15,
-        totalPayRow: 17,
+        totalPayRow: 18,
         positionRow: 2,
         payPeriodRow: 3,
         valueColumn: 2,
@@ -165,7 +165,7 @@ function getTechnicianSheetMappingForTimesheet(sheet) {
     if (mapping.ptoHoursRow === -1) mapping.ptoHoursRow = 8;
     if (mapping.totalHourlyPayRow === -1) mapping.totalHourlyPayRow = 9;
     if (mapping.totalSalesPayRow === -1) mapping.totalSalesPayRow = 15;
-    if (mapping.totalPayRow === -1) mapping.totalPayRow = 17;
+    if (mapping.totalPayRow === -1) mapping.totalPayRow = 18;
     if (mapping.positionRow === -1) mapping.positionRow = 2;
     
     // Set the standard columns (typically B for values, C for calculated amounts)
@@ -186,7 +186,7 @@ function getTechnicianSheetMappingForTimesheet(sheet) {
       ptoHoursRow: 8,
       totalHourlyPayRow: 9,
       totalSalesPayRow: 15,
-      totalPayRow: 17,
+      totalPayRow: 18,
       positionRow: 2,
       payPeriodRow: 3,
       valueColumn: 2,
@@ -341,7 +341,7 @@ function updateHoursForTechnician(technicianName, actionRow, actionColumn, skipS
     SpreadsheetApp.flush();
     
     // Get the total pay amount from cell C18 in the technician's sheet
-    var totalPayCell = techSheet.getRange(18, 3); // C18
+    var totalPayCell = techSheet.getRange(mapping.totalPayRow, mapping.calculatedValueColumn);
     var totalPayValue = totalPayCell.getValue();
     console.log("Total Pay for " + technicianName + ": " + totalPayValue);
     

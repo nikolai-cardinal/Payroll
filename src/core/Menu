@@ -15,10 +15,10 @@ Modules.Menu = Modules.Menu || {};
       .addItem('Payroll', 'payrollPrompt')
       .addSeparator()
       .addItem('Bonus', 'bonusPrompt')
-      .addItem('PBP', 'processAllPBPGlobal')
+      .addItem('PBP', 'pbpPrompt')
       .addItem('Yard Signs', 'menuProcessAllYardSigns')
-      .addItem('Timesheet', 'processAllTimesheets')
-      .addItem('Lead Set', 'processAllLeadSets');
+      .addItem('Timesheet', 'timesheetPrompt')
+      .addItem('Lead Set', 'leadSetPrompt');
   };
 
   /**

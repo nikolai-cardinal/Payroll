@@ -274,10 +274,10 @@ function clearLeadDataInInstallSection(techSheet) {
 /**
  * Updates the lead summary information in the top section of the sheet.
  * @param {SpreadsheetApp.Sheet} techSheet - The technician's sheet.
- * @param {Number} leadCount - The number of leads.
+ * @param {Number} totalRevenue - The total revenue amount.
  * @param {Number} totalCommission - The total commission amount.
  */
-function updateTopSummaryLeadSet(techSheet, leadCount, totalCommission) {
+function updateTopSummaryLeadSet(techSheet, totalRevenue, totalCommission) {
   try {
     // Look for lead summary row
     const data = techSheet.getRange('A1:A30').getValues();
@@ -296,11 +296,11 @@ function updateTopSummaryLeadSet(techSheet, leadCount, totalCommission) {
     
     if (row > 0) {
       // Always use row 14 for Lead Set counts and totals
-      techSheet.getRange(14, 2).setValue(leadCount);
+      techSheet.getRange(14, 2).setValue(totalRevenue).setNumberFormat('$#,##0.00');
       techSheet.getRange(14, 3).setValue(totalCommission).setNumberFormat('$#,##0.00');
     } else {
       // Fallback: also row 14 for both values
-      techSheet.getRange(14, 2).setValue(leadCount);
+      techSheet.getRange(14, 2).setValue(totalRevenue).setNumberFormat('$#,##0.00');
       techSheet.getRange(14, 3).setValue(totalCommission).setNumberFormat('$#,##0.00');
     }
   } catch (error) {
@@ -324,12 +324,19 @@ function processAndWriteLeadData(leadSetSheet, techSheet, technicianName, suppre
     return { 
       success: true, 
       leadsProcessed: 0, 
-      totalCommission: 0
+      totalCommission: 0,
+      totalRevenue: 0
     };
   }
   
-  // Calculate commissions
+  // Calculate commissions and also total revenue
   const { processedLeads, totalCommission } = calculateLeadCommissions(leads);
+  
+  // Sum total revenue from leads data (column 'revenue')
+  const totalRevenue = leads.reduce(function(sum, l) {
+    var rev = l && typeof l.revenue === 'number' ? l.revenue : parseFloat(l.revenue || 0);
+    return sum + (isNaN(rev) ? 0 : rev);
+  }, 0);
   
   // Prepare data for writing
   const leadDataToWrite = processedLeads.map(lead => [
@@ -353,13 +360,14 @@ function processAndWriteLeadData(leadSetSheet, techSheet, technicianName, suppre
     techSheet.getRange(startRow, 7, leadDataToWrite.length, 1).setNumberFormat('mm/dd/yyyy'); // Column G - Date
   }
   
-  // Update summary information
-  updateTopSummaryLeadSet(techSheet, processedLeads.length, totalCommission);
+  // Update summary information with revenue and commission
+  updateTopSummaryLeadSet(techSheet, totalRevenue, totalCommission);
   
   return {
     success: true,
     leadsProcessed: processedLeads.length,
-    totalCommission: totalCommission
+    totalCommission: totalCommission,
+    totalRevenue: totalRevenue
   };
 }
 

@@ -197,14 +197,21 @@ function processLeadsForTechnician(leadSetSheet, techSheet, technicianName) {
   // Process the leads using the utilities
   const { processedLeads, totalCommission } = Modules.LeadSet.Utilities.calculateLeadCommissions(leadsData);
   
+  // Calculate total revenue from leadsData
+  var totalRevenue = leadsData.reduce(function(sum, l){
+    var rev = l && typeof l.revenue === 'number' ? l.revenue : parseFloat(l.revenue || 0);
+    return sum + (isNaN(rev) ? 0 : rev);
+  },0);
+  
   // Write to the technician sheet
   Modules.LeadSet.Utilities.writeNewLeadEntries(techSheet, processedLeads);
-  Modules.LeadSet.Utilities.updateTopSummaryLeadSet(techSheet, processedLeads.length, totalCommission);
+  Modules.LeadSet.Utilities.updateTopSummaryLeadSet(techSheet, totalRevenue, totalCommission);
   
   return { 
     success: true, 
     leadsProcessed: processedLeads.length, 
-    totalCommission: totalCommission 
+    totalCommission: totalCommission,
+    totalRevenue: totalRevenue 
   };
 }
 

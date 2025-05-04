@@ -5,6 +5,46 @@ Modules.PBP.Helpers = Modules.PBP.Helpers || {};
 Modules.Shared = Modules.Shared || {};
 Modules.Shared.PayrollUtils = Modules.Shared.PayrollUtils || {};
 
+// Important - Ensure the PBPMain file is loaded
+try {
+  // Import PBPMain - This is a hint for Apps Script to load the file
+  console.log("Loading PBPMain...");
+  // Use eval to prevent optimization from removing the "unused" import
+  eval('typeof PBPMain');
+} catch (e) {
+  console.log("Note: PBPMain direct import attempt completed");
+}
+
+// Make sure we expose the main PBP functions if they exist
+// Using a function to check both global scope and local scope
+(function() {
+  // First check if the global functions exist
+  if (typeof pbpMain_updatePBPForTechnician === 'function') {
+    Modules.PBP.updatePBPForTechnician = pbpMain_updatePBPForTechnician;
+    console.log("Found global pbpMain_updatePBPForTechnician function");
+  }
+  
+  if (typeof pbpMain_processAllPBP === 'function') {
+    Modules.PBP.processAllPBP = pbpMain_processAllPBP;
+    console.log("Found global pbpMain_processAllPBP function");
+  }
+  
+  // Check within this script as well
+  if (this.pbpMain_updatePBPForTechnician && typeof this.pbpMain_updatePBPForTechnician === 'function') {
+    if (!Modules.PBP.updatePBPForTechnician) {
+      Modules.PBP.updatePBPForTechnician = this.pbpMain_updatePBPForTechnician;
+      console.log("Found script-local pbpMain_updatePBPForTechnician function");
+    }
+  }
+  
+  if (this.pbpMain_processAllPBP && typeof this.pbpMain_processAllPBP === 'function') {
+    if (!Modules.PBP.processAllPBP) {
+      Modules.PBP.processAllPBP = this.pbpMain_processAllPBP;
+      console.log("Found script-local pbpMain_processAllPBP function");
+    }
+  }
+})();
+
 // Dependencies on shared modules:
 // - Modules.Shared.SheetUtils: For sheet operations
 // - Modules.Shared.DateUtils: For date formatting
@@ -377,14 +417,180 @@ Modules.PBP.processForTechnician = function(technicianName) {
   
   Logger.log('PBP: Processing for technician ' + technicianName);
   
-  if (typeof pbpMain_updatePBPForTechnician === 'function') {
-    pbpMain_updatePBPForTechnician(technicianName, null, null, {
-      skipStatusUpdate: false,
-      suppressPopup: false
-    });
-  } else {
-    Logger.log('Error: pbpMain_updatePBPForTechnician function not found');
-    SpreadsheetApp.getUi().alert('Error: PBP processing function not available. Please contact support.');
+  // Avoid duplicate calls and multiple popups by checking a processing flag
+  if (Modules.PBP._isProcessing) {
+    Logger.log('PBP: Already processing a request, skipping duplicate call');
+    return false;
+  }
+  
+  Modules.PBP._isProcessing = true;
+  
+  try {
+    // First try direct function from PBPMain
+    if (typeof pbpMain_updatePBPForTechnician === 'function') {
+      Logger.log('Using pbpMain_updatePBPForTechnician function');
+      var result = pbpMain_updatePBPForTechnician(technicianName, null, null, {
+        skipStatusUpdate: false,
+        suppressPopup: false
+      });
+      Modules.PBP._isProcessing = false;
+      return result !== null;
+    }
+    
+    // Fallback implementation if the external function is not available
+    Logger.log('Using fallback PBP processing implementation for ' + technicianName);
+    
+    // Get the spreadsheet and find the technician's sheet
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var techSheet = null;
+    
+    // Find technician's sheet by name
+    var sheets = ss.getSheets();
+    for (var i = 0; i < sheets.length; i++) {
+      var sheetName = sheets[i].getName();
+      if (sheetName.toLowerCase() === technicianName.toLowerCase()) {
+        techSheet = sheets[i];
+        break;
+      }
+    }
+    
+    if (!techSheet) {
+      Logger.log('Technician sheet not found for: ' + technicianName);
+      Modules.PBP._isProcessing = false;
+      return false;
+    }
+    
+    // Get main sheet data to find PBP entries
+    var mainSheetName = Modules.Constants && Modules.Constants.SHEET ? 
+                        Modules.Constants.SHEET.MAIN : 'Main';
+    var mainSheet = ss.getSheetByName(mainSheetName);
+    
+    if (!mainSheet) {
+      Logger.log('Main sheet not found');
+      Modules.PBP._isProcessing = false;
+      return false;
+    }
+    
+    // Process the PBP entries
+    var mainData = mainSheet.getDataRange().getValues();
+    var headerRow = mainData[0];
+    
+    // Find relevant column indices
+    var technicianColIdx = -1;
+    var pbpColIdx = -1;
+    var customerNameColIdx = -1;
+    var dateColIdx = -1;
+    var businessUnitColIdx = -1;
+    var assignedTechsColIdx = -1;
+    
+    for (var c = 0; c < headerRow.length; c++) {
+      var colName = headerRow[c] ? headerRow[c].toString().toLowerCase() : '';
+      if (colName.includes('technician')) technicianColIdx = c;
+      if (colName.includes('pbp') || colName.includes('cross sale')) pbpColIdx = c;
+      if (colName.includes('customer')) customerNameColIdx = c;
+      if (colName.includes('date')) dateColIdx = c;
+      if (colName.includes('business unit')) businessUnitColIdx = c;
+      if (colName.includes('assigned techs')) assignedTechsColIdx = c;
+    }
+    
+    if (technicianColIdx < 0 || pbpColIdx < 0) {
+      Logger.log('Required columns not found in Main sheet');
+      Modules.PBP._isProcessing = false;
+      return false;
+    }
+    
+    // Find and process matching PBP entries
+    var pbpEntries = [];
+    var totalPbpAmount = 0;
+    
+    // Look for technician rates data to build tech cache
+    var ratesSheet = ss.getSheetByName('Technician Rates');
+    var ratesData = ratesSheet ? ratesSheet.getDataRange().getValues() : [];
+    var techCache = Modules.PBP.Helpers.buildTechDetailsCache(ratesData);
+    
+    for (var r = 1; r < mainData.length; r++) {
+      var row = mainData[r];
+      var techName = row[technicianColIdx];
+      var pbpValue = row[pbpColIdx];
+      
+      if (!techName || !pbpValue) continue;
+      
+      // Extract PBP amount from text if needed
+      var pbpAmount = Modules.PBP.Helpers.parsePbpAmount(pbpValue);
+      if (!pbpAmount) continue;
+      
+      // Check if this technician is part of the job
+      var primaryTech = techName.toString().trim();
+      var assignedTechs = assignedTechsColIdx >= 0 ? row[assignedTechsColIdx] : '';
+      
+      var techResult = Modules.PBP.Helpers.getUniqueTechNames(primaryTech, assignedTechs);
+      var uniqueNames = techResult.uniqueNames;
+      var lowerSet = techResult.lowerSet;
+      
+      // Skip if technician isn't part of this job
+      if (!lowerSet.has(technicianName.toLowerCase())) continue;
+      
+      // Calculate shares for all technicians on this job
+      var techList = Modules.PBP.Helpers.computeJobTechnicians(uniqueNames, techCache, pbpAmount);
+      
+      // Find this technician's entry
+      var techEntry = null;
+      for (var t = 0; t < techList.length; t++) {
+        if (techList[t].name.toLowerCase() === technicianName.toLowerCase()) {
+          techEntry = techList[t];
+          break;
+        }
+      }
+      
+      if (!techEntry || !techEntry.payout) continue;
+      
+      // Create PBP entry for this technician
+      pbpEntries.push({
+        customerName: customerNameColIdx >= 0 ? row[customerNameColIdx] : '',
+        jobBusinessUnit: businessUnitColIdx >= 0 ? row[businessUnitColIdx] : '',
+        completionDate: dateColIdx >= 0 ? row[dateColIdx] : '',
+        totalPbp: pbpAmount,
+        technicianShare: techEntry.payout,
+        splitPercentage: techEntry.splitPercent,
+        roleForJob: techEntry.finalRole,
+        teamDetails: uniqueNames.join(', ')
+      });
+      
+      totalPbpAmount += techEntry.payout;
+    }
+    
+    // Write PBP data to sheet
+    if (pbpEntries.length > 0) {
+      Modules.PBP.writePbpDataToSheet(techSheet, pbpEntries, totalPbpAmount);
+      
+      // Show a single summary popup
+      var ui = SpreadsheetApp.getUi();
+      var summaryMessage = "PBP Update for: " + technicianName + "\n";
+      summaryMessage += "Total Calculated PBP Share: $" + totalPbpAmount.toFixed(2) + "\n";
+      summaryMessage += "Number of PBP Entries Processed: " + pbpEntries.length;
+      ui.alert(summaryMessage);
+      
+      Logger.log('Successfully processed ' + pbpEntries.length + ' PBP entries for ' + technicianName);
+      Modules.PBP._isProcessing = false;
+      return true;
+    } else {
+      Logger.log('No PBP entries found for ' + technicianName);
+      // Still update the sheet to clear any old entries
+      Modules.PBP.writePbpDataToSheet(techSheet, [], 0);
+      
+      // Show a simple "no entries" popup
+      var ui = SpreadsheetApp.getUi();
+      ui.alert("No PBP entries found for " + technicianName);
+      
+      Modules.PBP._isProcessing = false;
+      return true;
+    }
+    
+  } catch (err) {
+    Logger.log('Error processing PBP for ' + technicianName + ': ' + err);
+    SpreadsheetApp.getUi().alert('Error processing PBP for ' + technicianName + ': ' + err.message);
+    Modules.PBP._isProcessing = false;
+    return false;
   }
 };
 
@@ -401,4 +607,14 @@ function processAllPBPGlobal() {
 }
 
 // Create proxy functions for backward compatibility
-var updatePBPForTechnician = Modules.PBP.processForTechnician; 
+var updatePBPForTechnician = function(technicianName) {
+  Logger.log('Calling updatePBPForTechnician for ' + technicianName);
+  try {
+    // Call our module's method which has fallback implementation
+    // NOTE: According to Rule #12, this should be moved to src/core/Proxies in a future refactoring
+    return Modules.PBP.processForTechnician(technicianName);
+  } catch (err) {
+    Logger.log('Error in updatePBPForTechnician: ' + err);
+    return false;
+  }
+}; 

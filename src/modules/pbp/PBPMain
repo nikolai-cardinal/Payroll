@@ -9,6 +9,11 @@
 var Modules = Modules || {};
 Modules.PBP = Modules.PBP || {};
 
+// Ensure global availability of main functions
+// This needs to be at the top to ensure functions are globally accessible
+var pbpMain_updatePBPForTechnician; // Forward declaration to make it discoverable
+var pbpMain_processAllPBP; // Forward declaration to make it discoverable
+
 /**
 * Returns a standard mapping object for columns in the 'Main' sheet relevant to PBP.
 *
@@ -385,6 +390,10 @@ function processAllPBP() {
 // Make functions available through the Modules.PBP namespace for programmatic access
 Modules.PBP.updatePBPForTechnician = pbpMain_updatePBPForTechnician;
 Modules.PBP.processAllPBP = pbpMain_processAllPBP;
+
+// Ensure functions are added to the global scope to be found by other modules
+this.pbpMain_updatePBPForTechnician = pbpMain_updatePBPForTechnician;
+this.pbpMain_processAllPBP = pbpMain_processAllPBP;
 
 // Menu-specific global function
 function processAllPBPGlobal() {
