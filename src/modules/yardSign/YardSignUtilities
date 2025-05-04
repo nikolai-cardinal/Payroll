@@ -285,11 +285,11 @@ function processAllYardSignsUtility(statusCallback) {
 */
 function ensureYardSignSheetExists() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var yardSignSheet = ss.getSheetByName('Yard Sign');
+  var yardSignSheet = ss.getSheetByName(Modules.Constants.SHEET.YARD_SIGN);
   
   if (!yardSignSheet) {
     console.log("Yard Sign sheet not found, creating it...");
-    yardSignSheet = ss.insertSheet('Yard Sign');
+    yardSignSheet = ss.insertSheet(Modules.Constants.SHEET.YARD_SIGN);
   }
   
   // Check if the sheet already has headers

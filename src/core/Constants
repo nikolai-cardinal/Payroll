@@ -13,6 +13,7 @@ var Modules = Modules || {};
     MAIN: 'Main',           // primary payroll sheet
     SPIFF: 'Spiff/Bonus',   // spiff + bonus calculations
     SERVICE: 'Service',     // service calls sheet
+    YARD_SIGN: 'Yard Sign', // yard sign sheet
     // Add future sheet constants here
   });
 

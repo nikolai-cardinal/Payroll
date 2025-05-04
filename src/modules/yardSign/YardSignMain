@@ -328,13 +328,14 @@ function processAllYardSigns() {
   var skippedCount = 0;
   var errorCount = 0;
   var skippedTechs = []; // Store names of skipped technicians
+  var exemptTechs = []; // Store exempt technicians that we won't show in the popup
 
   if (!ratesSheet) {
     ui.alert('Error: Main sheet not found.');
     return;
   }
 
-  // Get technician names and classes from the rates sheet (Columns A and C)
+  // Get technician names and classes from the rates sheet (Columns A, C, and E)
   // Assuming data starts from row 3
   var startRow = 3; 
   var lastRow = ratesSheet.getLastRow();
@@ -342,33 +343,42 @@ function processAllYardSigns() {
     ui.alert("No technician data found in 'Main' sheet (starting row 3).");
     return;
   }
-  // Get columns A (Name), B (Dept - maybe needed later?), C (Class)
-  var range = ratesSheet.getRange(startRow, 1, lastRow - startRow + 1, 3); 
+  // Get columns A (Name), B (Dept), C (Class), E (Exempt status)
+  var range = ratesSheet.getRange(startRow, 1, lastRow - startRow + 1, 5); 
   var data = range.getValues();
 
-  // Use a sidebar or toast for progress instead of modal dialog if possible
-  // ui.showSidebar(...) or SpreadsheetApp.getActiveSpreadsheet().toast(...)
-  // For simplicity, using modal dialog as before:
-  ui.showModalDialog(HtmlService.createHtmlOutput('<p>Processing all Yard Signs... Please wait.</p>'), 'Processing');
+  // Replace modal dialog with a toast notification which is less intrusive
+  ss.toast("Processing all Yard Signs... This may take a moment.", "Processing", 30);
 
   for (var i = 0; i < data.length; i++) {
     var techName = data[i][0];
-    // Get Class from Column C (index 2 in the zero-based data array)
-    var techClass = data[i][2] ? data[i][2].toString().trim() : ''; 
-    var currentRow = startRow + i; // Actual row number for logging
-
     // Skip empty rows
     if (!techName || techName.toString().trim() === '') {
       continue;
     }
+    
+    // Get Class from Column C (index 2 in the zero-based data array)
+    var techClass = data[i][2] ? data[i][2].toString().trim() : '';
+    // Get Exempt status from Column E (index 4 in the zero-based data array)
+    var exemptStatus = data[i][4] ? data[i][4].toString().trim() : '';
+    var isExempt = exemptStatus.toLowerCase() === 'exempt';
+    
+    var currentRow = startRow + i; // Actual row number for logging
 
     // Check if technician is Class 1
     if (techClass.toLowerCase() === 'class 1') {
         console.log(`Skipping Yard Sign processing for Class 1 technician: ${techName} (Row ${currentRow})`);
         skippedCount++;
-        skippedTechs.push(`${techName} (Class 1)`);
         
-        // Ensure tech sheet exists before clearing/updating
+        // Only add to skippedTechs if not exempt
+        if (!isExempt) {
+          skippedTechs.push(`${techName} (Class 1)`);
+        } else {
+          exemptTechs.push(techName); // Track exempt techs separately for logging
+          console.log(`${techName} is exempt - not showing in summary popup`);
+        }
+        
+        // Ensure Technician sheet exists before clearing/updating
         var techSheetCheck = ss.getSheetByName(techName);
         if (techSheetCheck) {
             try {
@@ -385,12 +395,20 @@ function processAllYardSigns() {
         continue; // Move to the next technician
     }
 
-    // Check if technician sheet exists before processing (redundant check if updateYardSign handles it, but safe)
+    // Check if technician sheet exists before processing 
     var techSheet = ss.getSheetByName(techName);
     if (!techSheet) {
       console.warn(`Skipping Yard Sign for ${techName}: Technician sheet not found.`);
       skippedCount++;
-      skippedTechs.push(`${techName} (No Sheet)`);
+      
+      // Only add to skippedTechs if not exempt
+      if (!isExempt) {
+        skippedTechs.push(`${techName} (No Sheet)`);
+      } else {
+        exemptTechs.push(techName); // Track exempt techs separately for logging
+        console.log(`${techName} is exempt - not showing in summary popup`);
+      }
+      
       continue; // Skip to next technician
     }
 
@@ -402,11 +420,22 @@ function processAllYardSigns() {
       // The called function will now handle apprentice checks internally as well
       updateYardSignForTechnician(techName, null, null, true, true); 
       processedCount++;
+      
+      // Update progress every 5 technicians
+      if (processedCount % 5 === 0) {
+        ss.toast(`Processing: ${processedCount} technicians so far...`, "Progress", 3);
+      }
     } catch (e) {
       console.error(`Error processing Yard Signs for ${techName}: ${e.message}`);
       errorCount++;
-      // Optionally: Log error without stopping the loop for other techs
-      skippedTechs.push(`${techName} (Error: ${e.message.substring(0, 50)})`); // Add to skipped list with error note
+      
+      // Only add to skippedTechs if not exempt
+      if (!isExempt) {
+        skippedTechs.push(`${techName} (Error: ${e.message.substring(0, 50)})`);
+      } else {
+        exemptTechs.push(techName); // Track exempt techs separately for logging
+        console.log(`${techName} is exempt - not showing in summary popup`);
+      }
     }
     
     // Add a small delay and flush to prevent timeouts on large lists
@@ -414,14 +443,20 @@ function processAllYardSigns() {
     SpreadsheetApp.flush(); 
   }
   
-  // Close the modal dialog - usually happens automatically
-  // Example: DriveApp.getApp().close(); // Incorrect, just letting script end handle it.
+  // Clear the processing toast
+  ss.toast("Processing complete!", "Complete", 3);
 
   // Display summary message
   var summaryMessage = `Yard Sign Processing Complete.\n\n` +
                        `Processed: ${processedCount}\n` +
-                       `Skipped: ${skippedCount}\n` +
+                       `Skipped: ${skippedCount - exemptTechs.length}\n` + // Adjust skipped count to exclude exempt techs
                        `Errors: ${errorCount}`;
+  
+  // Log total exempt techs for reference                     
+  console.log(`Total exempt technicians excluded from summary: ${exemptTechs.length}`);
+  if (exemptTechs.length > 0) {
+    console.log(`Exempt technicians: ${exemptTechs.join(', ')}`);
+  }
                        
   if (skippedTechs.length > 0) {
      // Limit the number of names shown in the alert if the list is very long
@@ -438,4 +473,25 @@ function processAllYardSigns() {
   }
 
   ui.alert(summaryMessage);
+}
+
+// Export functions to the module namespace for external access (Rule 23)
+(function() {
+  // Create Main namespace if it doesn't exist
+  Modules.YardSign.Main = Modules.YardSign.Main || {};
+  
+  // Export functions to the Main namespace
+  Modules.YardSign.Main.updateYardSignForTechnician = updateYardSignForTechnician;
+  Modules.YardSign.Main.processAllYardSigns = processAllYardSigns;
+  Modules.YardSign.Main.initYardSign = initYardSign;
+})();
+
+// Global function for direct menu access - must be outside of IIFE to be in global scope
+/**
+ * Menu function for processing all yard signs.
+ * This is directly called from the menu system.
+ */
+function menuProcessAllYardSigns() {
+  console.log("Menu function: Process All Yard Signs called");
+  Modules.YardSign.processAll();
 } 

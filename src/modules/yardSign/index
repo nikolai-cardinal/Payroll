@@ -1,0 +1,111 @@
+// Namespace stub – YardSign
+var Modules = Modules || {};
+Modules.YardSign = Modules.YardSign || {};
+
+/* global console, processYardSignsForTechnician */
+
+// Public API for YardSign Module
+
+/**
+ * Adds menu entries specific to the Yard Sign module.
+ * @param {GoogleAppsScript.Base.Ui} ui The UI environment.
+ */
+Modules.YardSign.addMenuEntries = function(ui) {
+  console.log('YardSign: addMenuEntries called');
+  
+  // No unique menu entries for Yard Sign, as it will be accessed through standard menus
+  // This function exists primarily to maintain the standard module interface
+};
+
+/**
+ * Handles edit events relevant to the YardSign module.
+ * Ignores any triggers from Column G in the Main sheet.
+ * @param {GoogleAppsScript.Events.SheetsOnEdit} e The edit event object.
+ * @return {Object|null} Optional result or status.
+ */
+Modules.YardSign.handleEdit = function(e) {
+  // Skip processing if edit is in Column G of Main sheet
+  if (e && e.range) {
+    var sheet = e.range.getSheet();
+    if (sheet.getName() === Modules.Constants.SHEET.MAIN && e.range.getColumn() === 7) {
+      console.log('YardSign: Ignoring trigger from Column G in Main sheet as requested');
+      return null;
+    }
+  }
+  
+  console.log('YardSign: handleEdit called for range ' + (e && e.range ? e.range.getA1Notation() : 'N/A'));
+  return null;
+};
+
+/**
+ * Processes all relevant entries for the Yard Sign module.
+ */
+Modules.YardSign.processAll = function() {
+  console.log('YardSign: processAll called');
+  
+  // Call the function that handles processing all yard signs
+  if (typeof processAllYardSigns === 'function') {
+    processAllYardSigns();
+  } else if (Modules.YardSign.Main && typeof Modules.YardSign.Main.processAllYardSigns === 'function') {
+    Modules.YardSign.Main.processAllYardSigns();
+  } else {
+    console.error('YardSign: No valid processAllYardSigns function found');
+  }
+};
+
+/**
+ * Processes Yard Sign entries for a specific technician.
+ * @param {string} technicianName The name of the technician to process.
+ */
+Modules.YardSign.processForTechnician = function(technicianName) {
+  if (!technicianName) return;
+
+  console.log('YardSign: Processing for technician ' + technicianName);
+
+  try {
+    var processed = false;
+
+    // Preferred modern implementation (global)
+    if (typeof updateYardSignForTechnician === 'function') {
+      updateYardSignForTechnician(technicianName, null, null, true, false);
+      processed = true;
+    }
+
+    // Legacy/alternative naming
+    else if (typeof processYardSignsForTechnician === 'function') {
+      processYardSignsForTechnician(technicianName);
+      processed = true;
+    }
+
+    // Deep namespace fallback (Rule 23)
+    else if (Modules.YardSign.Main && typeof Modules.YardSign.Main.updateYardSignForTechnician === 'function') {
+      Modules.YardSign.Main.updateYardSignForTechnician(technicianName, null, null, true, false);
+      processed = true;
+    }
+
+    // Additional global helper that may exist
+    else if (typeof processYardSignForTechnician === 'function') {
+      processYardSignForTechnician(technicianName);
+      processed = true;
+    }
+
+    if (!processed) {
+      // Introspect available functions for easier debugging
+      var available = [];
+      if (Modules.YardSign) {
+        for (var key in Modules.YardSign) {
+          if (typeof Modules.YardSign[key] === 'function') available.push(key);
+        }
+      }
+      console.error('YardSign: No valid individual processing function found for: ' + technicianName + '. Available: ' + available.join(', '));
+      throw new Error('No valid Yard Sign processing function found for individual technician');
+    }
+  } catch (err) {
+    if (Modules.Shared && Modules.Shared.PayrollLogger) {
+      Modules.Shared.PayrollLogger.error('YardSign.processForTechnician error:', err);
+    } else {
+      console.error('YardSign.processForTechnician error: ' + err);
+    }
+    throw err; // propagate so callers can handle
+  }
+}; 

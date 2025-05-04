@@ -16,7 +16,7 @@ Modules.Menu = Modules.Menu || {};
       .addSeparator()
       .addItem('Bonus', 'bonusPrompt')
       .addItem('PBP', 'pbpPrompt')
-      .addItem('Yard Signs', 'menuProcessAllYardSigns')
+      .addItem('Yard Signs', 'yardSignPrompt')
       .addItem('Timesheet', 'timesheetPrompt')
       .addItem('Lead Set', 'leadSetPrompt');
   };

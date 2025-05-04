@@ -419,6 +419,43 @@ function timesheetPrompt() {
   }
 }
 
+function yardSignPrompt() {
+  var ui = SpreadsheetApp.getUi();
+  var choice = ui.alert('Yard Signs','Process Yard Signs for EVERYONE (Yes) or an INDIVIDUAL technician (No)?',ui.ButtonSet.YES_NO);
+  if (choice === ui.Button.YES) {
+    try {
+      if (typeof processAllYardSigns === 'function') {
+        processAllYardSigns();
+      } else if (Modules.YardSign && typeof Modules.YardSign.processAll === 'function') {
+        Modules.YardSign.processAll();
+      } else if (Modules.YardSign && Modules.YardSign.Main && typeof Modules.YardSign.Main.processAllYardSigns === 'function') {
+        Modules.YardSign.Main.processAllYardSigns();
+      } else {
+        ui.alert('Error','No valid Yard Sign batch processing function found.',ui.ButtonSet.OK);
+      }
+    } catch (err) {
+      Modules.Shared && Modules.Shared.PayrollLogger && Modules.Shared.PayrollLogger.error('Error processing all yard signs:',err);
+      ui.alert('Error processing Yard Signs',err && err.message ? err.message : err,ui.ButtonSet.OK);
+    }
+  } else if (choice === ui.Button.NO) {
+    var resp = ui.prompt('Individual Yard Sign','Enter the technician\'s name:',ui.ButtonSet.OK_CANCEL);
+    if (resp.getSelectedButton() !== ui.Button.OK) return;
+    var techName = (resp.getResponseText() || '').trim();
+    if (!techName) return;
+    try {
+      var found = false;
+      if (Modules.YardSign && typeof Modules.YardSign.processForTechnician === 'function') { Modules.YardSign.processForTechnician(techName); found = true; }
+      else if (Modules.YardSign && typeof Modules.YardSign.updateYardSignForTechnician === 'function') { Modules.YardSign.updateYardSignForTechnician(techName); found = true; }
+      else if (Modules.YardSign && Modules.YardSign.Main && typeof Modules.YardSign.Main.updateYardSignForTechnician === 'function') { Modules.YardSign.Main.updateYardSignForTechnician(techName,null,null,true,false); found = true; }
+      else if (typeof processYardSignForTechnician === 'function') { processYardSignForTechnician(techName); found = true; }
+      if (!found) throw new Error('No valid Yard Sign processing function found for individual technician');
+    } catch (err) {
+      Modules.Shared && Modules.Shared.PayrollLogger && Modules.Shared.PayrollLogger.error('Error processing Yard Sign for '+techName+':',err);
+      ui.alert('Error processing Yard Sign','Could not process Yard Sign for technician "'+techName+'". Error: '+err.message,ui.ButtonSet.OK);
+    }
+  }
+}
+
 Modules.Main = {
   onOpen: onOpen,
   onEdit: onEdit,
@@ -429,4 +466,5 @@ Modules.Main = {
   pbpPrompt: pbpPrompt,
   leadSetPrompt: leadSetPrompt,
   timesheetPrompt: timesheetPrompt,
+  yardSignPrompt: yardSignPrompt,
 }; 
