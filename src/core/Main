@@ -82,6 +82,19 @@ function runFullPayroll() {
   var ui = SpreadsheetApp.getUi();
   ui.alert('Running full payroll – please wait');
 
+  // NEW: Update Pay Period header on all technician sheets before processing
+  try {
+    if (Modules.Utilities && typeof Modules.Utilities.getPayPeriodTextFromMain === 'function' &&
+        typeof Modules.Utilities.syncPayPeriodHeaderForAllTechnicians === 'function') {
+      var periodText = Modules.Utilities.getPayPeriodTextFromMain();
+      if (periodText) {
+        Modules.Utilities.syncPayPeriodHeaderForAllTechnicians(periodText);
+      }
+    }
+  } catch(ignore) {
+    // swallow
+  }
+
   var steps = [
     { fn: Modules.SpiffBonus && Modules.SpiffBonus.processAll },
     { fn: Modules.PBP && Modules.PBP.processAllPBP },
@@ -135,6 +148,19 @@ function runIndividualPayroll() {
   
   ui.alert('Running payroll for ' + techName + ' – please wait');
   
+  // NEW: Update Pay Period header on the specific technician sheet
+  try {
+    if (Modules.Utilities && typeof Modules.Utilities.getPayPeriodTextFromMain === 'function' &&
+        typeof Modules.Utilities.setPayPeriodHeaderForTechnician === 'function') {
+      var periodTextInd = Modules.Utilities.getPayPeriodTextFromMain();
+      if (periodTextInd) {
+        Modules.Utilities.setPayPeriodHeaderForTechnician(techName, periodTextInd);
+      }
+    }
+  } catch(ignore) {
+    // swallow
+  }
+
   // Run each module's process for this specific technician
   var steps = [
     { name: 'Spiff/Bonus', fn: Modules.SpiffBonus && Modules.SpiffBonus.processForTechnician, args: [techName] },

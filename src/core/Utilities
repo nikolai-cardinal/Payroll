@@ -119,11 +119,101 @@ Modules.Utilities = Modules.Utilities || {};
     }
   }
 
+  /**
+   * Sets the Pay Period text (from Main!F1) into cell A2 of a technician sheet.
+   * Assumes A1 is merged across A1:C1 in the template, but will just write
+   * the value without altering merge state.
+   *
+   * @param {string} technicianName The name of the technician / sheet.
+   * @param {string} payPeriodText  The exact text (e.g. "Pay Period: 04_21_25 - 04_27_25").
+   * @param {SpreadsheetApp.Spreadsheet} [ss] Optional spreadsheet instance.
+   * @return {boolean} True if the sheet was found and updated.
+   */
+  function setPayPeriodHeaderForTechnician(technicianName, payPeriodText, ss) {
+    if (!technicianName || !payPeriodText) return false;
+    ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return false;
+
+    try {
+      var techSheet = ss.getSheetByName(technicianName);
+      if (!techSheet) return false;
+      techSheet.getRange("A2").setValue(payPeriodText);
+      return true;
+    } catch (err) {
+      console.error("setPayPeriodHeaderForTechnician error:", err);
+      return false;
+    }
+  }
+
+  /**
+   * Writes the Pay Period text to every technician sheet referenced in Main.
+   *
+   * @param {string} payPeriodText The pay period string to write.
+   * @param {SpreadsheetApp.Spreadsheet} [ss] Optional spreadsheet instance.
+   * @return {number} The number of technician sheets successfully updated.
+   */
+  function syncPayPeriodHeaderForAllTechnicians(payPeriodText, ss) {
+    if (!payPeriodText) return 0;
+    ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return 0;
+
+    var mainSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
+    if (!mainSheet) return 0;
+
+    var mapping = (Modules.Utilities && typeof Modules.Utilities.getRatesSheetMapping === 'function')
+      ? Modules.Utilities.getRatesSheetMapping()
+      : { nameColumn: 1, dataStartRow: 3 };
+
+    var lastRow = mainSheet.getLastRow();
+    if (lastRow < mapping.dataStartRow) return 0;
+
+    var names = mainSheet
+      .getRange(mapping.dataStartRow, mapping.nameColumn, lastRow - mapping.dataStartRow + 1, 1)
+      .getValues()
+      .flat();
+
+    var count = 0;
+    names.forEach(function(name) {
+      if (name && typeof name === 'string' && name.trim() !== '') {
+        if (setPayPeriodHeaderForTechnician(name, payPeriodText, ss)) {
+          count++;
+        }
+      }
+    });
+
+    return count;
+  }
+
+  /**
+   * Reads the Pay Period string from Main!F1 and returns it as a string.
+   * Falls back to empty string if not found.
+   *
+   * @param {SpreadsheetApp.Spreadsheet} [ss] Optional spreadsheet instance.
+   * @return {string} The pay period text.
+   */
+  function getPayPeriodTextFromMain(ss) {
+    ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return '';
+
+    try {
+      var mainSheet = ss.getSheetByName(Modules.Constants.SHEET.MAIN);
+      if (!mainSheet) return '';
+      var val = mainSheet.getRange('F1').getDisplayValue();
+      return val ? val.toString() : '';
+    } catch (err) {
+      console.error('getPayPeriodTextFromMain error:', err);
+      return '';
+    }
+  }
+
   // Expose helpers on the namespace without overwriting any existing keys.
   Object.assign(Modules.Utilities, {
     getRatesSheetMapping: getRatesSheetMapping,
     columnToLetter: columnToLetter,
     safeOperation: safeOperation,
-    isTechnicianEligibleForBonus: isTechnicianEligibleForBonus
+    isTechnicianEligibleForBonus: isTechnicianEligibleForBonus,
+    setPayPeriodHeaderForTechnician: setPayPeriodHeaderForTechnician,
+    syncPayPeriodHeaderForAllTechnicians: syncPayPeriodHeaderForAllTechnicians,
+    getPayPeriodTextFromMain: getPayPeriodTextFromMain
   });
 })();
