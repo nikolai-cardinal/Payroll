@@ -1181,7 +1181,6 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
     if (!pbpAmount) continue; // Skip if no PBP amount found
     
     // Get technician names from the sheet
-    var salesTechCol = 5; // Column F - Sold By Technician 
     var primaryTechCol = 6; // Column G - Primary Technician
     var assignedTechsCol = 7; // Column H - Assigned Technicians
     
@@ -1201,7 +1200,7 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
     }
 
     // Add primary tech and all assigned techs
-    addTech(row[salesTechCol]);
+    addTech(row[primaryTechCol]);
     var assignedTechs = parseTechnicianNames(row[assignedTechsCol] || '');
     for (var a = 0; a < assignedTechs.length; a++) {
       addTech(assignedTechs[a]);

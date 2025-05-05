@@ -11,6 +11,9 @@
  *   This module exposes a handleEdit(e) method which will be invoked by Core/Main's
  *   delegation flow *if* Modules.TotalPay is included in the ordered modules list.
  *   To stay self-contained, it also adds itself to the list at runtime when loaded.
+ *   
+ *   For more reliable updates, use installTotalPayTrigger() to set up an installable
+ *   trigger that works even when the sheet is not actively being edited by a user.
  */
 
 var Modules = Modules || {};
@@ -91,6 +94,80 @@ Modules.TotalPay.handleEdit = function(e) {
     return false;
   }
 };
+
+/**
+ * Installable trigger handler that ensures total pay updates reliably.
+ * Called by the installable trigger.
+ * @param {GoogleAppsScript.Events.SheetsOnEdit} e Edit event payload.
+ */
+Modules.TotalPay.onEditInstallable = function(e) {
+  try {
+    return Modules.TotalPay.handleEdit(e);
+  } catch (err) {
+    if (Modules.Shared && Modules.Shared.PayrollLogger) {
+      Modules.Shared.PayrollLogger.error('TotalPay.onEditInstallable error:', err);
+    } else {
+      console.error('TotalPay.onEditInstallable error: ' + err);
+    }
+    return false;
+  }
+};
+
+/**
+ * Sets up an installable trigger for more reliable total pay updates.
+ * This should be run once to install the trigger.
+ */
+Modules.TotalPay.installTrigger = function() {
+  // Check for existing triggers to avoid duplicates
+  var allTriggers = ScriptApp.getProjectTriggers();
+  var hasEditTrigger = false;
+  
+  allTriggers.forEach(function(trigger) {
+    if (trigger.getHandlerFunction() === 'onEditInstallable') {
+      hasEditTrigger = true;
+    }
+  });
+  
+  if (!hasEditTrigger) {
+    ScriptApp.newTrigger('onEditInstallable')
+      .forSpreadsheet(SpreadsheetApp.getActive())
+      .onEdit()
+      .create();
+      
+    if (Modules.Shared && Modules.Shared.PayrollLogger) {
+      Modules.Shared.PayrollLogger.info('TotalPay: Installed onEdit trigger');
+    } else {
+      console.info('TotalPay: Installed onEdit trigger');
+    }
+  } else {
+    if (Modules.Shared && Modules.Shared.PayrollLogger) {
+      Modules.Shared.PayrollLogger.info('TotalPay: onEdit trigger already exists');
+    } else {
+      console.info('TotalPay: onEdit trigger already exists');
+    }
+  }
+};
+
+/**
+ * Global function for the installable trigger to call.
+ * Delegates to the module's handler.
+ */
+function onEditInstallable(e) {
+  if (Modules.TotalPay && typeof Modules.TotalPay.onEditInstallable === 'function') {
+    return Modules.TotalPay.onEditInstallable(e);
+  }
+  return false;
+}
+
+/**
+ * Exposes the trigger installation function globally.
+ * Run this function once to install the trigger.
+ */
+function installTotalPayTrigger() {
+  if (Modules.TotalPay && typeof Modules.TotalPay.installTrigger === 'function') {
+    Modules.TotalPay.installTrigger();
+  }
+}
 
 /**
  * Runtime patch – inject this module into Core/Main's ordered list (if available).
