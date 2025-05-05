@@ -2,6 +2,16 @@ var Modules = Modules || {};
 Modules.PBP = Modules.PBP || {};
 Modules.PBP.Helpers = Modules.PBP.Helpers || {};
 
+/**
+ * PBP Calculation Helpers
+ * 
+ * Important note on Class 1 technicians:
+ * - Class 1 technicians are marked as 'Assistant' for split calculations
+ * - They are included in the team count and affect the split percentages for all team members
+ * - They remain ineligible for PBP payouts (payout amount = 0)
+ * - This ensures higher class techs don't receive payment for work assisted by Class 1 technicians
+ */
+
 (function() {
   'use strict';
 
@@ -21,7 +31,45 @@ Modules.PBP.Helpers = Modules.PBP.Helpers || {};
       var lower = name.toLowerCase();
       if (cache[lower]) continue;
       var title = row[2] ? row[2].toString() : '';
-      var info = Modules.Shared.TechnicianUtils.getTechnicianClassAndRole(title);
+      
+      // Use getTechnicianClassAndRole with safe fallback
+      var getTechClassAndRole = (Modules.Shared && 
+                               Modules.Shared.TechnicianUtils && 
+                               Modules.Shared.TechnicianUtils.getTechnicianClassAndRole) ? 
+        Modules.Shared.TechnicianUtils.getTechnicianClassAndRole : 
+        function(posTitle) {
+          // Simple inline fallback that handles "Class X" format
+          if (!posTitle) return { class: 0, role: 'None', isEligible: false };
+          var titleLower = posTitle.toString().toLowerCase().trim();
+          
+          // Direct matches for dropdown values
+          if (titleLower === 'class 4' || titleLower === 'c4') {
+            return { class: 4, role: 'Lead', isEligible: true };
+          }
+          if (titleLower === 'class 3' || titleLower === 'c3') {
+            return { class: 3, role: 'Lead', isEligible: true };
+          }
+          if (titleLower === 'class 2' || titleLower === 'c2') {
+            return { class: 2, role: 'Assistant', isEligible: true };
+          }
+          if (titleLower === 'class 1' || titleLower === 'c1') {
+            return { class: 1, role: 'Assistant', isEligible: false };
+          }
+          
+          // Regex match for "Class X" format
+          var classMatch = titleLower.match(/class\s*([1-4])/);
+          if (classMatch && classMatch[1]) {
+            var techClass = parseInt(classMatch[1], 10);
+            var role = techClass >= 3 ? 'Lead' : 'Assistant';
+            var eligible = techClass >= 2;
+            return { class: techClass, role: role, isEligible: eligible };
+          }
+          
+          // Default
+          return { class: 2, role: 'Assistant', isEligible: true };
+        };
+      
+      var info = getTechClassAndRole(title);
       cache[lower] = {
         name: name,
         class: info.class,
@@ -78,6 +126,13 @@ Modules.PBP.Helpers = Modules.PBP.Helpers || {};
     uniqueNames.forEach(function(name) {
       var cached = techCache[name.toLowerCase()];
       var info = cached || { name: name, class: 0, isEligible: false, initialRole: 'None' };
+      
+      // Assign Class 1 as Assistants for split calculations, but keep them ineligible for payment
+      if (info.class === 1) {
+        info.isEligible = false;
+        info.initialRole = 'Assistant'; // Changed from 'None' to 'Assistant'
+      }
+      
       techs.push({
         name: info.name,
         class: info.class,
@@ -87,25 +142,57 @@ Modules.PBP.Helpers = Modules.PBP.Helpers || {};
         splitPercent: 0,
         payout: 0
       });
-      if (info.class > highestClass) highestClass = info.class;
+      
+      // Only consider eligible techs for highest class determination
+      if (info.isEligible && info.class > highestClass) {
+        highestClass = info.class;
+      }
     });
 
+    // Count all techs (including Class 1) for team composition
     var total = techs.length;
     var hasHighClass = techs.some(function(t) { return t.class >= 3; });
 
     // Determine final role per rules.
     techs.forEach(function(t) {
-      if (t.class === 2 && t.class === highestClass && !hasHighClass) t.finalRole = 'Lead';
-      if (total === 1 && t.class >= 2) t.finalRole = 'Lead';
-      if (total === 1 && t.class === 1) t.finalRole = 'Assistant';
+      // Class 1 keeps Assistant role but stays ineligible
+      if (t.class === 1) {
+        t.finalRole = 'Assistant';
+        return;
+      }
+      
+      // Skip other ineligible techs
+      if (!t.isEligible) {
+        t.finalRole = 'None';
+        return;
+      }
+      
+      // Class 2 promotion: If a Class 2 tech is highest class and no Class 3+ present
+      if (t.class === 2 && t.class === highestClass && !hasHighClass) {
+        t.finalRole = 'Lead';
+      }
+      
+      // Solo technician gets Lead role if Class 2+
+      if (total === 1 && t.class >= 2) {
+        t.finalRole = 'Lead';
+      }
     });
 
-    var leadCount = techs.filter(function(t){ return t.finalRole === 'Lead'; }).length;
-    var assistantCount = techs.filter(function(t){ return t.finalRole === 'Assistant'; }).length;
+    // Count all roles for split calculations, including Class 1 as Assistants
+    var leadCount = techs.filter(function(t) { 
+      return t.finalRole === 'Lead';
+    }).length;
+    
+    var assistantCount = techs.filter(function(t) { 
+      return t.finalRole === 'Assistant';
+    }).length;
 
     // Calculate split % + payout
     techs.forEach(function(t) {
+      // Calculate split percentages for all techs based on their role
       t.splitPercent = Modules.Shared.PayrollUtils.calculateSplitPercentage(total, leadCount, assistantCount, t.finalRole);
+      
+      // But only eligible techs get a payout
       t.payout = t.isEligible ? pbpAmount * (t.splitPercent / 100) : 0;
     });
 

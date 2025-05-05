@@ -1066,6 +1066,23 @@ function getClassAndRoleFromTitle(title) {
   
   var titleLower = title.toString().toLowerCase().trim();
   
+  // Explicit class detection from dropdown values in the screenshot
+  if (titleLower === 'class 4' || titleLower === 'c4') {
+    return { class: 4, role: 'Lead', isEligible: true };
+  }
+  
+  if (titleLower === 'class 3' || titleLower === 'c3') {
+    return { class: 3, role: 'Lead', isEligible: true };
+  }
+  
+  if (titleLower === 'class 2' || titleLower === 'c2') {
+    return { class: 2, role: 'Assistant', isEligible: true };
+  }
+  
+  if (titleLower === 'class 1' || titleLower === 'c1') {
+    return { class: 1, role: 'None', isEligible: false };
+  }
+  
   // Class 4 roles (highest seniority)
   if (titleLower.includes('master') || titleLower.includes('senior tech')) {
     return { class: 4, role: 'Lead', isEligible: true };
@@ -1206,6 +1223,7 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
     // Calculate split percentages - simplified fallback
     var techs = [];
     var highestClass = 0;
+    var hasPaidTechs = false;
 
     // Populate base info and find highest class present
     for (var u = 0; u < uniqueNames.length; u++) {
@@ -1218,6 +1236,16 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
         initialRole: 'Assistant' 
       };
       
+      // Only count higher class if tech is eligible for payment
+      if (techInfo.isEligible && techInfo.class > highestClass) {
+        highestClass = techInfo.class;
+      }
+      
+      // Track if we have any paid techs
+      if (techInfo.isEligible && techInfo.class >= 2) {
+        hasPaidTechs = true;
+      }
+      
       techs.push({
         name: techInfo.name,
         class: techInfo.class,
@@ -1227,60 +1255,102 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
         splitPercent: 0,
         payout: 0
       });
-      
-      if (techInfo.class > highestClass) {
-        highestClass = techInfo.class;
-      }
     }
 
-    var total = techs.length;
-    var hasHighClass = techs.some(function(t) { return t.class >= 3; });
+    // Skip if no eligible techs
+    if (!hasPaidTechs) continue;
 
-    // Determine final role per rules
-    for (var t = 0; t < techs.length; t++) {
-      var tech = techs[t];
-      if (tech.class === 2 && tech.class === highestClass && !hasHighClass) {
-        tech.finalRole = 'Lead';
-      }
-      if (total === 1 && tech.class >= 2) {
-        tech.finalRole = 'Lead';
-      }
-      if (total === 1 && tech.class === 1) {
-        tech.finalRole = 'Assistant';
-      }
-    }
+    // Only count eligible techs (class 2+) in total count for splitting
+    var eligibleTechs = techs.filter(function(t) { 
+      return t.isEligible && t.class >= 2; 
+    });
+    var total = eligibleTechs.length;
+    var hasHighClass = techs.some(function(t) { return t.class >= 3 && t.isEligible; });
 
-    var leadCount = techs.filter(function(t) { return t.finalRole === 'Lead'; }).length;
-    var assistantCount = techs.filter(function(t) { return t.finalRole === 'Assistant'; }).length;
-
-    // Calculate split % + payout
-    for (var s = 0; s < techs.length; s++) {
-      var t = techs[s];
+    // Determine final role per rules - ONLY for eligible techs
+    techs.forEach(function(t) {
+      // Class 1 techs get Assistant role but remain ineligible for payment
+      if (t.class === 1) {
+        t.isEligible = false;
+        t.finalRole = 'Assistant';
+        return;
+      }
       
-      // Calculate split percentage
+      if (!t.isEligible) return; // Skip other ineligible techs
+      
+      if (t.class === 2 && t.class === highestClass && !hasHighClass) t.finalRole = 'Lead';
+      if (total === 1 && t.class >= 2) t.finalRole = 'Lead';
+    });
+
+    // Count all roles for split calculations, including Class 1 as Assistants
+    var leadCount = techs.filter(function(t){ 
+      return t.finalRole === 'Lead'; 
+    }).length;
+    
+    var assistantCount = techs.filter(function(t){ 
+      return t.finalRole === 'Assistant'; 
+    }).length;
+
+    // Calculate split percentage for all techs, but only eligible techs get payouts
+    techs.forEach(function(t) {
+      // Use Shared.PayrollUtils.calculateSplitPercentage if available
       var splitPercent = 0;
       
-      // If there's only one tech, they get 100%
-      if (total === 1) {
-        splitPercent = 100;
-      } 
-      // Two techs - 65/35 split for Lead/Assistant, 50/50 for same roles
-      else if (total === 2) {
-        if (leadCount === 1 && assistantCount === 1) {
-          splitPercent = t.finalRole === 'Lead' ? 65 : 35;
-        } else {
-          splitPercent = 50; // 2 Leads OR 2 Assistants
+      if (typeof Modules !== 'undefined' && 
+          typeof Modules.Shared !== 'undefined' && 
+          typeof Modules.Shared.PayrollUtils !== 'undefined' && 
+          typeof Modules.Shared.PayrollUtils.calculateSplitPercentage === 'function') {
+        // Use the proper implementation that follows business rules
+        splitPercent = Modules.Shared.PayrollUtils.calculateSplitPercentage(
+          total, leadCount, assistantCount, t.finalRole);
+      } else {
+        // Fallback calculation only if shared function unavailable
+        var effectiveTotal = leadCount + assistantCount;
+        
+        // Solo tech gets full amount
+        if (effectiveTotal === 1) {
+          splitPercent = 100;
+        } 
+        // Two techs - 65/35 split for Lead/Assistant, 50/50 for same roles
+        else if (effectiveTotal === 2) {
+          if (leadCount === 1 && assistantCount === 1) {
+            splitPercent = t.finalRole === 'Lead' ? 65 : 35;
+          } else {
+            splitPercent = 50; // 2 Leads OR 2 Assistants
+          }
+        } 
+        // Three techs - use proper 3-tech splits per business rules
+        else if (effectiveTotal === 3) {
+          if (leadCount === 1 && assistantCount === 2) {
+            splitPercent = t.finalRole === 'Lead' ? 46 : 27;
+          } else if (leadCount === 2 && assistantCount === 1) {
+            splitPercent = t.finalRole === 'Lead' ? 38 : 24;
+          } else {
+            splitPercent = 100 / 3; // Equal split for 3 leads or 3 assistants
+          }
         }
-      } 
-      // More techs - use standard splits
-      else if (total >= 3) {
-        // Fall back to equal split
-        splitPercent = 100 / total;
+        // Four techs - use proper 4-tech splits per business rules
+        else if (effectiveTotal === 4) {
+          if (leadCount === 2 && assistantCount === 2) {
+            splitPercent = t.finalRole === 'Lead' ? 30 : 20;
+          } else if (leadCount === 3 && assistantCount === 1) {
+            splitPercent = t.finalRole === 'Lead' ? 30 : 10;
+          } else {
+            splitPercent = 25; // Equal split for 4 leads or 4 assistants
+          }
+        }
+        // More than 4 techs - equal split (fallback)
+        else if (effectiveTotal > 4) {
+          // Fall back to equal split for 5+ techs
+          splitPercent = 100 / effectiveTotal;
+        }
       }
       
       t.splitPercent = splitPercent;
-      t.payout = t.isEligible ? pbpAmount * (splitPercent / 100) : 0;
-    }
+      
+      // But only eligible techs get paid
+      t.payout = (t.isEligible && t.finalRole !== 'None') ? pbpAmount * (splitPercent / 100) : 0;
+    });
     
     // Find this technician's details
     var targetTech = null;
@@ -1291,8 +1361,8 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
       }
     }
     
-    // Skip if technician not found or not eligible
-    if (!targetTech) continue;
+    // Skip if technician not found, not eligible, or no payout
+    if (!targetTech || !targetTech.isEligible || targetTech.payout <= 0) continue;
     
     // Add entry to results
     resultEntries.push({
@@ -1306,7 +1376,10 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
       splitPercentage: targetTech.splitPercent,
       isEligible: targetTech.isEligible,
       teamDetails: techs.map(function(t) {
-        return t.name + " (C" + t.class + "/" + t.finalRole + "/" + t.splitPercent.toFixed(1) + "%)";
+        return t.name + " (C" + t.class + "/" + 
+          // Show Class 1 as "Assistant" rather than "Not eligible" in the display string
+          (t.class === 1 ? "Assistant" : (t.isEligible ? t.finalRole : "Not eligible")) + "/" + 
+          t.splitPercent.toFixed(1) + "%)";
       }).join(', ')
     });
     

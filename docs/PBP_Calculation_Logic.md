@@ -40,6 +40,7 @@ For each row in the Job Performance Data Sheet identified as a PBP entry (contai
             *   **Class 1:** (Formerly Apprentice)
                 *   Overview: Entry-level tech in training. Works alongside senior techs. Focused on learning safety, process, and basics of the trade.
                 *   PBP: Not eligible.
+                *   **Important:** While Class 1 techs do not receive PBP directly when their payroll is processed, they ARE counted in team splits as Assistants. This ensures higher class techs don't receive payment for work done by Class 1 assistants.
                 *   *(Other Spiffs: Yard sign/review eligible, regular spiffs not eligible).*
             *   **Class 2 – Service Technician:**
                 *   Overview: Runs basic service and maintenance calls with oversight. Begins handling customer-facing interactions.
@@ -69,6 +70,7 @@ For each row in the Job Performance Data Sheet identified as a PBP entry (contai
     *   Count the total number of technicians assigned (`totalTechs`).
     *   Count the number of 'Lead' roles (`leadCount`).
     *   Count the number of 'Assistant' roles (`assistantCount`).
+    *   **Note:** All techs, including Class 1, are counted for role assignments and splits.
 6.  **Calculate PBP Split Percentages:**
     *   Based on `totalTechs`, `leadCount`, and `assistantCount`, determine the correct split scenario:
         *   **One-Man Job (`totalTechs` === 1):**
@@ -95,6 +97,7 @@ For each row in the Job Performance Data Sheet identified as a PBP entry (contai
     *   For each technician:
         *   If `isEligible` is `false` (i.e., Class 1 or invalid class), set their final `payoutAmount = 0`.
         *   If `isEligible` is `true`, set `payoutAmount = individualShare`.
+    *   **Note:** This step ensures that splits are calculated correctly for all team members, but Class 1 techs don't receive PBP payments when their payroll is run.
 9.  **Store Results:**
     *   For the specific technician whose payroll is being run (`technicianName` parameter in the main function):
         *   Record the calculated `payoutAmount`.

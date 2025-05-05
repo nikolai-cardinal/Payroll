@@ -377,9 +377,12 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
     if (processed[key]) continue;
     processed[key] = true;
 
+    // Use the updated computeJobTechnicians that properly handles Class 1 techs
     var jobTechs = Modules.PBP.Helpers.computeJobTechnicians(namesInfo.uniqueNames, techCache, pbpAmount);
     var target = jobTechs.find(function(t){ return t.name.toLowerCase() === technicianName.toLowerCase(); });
-    if (!target) continue;
+    
+    // Skip if target tech is not found or not eligible (e.g., Class 1) or has no payout
+    if (!target || !target.isEligible || target.payout <= 0) continue;
 
     resultEntries.push({
       customerName: row[1],
@@ -391,7 +394,11 @@ function calculatePbpEntries(technicianName, spiffBonusData, ratesData) {
       roleForJob: target.finalRole,
       splitPercentage: target.splitPercent,
       isEligible: target.isEligible,
-      teamDetails: jobTechs.map(function(t){return t.name+" (C"+t.class+"/"+t.finalRole+"/"+t.splitPercent.toFixed(1)+"%)";}).join(', ')
+      teamDetails: jobTechs.map(function(t){
+        return t.name + " (C" + t.class + "/" + 
+          (t.class === 1 ? "Assistant" : (t.isEligible ? t.finalRole : "Not eligible")) + "/" + 
+          t.splitPercent.toFixed(1) + "%)";
+      }).join(', ')
     });
     totalShare += target.payout;
   }
