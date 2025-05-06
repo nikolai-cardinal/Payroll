@@ -137,6 +137,7 @@ function runFullPayroll() {
     { name: 'KPI', fn: Modules.TechKPI && Modules.TechKPI.processAll },
     { name: 'Yard Signs', fn: Modules.YardSign && Modules.YardSign.processAll },
     { name: 'Timesheet', fn: Modules.TimeSheet && Modules.TimeSheet.processAll },
+    { name: 'Service', fn: (Modules.Service && Modules.Service.processAll) || (typeof processAllServices === 'function' && processAllServices) },
     { name: 'Lead Set', fn: Modules.LeadSet && Modules.LeadSet.processAll },
   ];
 
@@ -271,6 +272,7 @@ function runIndividualPayroll() {
     { name: 'KPI', fn: Modules.TechKPI && Modules.TechKPI.processForTechnician, args: [techName] },
     { name: 'Yard Signs', fn: Modules.YardSign && Modules.YardSign.processForTechnician, args: [techName] },
     { name: 'Timesheet', fn: Modules.TimeSheet && Modules.TimeSheet.processForTechnician, args: [techName] },
+    { name: 'Service', fn: (Modules.Service && Modules.Service.processForTechnician) || (typeof updateServiceForTechnician === 'function' && updateServiceForTechnician), args: [techName] },
     { name: 'Lead Set', fn: Modules.LeadSet && Modules.LeadSet.processForTechnician, args: [techName] },
   ];
   
@@ -598,6 +600,63 @@ function yardSignPrompt() {
   }
 }
 
+// Prompt user to run Service for everyone or an individual technician.
+function servicePrompt() {
+  var ui = SpreadsheetApp.getUi();
+  var choice = ui.alert(
+    'Service',
+    'Process Service for EVERYONE (Yes) or an INDIVIDUAL technician (No)?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (choice === ui.Button.YES) {
+    try {
+      if (typeof processAllServices === 'function') {
+        processAllServices();
+      } else if (Modules.Service && typeof Modules.Service.processAll === 'function') {
+        Modules.Service.processAll();
+      } else if (Modules.Service && Modules.Service.Main && typeof Modules.Service.Main.processAllServices === 'function') {
+        Modules.Service.Main.processAllServices();
+      } else {
+        ui.alert('Error', 'No valid Service batch processing function found.', ui.ButtonSet.OK);
+      }
+    } catch (err) {
+      Modules.Shared && Modules.Shared.PayrollLogger && Modules.Shared.PayrollLogger.error('Error processing all services:', err);
+      ui.alert('Error processing Service', err && err.message ? err.message : err, ui.ButtonSet.OK);
+    }
+  } else if (choice === ui.Button.NO) {
+    var resp = ui.prompt('Individual Service', 'Enter the technician\'s name:', ui.ButtonSet.OK_CANCEL);
+    if (resp.getSelectedButton() !== ui.Button.OK) return;
+    var techName = (resp.getResponseText() || '').trim();
+    if (!techName) return;
+
+    try {
+      var functionFound = false;
+      if (Modules.Service && typeof Modules.Service.processForTechnician === 'function') {
+        Modules.Service.processForTechnician(techName);
+        functionFound = true;
+      } else if (typeof updateServiceForTechnician === 'function') {
+        updateServiceForTechnician(techName);
+        functionFound = true;
+      } else if (Modules.Service && Modules.Service.Main && typeof Modules.Service.Main.processServiceForTechnician === 'function') {
+        Modules.Service.Main.processServiceForTechnician(techName);
+        functionFound = true;
+      }
+
+      if (!functionFound) {
+        ui.alert('Error', 'No valid Service processing function found for technician "' + techName + '".', ui.ButtonSet.OK);
+      } else {
+        ui.alert('Service processing complete for ' + techName);
+      }
+    } catch (err) {
+      Modules.Shared && Modules.Shared.PayrollLogger && Modules.Shared.PayrollLogger.error('Error processing Service for ' + techName + ':', err);
+      ui.alert('Error processing Service',
+               'Could not process service for technician "' + techName + '". Error: ' + (err && err.message ? err.message : err),
+               ui.ButtonSet.OK);
+    }
+  }
+}
+
 Modules.Main = {
   onOpen: onOpen,
   onEdit: onEdit,
@@ -609,4 +668,5 @@ Modules.Main = {
   leadSetPrompt: leadSetPrompt,
   timesheetPrompt: timesheetPrompt,
   yardSignPrompt: yardSignPrompt,
+  servicePrompt: servicePrompt,
 }; 

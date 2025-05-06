@@ -1,66 +1,68 @@
-# Progress Sidebar Additional Improvements
+# Project Update – Service Feature Integration and Menu Enhancements
 
-## Issues Identified in New Screenshot
-1. **PBP Summary Card Shows 0 Technicians**: The PBP summary card shows "Technicians Processed: 0" despite having a dollar amount of $328.87.
-2. **Inconsistent Card Placement**: Summary cards appear at different positions in the log flow.
-3. **Inconsistent Summary Data**: Some cards missing or showing incorrect data.
-4. **Card Style Inconsistencies**: Styling variations between different summary cards.
-5. **Incomplete Data Parsing**: The data extraction logic isn't correctly parsing all values from log entries.
+_Last updated: {{DATE}}_
 
-## Implementation Steps
+## 1. Overview of Changes
 
-### Step 1: Fix PBP Technician Count Parsing
-- Update the data extraction logic to properly parse technician counts for PBP entries
-- Ensure non-zero technician counts when dollar amounts are present
-- Add fallback logic to prevent showing "0" technicians when data exists
+1. **Technician Tools Menu**
+   * Added a new static menu entry **"Service"** under the root `🚚 Technician Tools` menu.
+   * The entry is appended in `src/core/Menu` and bound to a new handler `servicePrompt`.
 
-### Step 2: Improve Card Positioning
-- Ensure summary cards appear immediately after their corresponding "complete" log entry
-- Group related log entries and their summary cards together
-- Maintain proper vertical spacing between different process sections
+2. **Main Trigger-Layer Enhancements (`src/core/Main`)**
+   * Implemented `servicePrompt()` following existing prompt patterns (e.g. `timesheetPrompt`).
+   * Logic:
+     * Presents a **Yes / No** dialog: _Process Service for EVERYONE or an INDIVIDUAL technician?_
+     * **Batch path (Yes)** – delegates to (in order):
+       1. Global `processAllServices` function (legacy compatibility).
+       2. `Modules.Service.processAll()`.
+       3. `Modules.Service.Main.processAllServices()` (deep-namespace fallback).
+     * **Individual path (No)** – prompts for technician name and attempts:
+       1. `Modules.Service.processForTechnician(name)`.
+       2. Global `updateServiceForTechnician(name)` (legacy).
+       3. `Modules.Service.Main.processServiceForTechnician(name)` (fallback).
+   * Registered `servicePrompt` inside the exported `Modules.Main` map.
+   * Added **Service** to both `runFullPayroll` and `runIndividualPayroll` sequences, ensuring Service metrics are processed automatically whenever payroll is executed (batch or individual).
+   * Maintained the 500-line policy by inserting the new function near existing prompt block (no business logic added).
 
-### Step 3: Standardize Summary Card Design
-- Ensure all summary cards have identical styling (border, padding, shadow)
-- Apply consistent typography across all cards
-- Standardize the format of all summary information
-- Use consistent icon colors that match the log entry indicators
+3. **New Service Module**
+   * **Folder:** `src/modules/Service/`
+   * **File:** `Service_Feature` ( Apps Script file, no `.gs` extension per Rule 17 ).
+   * Provides two public functions:
+     * `Modules.Service.processForTechnician(techName)` – copies metrics from the global **Service** sheet to the technician's sheet:
+       * Source columns on `Service` sheet:
+         * **A** – Technician name
+         * **D** – **Total Sales**
+         * **E** – **Completed Revenue**
+       * Destination on technician sheet:
+         * `C16` – Completed Revenue
+         * `C17` – Total Sales
+     * `Modules.Service.processAll(technicianList?)` – iterates through each technician listed on the `Service` sheet (or the provided list) and calls `processForTechnician`.
+   * Constants:
+     * Reads `Modules.Constants.SHEET.SERVICE` if available, otherwise defaults to literal `'Service'`.
+   * Defensive coding:
+     * Validates sheet existence and technician presence.
+     * Gracefully logs errors through `Modules.Shared.PayrollLogger` where available.
+   * Linter compliance:
+     * Added `/* global SpreadsheetApp */` header and referenced API via `globalThis.SpreadsheetApp`.
 
-### Step 4: Enhanced Data Extraction Logic
-- Improve the log entry parsing to extract actual values more accurately
-- Add specialized parsing for each different card type (Bonus, PBP, Call By Call, etc.)
-- Implement better fallback values when data can't be parsed
-- Create a consistent data model for all summary types
+4. **File-Structure Awareness**
+   * Created the **Service** folder without introducing any new sub-folders.
+   * No duplicate menu items introduced (Rule 22). All checks for existing definitions were done before insertion.
+   * Documentation updated here per Rule 13.
 
-### Step 5: Add Card for Full Payroll Complete
-- Add a summary card for "Full payroll complete" with aggregated statistics
-- Show total technicians processed across all operations
-- Display total processing time
-- Include overall summary metrics
+## 2. How to Use the New Service Feature
 
-### Step 6: Validate and Test
-- Test with various log entry patterns to ensure robust data extraction
-- Verify summary cards appear in the correct positions
-- Confirm all values are properly extracted and displayed
-- Ensure consistency across all card types and log entries
+1. Open the spreadsheet; on `onOpen` the root menu will load.
+2. Navigate to `🚚 Technician Tools → Service`.
+3. Choose **Yes** to run for everyone or **No** to process a single technician.
+4. Ensure the global `Service` sheet exists with the expected column layout.
 
-## Expected Outcome
-- Consistent summary cards for all completed operations
-- Accurate technician counts and dollar amounts
-- Uniform styling across all cards
-- Proper positioning of cards in the log flow
-- Complete summary information for the entire payroll process
+## 3. Future Considerations / TODO
 
-### Progress
+* Implement or migrate the legacy global helpers `processAllServices` and `updateServiceForTechnician` if still required by external scripts.
+* Add e2e tests in `tests/` to validate cell mapping.
+* Update central `Constants` module to include `SHEET.SERVICE` once defined (Rule 14).
 
-- [x] Step 1: Fix PBP Technician Count Parsing (completed)
-- [x] Step 2: Improve Card Positioning (completed)
-- [x] Step 3: Standardize Summary Card Design (completed)
-- [x] Step 4: Enhanced Data Extraction Logic (completed)
-- [x] Step 5: Add Card for Full Payroll Complete (completed)
-- [x] Step 6: Validate and Test (completed)
+---
 
-### Validation Notes
-- Tested various log scenarios: Bonus, PBP, Call-By-Call, Yard, Timesheet, Lead, and Full Payroll.  All summary cards rendered directly after their respective "complete" log entry.
-- Technician counts, dollar amounts, and percentages extracted correctly, including edge cases with comma-separated numbers and percentages without % sign.
-- Full payroll summary aggregated totals and processing time correctly.
-- UI styling verified on desktop and mobile viewport (<480 px).
+> _Generated automatically by the coding assistant to reflect the latest codebase updates._

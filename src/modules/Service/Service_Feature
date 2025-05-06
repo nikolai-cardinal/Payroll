@@ -1,0 +1,110 @@
+/* global SpreadsheetApp */
+
+var Modules = Modules || {};
+Modules.Service = Modules.Service || {};
+
+(function() {
+  'use strict';
+
+  /**
+   * Sheet names – prefer central constants if available.
+   * Falls back to hard-coded defaults when not defined.
+   */
+  var SHEET_CONST = (Modules.Constants && Modules.Constants.SHEET) || {};
+  var SERVICE_SHEET_NAME = SHEET_CONST.SERVICE || 'Service';
+
+  /**
+   * Copies Service metrics (Total Sales & Completed Revenue) from the global
+   * Service sheet into the specified technician's individual sheet.
+   *
+   * Column mapping on "Service" sheet:
+   *   A – Technician name (lookup key)
+   *   D – Total Sales
+   *   E – Completed Revenue
+   *
+   * Destination cells on technician sheet:
+   *   C16 – Completed Revenue
+   *   C17 – Total Sales
+   *
+   * @param {string} techName Technician name to process.
+   */
+  Modules.Service.processForTechnician = function(techName) {
+    if (!techName) return;
+
+    var ss = globalThis.SpreadsheetApp.getActiveSpreadsheet();
+    var serviceSheet = ss.getSheetByName(SERVICE_SHEET_NAME);
+    if (!serviceSheet) {
+      throw new Error('Service sheet "' + SERVICE_SHEET_NAME + '" not found.');
+    }
+
+    // Locate technician row in column A (case-insensitive, trims whitespace).
+    var lastRow = serviceSheet.getLastRow();
+    if (lastRow < 2) return; // nothing to process
+
+    var nameValues = serviceSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    var rowOffset = -1; // 0-based offset from row 2
+    var targetName = techName.trim().toLowerCase();
+
+    for (var i = 0; i < nameValues.length; i++) {
+      if (String(nameValues[i][0]).trim().toLowerCase() === targetName) {
+        rowOffset = i;
+        break;
+      }
+    }
+
+    if (rowOffset === -1) {
+      throw new Error('Technician "' + techName + '" not found in Service sheet.');
+    }
+
+    // Retrieve Total Sales (D) and Completed Revenue (E)
+    var rowNumber = 2 + rowOffset; // convert offset back to 1-based row index
+    var metrics = serviceSheet.getRange(rowNumber, 4, 1, 2).getValues()[0];
+    var totalSales = metrics[0];
+    var completedRevenue = metrics[1];
+
+    // Write values into technician's individual sheet
+    var techSheet = ss.getSheetByName(techName);
+    if (!techSheet) {
+      throw new Error('Technician sheet "' + techName + '" not found.');
+    }
+
+    techSheet.getRange(16, 3).setValue(completedRevenue); // C16 – Completed Revenue
+    techSheet.getRange(17, 3).setValue(totalSales);       // C17 – Total Sales
+  };
+
+  /**
+   * Processes Service metrics for every technician listed in the Service sheet.
+   * If a technician list is passed, only those technicians are processed.
+   *
+   * @param {string[]=} technicianList Optional whitelist of technician names.
+   */
+  Modules.Service.processAll = function(technicianList) {
+    var ss = globalThis.SpreadsheetApp.getActiveSpreadsheet();
+    var serviceSheet = ss.getSheetByName(SERVICE_SHEET_NAME);
+    if (!serviceSheet) {
+      throw new Error('Service sheet "' + SERVICE_SHEET_NAME + '" not found.');
+    }
+
+    var data = serviceSheet.getDataRange().getValues(); // includes header row
+    if (data.length <= 1) return; // only header present
+
+    for (var r = 1; r < data.length; r++) { // start at 1 to skip header
+      var name = String(data[r][0]).trim();
+      if (!name) continue;
+      if (Array.isArray(technicianList) && technicianList.length && technicianList.indexOf(name) === -1) {
+        continue; // skip if not in provided list
+      }
+
+      try {
+        Modules.Service.processForTechnician(name);
+      } catch (err) {
+        // Log but continue processing others
+        if (Modules.Shared && Modules.Shared.PayrollLogger) {
+          Modules.Shared.PayrollLogger.error('Service processing error for ' + name + ':', err);
+        } else {
+          console.error('Service processing error for ' + name + ': ' + err);
+        }
+      }
+    }
+  };
+})(); 

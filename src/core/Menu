@@ -18,7 +18,8 @@ Modules.Menu = Modules.Menu || {};
       .addItem('PBP', 'pbpPrompt')
       .addItem('Yard Signs', 'yardSignPrompt')
       .addItem('Timesheet', 'timesheetPrompt')
-      .addItem('Lead Set', 'leadSetPrompt');
+      .addItem('Lead Set', 'leadSetPrompt')
+      .addItem('Service', 'servicePrompt');
   };
 
   /**

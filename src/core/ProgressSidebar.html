@@ -404,6 +404,7 @@
                  msg.includes('yard') || 
                  msg.includes('yard signs') || 
                  msg.includes('bonus') || 
+                 msg.includes('service') ||
                  msg.includes('payroll') ||
                  msg.includes('timesheet') ||
                  msg.includes('lead set'))) {
@@ -425,6 +426,8 @@
                 title = 'Timesheet complete';
               } else if (title.toLowerCase().includes('lead set complete')) {
                 title = 'Lead Set complete';
+              } else if (title.toLowerCase().includes('service complete')) {
+                title = 'Service complete';
               } else if (title.toLowerCase().includes('full payroll complete')) {
                 title = 'Full payroll complete';
               }
@@ -472,7 +475,7 @@
               // Set default values when no data is found
               if (techCount === 0) {
                 // Look at specific completion types to set appropriate defaults
-                if (msg.includes('yard signs') || msg.includes('lead set') || msg.includes('timesheet')) {
+                if (msg.includes('yard signs') || msg.includes('lead set') || msg.includes('timesheet') || msg.includes('service')) {
                   // Default for these types when no explicit count is found
                   techCount = 0;  // Default to 0 for these specific types as shown in the screenshot
                 } else if (msg.includes('bonus') || msg.includes('pbp') || msg.includes('call by call score')) {
@@ -617,6 +620,7 @@
             var formattedMsg = entry.msg
               .replace(/Spiff\/Bonus/g, "Bonus")
               .replace(/\bKPI\b/g, "Call By Call Score")
+              .replace(/\bService\b/g, "Service")
               .replace(/\bPBP\b/gi, "PBP")
               .trim();
             
