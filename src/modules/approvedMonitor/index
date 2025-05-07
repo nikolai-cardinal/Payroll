@@ -11,13 +11,18 @@ Modules.ApprovedMonitor = Modules.ApprovedMonitor || {};
    *
    * @param {GoogleAppsScript.Base.Menu} ui
    */
-  ns.addMenuEntries = function(ui) {
+  ns.addMenuEntries = function() {
+    var ui = SpreadsheetApp.getUi();
+
     if (typeof addApprovalMenu === 'function') {
       addApprovalMenu(ui);
     } else {
       console.warn('ApprovedMonitor: addApprovalMenu function not found');
-      // Optionally provide a fallback menu entry
-      // ui.createMenu('Approval ✔️').addItem('Initialize', 'initApprovalMonitor').addToUi();
+
+      // Minimal fallback so the user can still initialize the subsystem.
+      ui.createMenu('Approval ✔️')
+        .addItem('Initialize Approval System', 'initApprovalMonitor')
+        .addToUi();
     }
   };
 

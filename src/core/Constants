@@ -15,6 +15,10 @@ var Modules = Modules || {};
     SERVICE: 'Service',     // service calls sheet
     YARD_SIGN: 'Yard Sign', // yard sign sheet
     // Add future sheet constants here
+    SUMMARY_BOOK_1_ID:  '16rx0KyCVnRL2Q0nxJzT5jDhLqiGglRdpP7iZgO6XlZc', // external archive workbook (phase 1)
+    SUMMARY_BOOK_1_TAB: 'Summary',
+    SUMMARY_BOOK_2_ID:  '16rx0KyCVnRL2Q0nxJzT5jDhLqiGglRdpP7iZgO6XlZc', // same spreadsheet for Jobs tab
+    SUMMARY_BOOK_2_TAB: 'Jobs'
   });
 
   /**

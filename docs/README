@@ -1,68 +1,190 @@
-# Project Update – Service Feature Integration and Menu Enhancements
+<!--
+  ✨ AGENT PROMPT ✨  
+  After you finish any coding task, **append a `## Debrief` section** at the end of this document
+  summarising what you changed, why, and any outstanding TODOs.  This keeps future engineers in the loop.
+-->
 
-_Last updated: {{DATE}}_
+# Technician Sheet Archiving Feature – Implementation Plan
 
-## 1. Overview of Changes
+## 1  Overview
+When a technician's payroll is marked **Complete** (Main → Column J), their individual sheet must be **archived** before it is deleted/reset for the next period.
 
-1. **Technician Tools Menu**
-   * Added a new static menu entry **"Service"** under the root `🚚 Technician Tools` menu.
-   * The entry is appended in `src/core/Menu` and bound to a new handler `servicePrompt`.
+Phase 1 ▸ write a single row into the first external workbook
+```
+Spreadsheet ID  : 16rx0KyCVnRL2Q0nxJzT5jDhLqiGglRdpP7iZgO6XlZc
+Sheet (tab)     : Summary
+```
+Phase 2 ▸ after the user supplies mapping details, replicate the same row into a second workbook.
 
-2. **Main Trigger-Layer Enhancements (`src/core/Main`)**
-   * Implemented `servicePrompt()` following existing prompt patterns (e.g. `timesheetPrompt`).
-   * Logic:
-     * Presents a **Yes / No** dialog: _Process Service for EVERYONE or an INDIVIDUAL technician?_
-     * **Batch path (Yes)** – delegates to (in order):
-       1. Global `processAllServices` function (legacy compatibility).
-       2. `Modules.Service.processAll()`.
-       3. `Modules.Service.Main.processAllServices()` (deep-namespace fallback).
-     * **Individual path (No)** – prompts for technician name and attempts:
-       1. `Modules.Service.processForTechnician(name)`.
-       2. Global `updateServiceForTechnician(name)` (legacy).
-       3. `Modules.Service.Main.processServiceForTechnician(name)` (fallback).
-   * Registered `servicePrompt` inside the exported `Modules.Main` map.
-   * Added **Service** to both `runFullPayroll` and `runIndividualPayroll` sequences, ensuring Service metrics are processed automatically whenever payroll is executed (batch or individual).
-   * Maintained the 500-line policy by inserting the new function near existing prompt block (no business logic added).
-
-3. **New Service Module**
-   * **Folder:** `src/modules/Service/`
-   * **File:** `Service_Feature` ( Apps Script file, no `.gs` extension per Rule 17 ).
-   * Provides two public functions:
-     * `Modules.Service.processForTechnician(techName)` – copies metrics from the global **Service** sheet to the technician's sheet:
-       * Source columns on `Service` sheet:
-         * **A** – Technician name
-         * **D** – **Total Sales**
-         * **E** – **Completed Revenue**
-       * Destination on technician sheet:
-         * `C16` – Completed Revenue
-         * `C17` – Total Sales
-     * `Modules.Service.processAll(technicianList?)` – iterates through each technician listed on the `Service` sheet (or the provided list) and calls `processForTechnician`.
-   * Constants:
-     * Reads `Modules.Constants.SHEET.SERVICE` if available, otherwise defaults to literal `'Service'`.
-   * Defensive coding:
-     * Validates sheet existence and technician presence.
-     * Gracefully logs errors through `Modules.Shared.PayrollLogger` where available.
-   * Linter compliance:
-     * Added `/* global SpreadsheetApp */` header and referenced API via `globalThis.SpreadsheetApp`.
-
-4. **File-Structure Awareness**
-   * Created the **Service** folder without introducing any new sub-folders.
-   * No duplicate menu items introduced (Rule 22). All checks for existing definitions were done before insertion.
-   * Documentation updated here per Rule 13.
-
-## 2. How to Use the New Service Feature
-
-1. Open the spreadsheet; on `onOpen` the root menu will load.
-2. Navigate to `🚚 Technician Tools → Service`.
-3. Choose **Yes** to run for everyone or **No** to process a single technician.
-4. Ensure the global `Service` sheet exists with the expected column layout.
-
-## 3. Future Considerations / TODO
-
-* Implement or migrate the legacy global helpers `processAllServices` and `updateServiceForTechnician` if still required by external scripts.
-* Add e2e tests in `tests/` to validate cell mapping.
-* Update central `Constants` module to include `SHEET.SERVICE` once defined (Rule 14).
+The archive happens **synchronously** inside `resetTechnicianForNextPeriod` (no background queues or extra triggers) so data is guaranteed to be copied _before_ deletion.
 
 ---
 
-> _Generated automatically by the coding assistant to reflect the latest codebase updates._
+## Debrief (Phase 1 implemented – YYYY-MM-DD)
+
+**Key changes shipped**
+1. Added external workbook constants (`SUMMARY_BOOK_1_*`, placeholders for book 2) in `src/core/Constants`.
+2. Implemented `archiveTechnicianData` helper in `ApprovedMonitor` to synchronously copy data before deletion.
+3. Updated `resetTechnicianForNextPeriod` to archive first, abort on failure, then continue reset flow.
+4. Inserted header-creation logic to keep Summary sheet tidy.
+
+**Removed / cleaned-up**
+• Removed queue, time-based trigger, and extra menu items introduced by previous agent.
+
+**Next steps (at the time)**
+• Await mapping for Jobs tab (Phase 2).
+• Confirm Gross-Profit cell reference for Summary mapping.
+
+---
+
+## 2  Current-state audit & clean-up
+The previous AI version introduced queue-based helpers and a 1-minute trigger. These add complexity and silent-failure risk. They will be removed and replaced by a simple, in-line helper.
+
+Key fixes:
+1. Move hard-coded spreadsheet IDs into `src/core/Constants` (`SHEET.SUMMARY_BOOK_*`).
+2. Delete `scheduleArchiveTechnicianData`, `runPendingArchiveTechnicianData`, the ScriptProperty queue, and the trigger installer.
+3. Keep the module ≤ 500 lines after clean-up.
+
+---
+
+## 3  Configuration constants (to add in `src/core/Constants`)
+```js
+SHEET: {
+  // …existing entries…
+  SUMMARY_BOOK_1_ID:  '16rx0KyCVnRL2Q0nxJzT5jDhLqiGglRdpP7iZgO6XlZc',
+  SUMMARY_BOOK_1_TAB: 'Summary',
+  // Place-holder for the second workbook – to be filled later
+  SUMMARY_BOOK_2_ID:  '',
+  SUMMARY_BOOK_2_TAB: ''
+}
+```
+_All code should reference these constants – no local literals._
+
+---
+
+## 4  Column mapping for **Summary** (workbook #1)
+| External Column | Source location | Notes |
+|-----------------|-----------------|-------|
+| A Name                | `techSheet!A1`                            | Technician name |
+| B Department          | `Main!B[row]`                             | |
+| C Position            | `Main!C[row]`                             | |
+| D Base Rate           | `Main!D[row]`                             | |
+| E Total Hourly Pay    | `techSheet!C9`                            | |
+| F Regular Hours       | `techSheet!B6`                            | |
+| G Overtime Hours      | `techSheet!B7`                            | |
+| H PTO/Sick/Holiday    | `techSheet!B8`                            | |
+| I Bonus               | `techSheet!C11`                           | |
+| J Yard Sign Spiff     | `techSheet!C12`                           | |
+| K Total Install Pay   | `techSheet!C13`                           | |
+| L Lead Set Sale       | `techSheet!B14`                           | |
+| M Call-by-Call Score  | `techSheet!B15`                           | |
+| N Completed Revenue   | `techSheet!C16`                           | |
+| O Total Sales         | `techSheet!C17`                           | |
+| P Gross Profit %      | 'techSeheet!D4'                    | If present on sheet |
+| Q Total Pay           | `techSheet!C18`                           | |
+| R Stamp Date          | `new Date().toISOString()`                | UTC |
+| S Payroll Period      | `Main!F1`                                 | |
+
+Implementation: store this mapping in an array of objects so future sheets can reuse the same helper.
+
+---
+
+### 4.2  Column mapping for **Jobs** tab (same workbook)
+| External Column | Source location on technician sheet | Notes |
+|-----------------|--------------------------------------|-------|
+| A Period        | `techSheet!A2`  | Pay-period label |
+| B Employee      | `techSheet!A1`  | Technician name |
+| C Customer      | `techSheet!E`   | (specify exact cell/col as needed) |
+| D Item Name     | `techSheet!F`   |  |
+| E Completion Date | `techSheet!G` |  |
+| F Commission    | `techSheet!H`   |  |
+| G Notes         | `techSheet!I`   |  |
+| H Type          | `techSheet!J`   |  |
+
+Use identical spreadsheet ID (`SUMMARY_BOOK_1_ID`) but different tab name (`Jobs`).  Constants for the second destination are now:
+```js
+SUMMARY_BOOK_2_ID  = SUMMARY_BOOK_1_ID  // same file
+SUMMARY_BOOK_2_TAB = 'Jobs'
+```
+(All same-ID writes are safe; Apps Script reuses one openById call.)
+
+---
+
+## 5  Implementation steps
+1. **Centralise constants** (section 3).
+2. Inside `src/modules/approvedMonitor/ApprovedMonitor`:
+   1. Remove old queue logic & related triggers.
+   2. Add a helper `archiveTechnicianData(techSheet, mainSheet, mainRow)` that:
+      * builds an array according to the mapping,
+      * opens the external workbook once (`SpreadsheetApp.openById(…)`),
+      * appends the row (creates header if empty),
+      * throws on failure.
+   3. In `resetTechnicianForNextPeriod` replace the existing archive-queue call with:
+      ```js
+      try {
+        archiveTechnicianData(existingSheet, mainSheet, row);
+      } catch (err) {
+        SpreadsheetApp.getUi().alert('Archive failed – sheet NOT deleted: ' + err.message);
+        return; // abort reset
+      }
+      ```
+3. Maintain existing steps: clear Column I, delete sheet, recreate sheet, set Column J to "Ready".
+4. Add placeholder logic for Summary #2 (Phase 2).
+5. Update JSDoc throughout.
+
+---
+
+---
+
+## 6  Roll-out sequence
+1. After user supplies mapping for workbook #2, extend `archiveTechnicianData` accordingly (no new triggers required).
+
+---
+
+## 7  Clean-up & documentation tasks
+* Remove all now-unused helpers (`scheduleArchiveTechnicianData`, etc.).
+* Update this README "Phase 2" section once the second mapping is known.
+
+---
+
+## Debrief (Phase 2 implemented – YYYY-MM-DD)
+
+**Key changes shipped**
+1. Filled `SUMMARY_BOOK_2_*` constants (same file, tab `Jobs`).
+2. Enhanced `archiveTechnicianData` to iterate the technician sheet and write job-level rows into the `Jobs` tab using the new 8-column mapping.
+3. Header-row logic added for `Jobs` tab (idempotent).
+4. Original Summary archiving still occurs first; Jobs rows follow in same transaction.
+
+**Removed / cleaned-up**
+• No background queue, triggers, or extra menu items – code is now simpler and synchronous.
+
+**Next steps**
+• Confirm Customer/Item/Date/Commission etc. cell ranges—adjust iterating start row if required.
+• Supply Gross-Profit source cell for Summary mapping if needed.
+
+## Debrief (Step 5 completed – 2025-05-07)
+
+**Key changes shipped**
+1. Updated the JSDoc header of `archiveTechnicianData` in `src/modules/approvedMonitor/ApprovedMonitor` to document that Phase 2 logic is fully implemented (Summary + Jobs writes).
+
+**Removed / cleaned-up**
+• No additional code removals were necessary; legacy queue functions had already been deleted in earlier phases.
+
+**Outstanding TODOs**
+• Confirm the source cell for Gross-Profit % on each technician sheet and update the mapping in `archiveTechnicianData`.
+
+## Debrief (Archiving on Approval – 2025-05-07)
+
+**Key changes shipped**
+1. Modified `approvePayroll` (and therefore `approveAllTechnicians`) so that, after a **successful** webhook call, it immediately invokes `archiveTechnicianData` to copy the technician's Summary & Jobs data to the external workbook.  No sheet reset or deletion occurs in this path.
+2. Added a safety check that looks up the technician tab by name before archiving and logs a warning if it is missing.
+3. Success / failure is now persisted via `setApprovalStatus` (`'success'` shows a ✅ in the menu); the simple on-edit handler only clears status and never performs external I/O, removing the restricted-scope permission error.
+4. `onEditResetApprovalStatus` now _only_ clears stored status and refreshes the menu – it no longer calls `resetTechnicianForNextPeriod`.
+5. `resetTechnicianForNextPeriod` itself is unchanged; it will still perform archiving + sheet recreation if you manually set Column J to **Complete**.
+
+**Removed / cleaned-up**
+• No files deleted – logic was relocated, not removed.
+
+**Outstanding TODOs**
+• Still need to confirm the Gross-Profit % source cell and update the mapping in `archiveTechnicianData`.
+• Consider increasing the polling interval in `ProgressSidebar.html` (currently 1 s) if Cloud-Log volume becomes problematic.

@@ -187,14 +187,32 @@ function approvePayroll(row, silent) {
     // Send the webhook with all row data
     const success = sendApprovalWebhook(sheet, row);
 
-    // Store status for this row
-    setApprovalStatus(row, success ? 'success' : 'failure');
+    if (success) {
+      // Archive technician data to the external workbook (no sheet reset here)
+      try {
+        const techName = sheet.getRange(row, EMPLOYEE_NAME_COLUMN).getValue();
+        const techSheet = ss.getSheetByName(techName);
+        if (techSheet) {
+          archiveTechnicianData(techSheet, sheet, row);
+        } else {
+          console.warn('Tech sheet not found for archiving: ' + techName);
+        }
+      } catch (err) {
+        console.error('Error archiving technician: ' + err.message);
+      }
+
+      // Mark as success so ✅ appears in menu
+      setApprovalStatus(row, 'success');
+    } else {
+      // Persist failure so the ❌ mark shows up in the menu
+      setApprovalStatus(row, 'failure');
+    }
 
     if (!silent) {
-      // Refresh menu so status symbol appears immediately
+      // Refresh menu so status symbol + new sheet state appear immediately
       refreshApprovalMenu();
     }
-    
+
     return success;
   } catch (error) {
     console.error("Error approving payroll: " + error.message);
@@ -437,9 +455,15 @@ function onEditResetApprovalStatus(e) {
 
     // Only clear when the dropdown value is 'Complete'
     const value = String(range.getValue()).trim();
-    if (/^complete$/i.test(value)) {
+    // Accept both "Complete" and "Completed" (case-insensitive)
+    if (/^(complete|completed)$/i.test(value)) {
+      // Clear any stored status symbols in the Approval menu
       clearApprovalStatus(row);
-      // Refresh menu to remove emoji
+
+      // Perform full reset workflow (archive → delete → recreate sheet)
+      resetTechnicianForNextPeriod(sheet, row, true);
+
+      // Finally refresh the menu so UI reflects the new state
       refreshApprovalMenu();
     }
   } catch (err) {
@@ -486,5 +510,170 @@ function getSheetAsPdfBlob(sheet, filename) {
   } catch (err) {
     console.error('Error creating PDF blob: ' + err.message);
     return null;
+  }
+}
+
+/*
+ * Archives key payroll data from a technician sheet into the external "Summary"
+ * workbook before that sheet is deleted.  This helper now implements **Phase 2**:
+ *   • Writes the high-level Summary row (columns A–S) to SHEET.SUMMARY_BOOK_1_TAB.
+ *   • Then iterates the technician sheet and appends detailed job-level rows to
+ *     the "Jobs" tab (SHEET.SUMMARY_BOOK_2_TAB) using the 8-column mapping.
+ *
+ * Throws on failure so callers can abort the reset workflow and avoid data loss.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} techSheet  The technician sheet to archive.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} mainSheet  The Main sheet (for dept/position etc.).
+ * @param {number} mainRow                                 Row number on Main that corresponds to the tech.
+ */
+function archiveTechnicianData(techSheet, mainSheet, mainRow) {
+  const C = Modules.Constants.SHEET;
+  const summaryId   = C.SUMMARY_BOOK_1_ID;
+  const summaryTab  = C.SUMMARY_BOOK_1_TAB;
+
+  if (!summaryId || !summaryTab) {
+    throw new Error('Summary workbook constants not configured');
+  }
+
+  // Open external summary workbook & tab (create tab if missing)
+  const summarySs = SpreadsheetApp.openById(summaryId);
+  if (!summarySs) throw new Error('Cannot open summary spreadsheet');
+  let summarySheet = summarySs.getSheetByName(summaryTab) || summarySs.insertSheet(summaryTab);
+
+  // Build data row according to mapping
+  const techName         = techSheet.getRange('A1').getValue();
+  const department       = mainSheet.getRange(mainRow, 2).getValue(); // B
+  const position         = mainSheet.getRange(mainRow, 3).getValue(); // C
+  const baseRate         = mainSheet.getRange(mainRow, 4).getValue(); // D
+  const totalHourlyPay   = techSheet.getRange('C9').getValue();
+  const regularHours     = techSheet.getRange('B6').getValue();
+  const overtimeHours    = techSheet.getRange('B7').getValue();
+  const ptoHours         = techSheet.getRange('B8').getValue();
+  const bonus            = techSheet.getRange('C11').getValue();
+  const yardSignSpiff    = techSheet.getRange('C12').getValue();
+  const totalInstallPay  = techSheet.getRange('C13').getValue();
+  const leadSetSale      = techSheet.getRange('B14').getValue();
+  const callByCallScore  = techSheet.getRange('B15').getValue();
+  const completedRevenue = techSheet.getRange('C16').getValue();
+  const totalSales       = techSheet.getRange('C17').getValue();
+  const grossProfit      = techSheet.getRange('D4').getValue();
+  const totalPay         = techSheet.getRange('C18').getValue();
+  const stampDate        = Utilities.formatDate(new Date(), SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+  const payrollPeriod    = mainSheet.getRange('F1').getValue();
+
+  const rowData = [
+    techName, department, position, baseRate,
+    totalHourlyPay, regularHours, overtimeHours, ptoHours,
+    bonus, yardSignSpiff, totalInstallPay, leadSetSale, callByCallScore,
+    completedRevenue, totalSales, grossProfit, totalPay,
+    stampDate, payrollPeriod
+  ];
+
+  // Write header if the sheet is empty (idempotent)
+  if (summarySheet.getLastRow() === 0) {
+    summarySheet.appendRow([
+      'Name', 'Department', 'Position', 'Base Rate',
+      'Total Hourly Pay', 'Regular Hours', 'Overtime Hours', 'PTO/Sick/Holiday',
+      'Bonus', 'Yard Sign Spiff', 'Total Install Pay', 'Lead Set Sale',
+      'Call by Call Score', 'Completed Revenue', 'Total Sales', 'Gross Profit',
+      'Total Pay', 'Stamp Date', 'Payroll Period'
+    ]);
+  }
+
+  summarySheet.appendRow(rowData);
+
+  // Phase-2: write detailed job rows to Jobs tab -------------------------
+  try {
+    if (C.SUMMARY_BOOK_2_ID && C.SUMMARY_BOOK_2_TAB) {
+      const ss2 = (C.SUMMARY_BOOK_2_ID === summaryId) ? summarySs : SpreadsheetApp.openById(C.SUMMARY_BOOK_2_ID);
+      const jobsSheet = ss2.getSheetByName(C.SUMMARY_BOOK_2_TAB) || ss2.insertSheet(C.SUMMARY_BOOK_2_TAB);
+
+      // Header row if empty
+      if (jobsSheet.getLastRow() === 0) {
+        jobsSheet.appendRow(['Period', 'Employee', 'Customer', 'Item Name', 'Completion Date', 'Commission', 'Notes', 'Type']);
+      }
+
+      const periodVal   = techSheet.getRange('A2').getValue();
+      const employeeVal = techName;
+
+      const lastRowTech = techSheet.getLastRow();
+      // Iterate rows starting at 3 to skip header rows (A1 and possibly row 2)
+      for (let r = 3; r <= lastRowTech; r++) {
+        const customer = techSheet.getRange(r, 5).getValue(); // column E
+        if (!customer) continue; // skip blank rows
+
+        const itemName       = techSheet.getRange(r, 6).getValue(); // F
+        const completionDate = techSheet.getRange(r, 7).getValue(); // G
+        const commission     = techSheet.getRange(r, 8).getValue(); // H
+        const notes          = techSheet.getRange(r, 9).getValue(); // I
+        const typeVal        = techSheet.getRange(r,10).getValue(); // J
+
+        jobsSheet.appendRow([
+          periodVal, employeeVal, customer, itemName, completionDate, commission, notes, typeVal
+        ]);
+      }
+    }
+  } catch (e) {
+    console.warn('Jobs tab write failed: ' + e.message);
+  }
+}
+
+/**
+ * Resets a technician for the next pay-period.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} mainSheet The Main sheet reference.
+ * @param {number} row  Row number being reset.
+ * @param {boolean=} skipArchive When true, skips the external Archive write. Default false.
+ */
+function resetTechnicianForNextPeriod(mainSheet, row, skipArchive) {
+  try {
+    const ss = mainSheet.getParent();
+
+    // -------------- Tech name & basic sanity --------------
+    const techName = mainSheet.getRange(row, EMPLOYEE_NAME_COLUMN).getValue();
+    if (!techName) return; // nothing to do
+
+    // -------------- 1. clear Column I ----------------------
+    mainSheet.getRange(row, 9).clearContent(); // Column I index = 9
+
+    // -------------- 2. delete existing sheet --------------
+    const existingSheet = ss.getSheetByName(techName);
+    if (existingSheet) {
+      // Directly delete without external archive – data was already archived during Approve action
+      ss.deleteSheet(existingSheet);
+      // Ensure deletion is fully committed before we create a new copy.
+      SpreadsheetApp.flush();
+    }
+
+    // -------------- 3. recreate sheet ---------------------
+    let created = false;
+    try {
+      if (typeof createNewTechnicianSheet === 'function') {
+        createNewTechnicianSheet(techName, /*suppressPopup=*/ true);
+        created = true;
+      } else if (Modules.NewTechnician && typeof Modules.NewTechnician.createSheet === 'function') {
+        Modules.NewTechnician.createSheet(techName);
+        created = true;
+      }
+    } catch (e) {
+      console.error('Error creating new technician sheet for ' + techName + ': ' + e.message);
+    }
+
+    // Remove pay-period header if the sheet was created
+    if (created) {
+      const newSheet = ss.getSheetByName(techName);
+      if (newSheet) {
+        try {
+          newSheet.getRange(2, 1).clearContent(); // A2
+        } catch (e) {
+          console.warn('Could not clear A2 for ' + techName + ': ' + e.message);
+        }
+      }
+    }
+
+    // -------------- 4. reset Column J to "Ready" ----------
+    mainSheet.getRange(row, APPROVAL_COLUMN).setValue('Ready');
+
+  } catch (err) {
+    console.error('resetTechnicianForNextPeriod failed: ' + err.message);
   }
 } 

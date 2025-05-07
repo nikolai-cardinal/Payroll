@@ -1,6 +1,6 @@
 /*
  * Cardinal Payroll System - Report Upload
- * After a successful Bulk Approval, this module sends five PDF reports (Time Sheet,
+ * After a successful Bulk Approval, this module sends five CSV reports (Time Sheet,
  * Spiff/Bonus, Lead Set, Service, Yard Sign) to the same webhook endpoint used
  * for individual approvals. Each report is sent 10 seconds apart and contains
  * the payroll period (F1 from Main) plus the file payload.
@@ -17,7 +17,43 @@ const REPORT_UPLOAD_SHEETS = [
 ];
 
 /**
- * Sends the defined report sheets as PDF files to APPROVED_WEBHOOK_URL.
+ * Exports a given sheet as a CSV blob.
+ * This is used only for the bulk report uploads where PDF formatting is not
+ * required.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet   Sheet to export.
+ * @param {string} filename                            Base filename (without extension).
+ * @return {GoogleAppsScript.Base.Blob|null}           CSV blob or null on failure.
+ */
+function getSheetAsCsvBlob(sheet, filename) {
+  try {
+    var ss = sheet.getParent();
+    var spreadsheetId = ss.getId();
+    var sheetId = sheet.getSheetId();
+
+    // Build the export URL for CSV.
+    var exportUrl = 'https://docs.google.com/spreadsheets/d/' + spreadsheetId +
+      '/export?format=csv&gid=' + sheetId;
+
+    var token = ScriptApp.getOAuthToken();
+    var response = UrlFetchApp.fetch(exportUrl, {
+      headers: {
+        'Authorization': 'Bearer ' + token
+      },
+      muteHttpExceptions: true
+    });
+
+    return response.getBlob()
+      .setName(filename + '.csv')
+      .setContentType('text/csv');
+  } catch (err) {
+    console.error('Error creating CSV blob: ' + err.message);
+    return null;
+  }
+}
+
+/**
+ * Sends the defined report sheets as CSV files to APPROVED_WEBHOOK_URL.
  * This function is intended to run right after the user clicks OK on the
  * Bulk Approval Summary dialog.
  */
@@ -39,16 +75,16 @@ function sendBulkReportUploads() {
         return; // Skip missing sheet
       }
 
-      const pdfBlob = getSheetAsPdfBlob(tab, sheetName);
-      if (!pdfBlob) {
-        console.warn('Unable to create PDF blob for sheet: ' + sheetName);
+      const csvBlob = getSheetAsCsvBlob(tab, sheetName);
+      if (!csvBlob) {
+        console.warn('Unable to create CSV blob for sheet: ' + sheetName);
         return;
       }
 
       const payload = {
         payrollPeriod: payrollPeriod,
         reportName: sheetName,
-        file: pdfBlob
+        file: csvBlob
       };
 
       const options = {

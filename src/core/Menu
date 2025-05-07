@@ -40,7 +40,6 @@ Modules.Menu = Modules.Menu || {};
 
     // Get ordered modules directly, no longer relying on external _getOrderedModules
     var orderedModules = [
-      Modules.ApprovedMonitor,
       Modules.TimeSheet,
       Modules.SpiffBonus,
       Modules.PBP,
@@ -75,5 +74,18 @@ Modules.Menu = Modules.Menu || {};
       .addItem('New Sheet', 'createNewTechnicianSheet')
       .addItem('All New Sheets', 'createAllNewTechnicianSheets')
       .addToUi();
+
+    // Add Approval menu after Technician Sheets so it appears to the right.
+    try {
+      if (Modules.ApprovedMonitor && typeof Modules.ApprovedMonitor.addMenuEntries === 'function') {
+        Modules.ApprovedMonitor.addMenuEntries();
+      }
+    } catch (err) {
+      if (Modules.Shared && Modules.Shared.PayrollLogger) {
+        Modules.Shared.PayrollLogger.error(err);
+      } else {
+        console.error('Error adding Approval menu: ' + err);
+      }
+    }
   };
 })(); 
