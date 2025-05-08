@@ -560,13 +560,25 @@ function archiveTechnicianData(techSheet, mainSheet, mainRow) {
   const totalPay         = techSheet.getRange('C18').getValue();
   const stampDate        = Utilities.formatDate(new Date(), SpreadsheetApp.getActive().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
   const payrollPeriod    = mainSheet.getRange('F1').getValue();
+  // Completed Jobs (column T) – look up the technician in the "Service" sheet (column A) and pull column C
+  let completedJobs = '';
+  try {
+    const serviceSheet = mainSheet.getParent().getSheetByName('Service');
+    if (serviceSheet) {
+      const serviceData = serviceSheet.getRange(1, 1, serviceSheet.getLastRow(), 3).getValues(); // cols A-C
+      const matchRow = serviceData.find(r => String(r[0]).trim() === String(techName).trim());
+      if (matchRow) completedJobs = matchRow[2] || '';
+    }
+  } catch (e) {
+    console.warn('Service sheet lookup failed: ' + e.message);
+  }
 
   const rowData = [
     techName, department, position, baseRate,
     totalHourlyPay, regularHours, overtimeHours, ptoHours,
     bonus, yardSignSpiff, totalInstallPay, leadSetSale, callByCallScore,
     completedRevenue, totalSales, grossProfit, totalPay,
-    stampDate, payrollPeriod
+    stampDate, payrollPeriod, completedJobs
   ];
 
   // Write header if the sheet is empty (idempotent)
@@ -576,7 +588,7 @@ function archiveTechnicianData(techSheet, mainSheet, mainRow) {
       'Total Hourly Pay', 'Regular Hours', 'Overtime Hours', 'PTO/Sick/Holiday',
       'Bonus', 'Yard Sign Spiff', 'Total Install Pay', 'Lead Set Sale',
       'Call by Call Score', 'Completed Revenue', 'Total Sales', 'Gross Profit',
-      'Total Pay', 'Stamp Date', 'Payroll Period'
+      'Total Pay', 'Stamp Date', 'Payroll Period', 'Completed Jobs'
     ]);
   }
 
