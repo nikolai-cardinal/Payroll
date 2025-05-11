@@ -554,6 +554,7 @@ function archiveTechnicianData(techSheet, mainSheet, mainRow) {
   const totalInstallPay  = techSheet.getRange('C13').getValue();
   const leadSetSale      = techSheet.getRange('B14').getValue();
   const callByCallScore  = techSheet.getRange('B15').getValue();
+  const c15Data          = techSheet.getRange('C15').getValue(); // Get the value from C15
   const completedRevenue = techSheet.getRange('C16').getValue();
   const totalSales       = techSheet.getRange('C17').getValue();
   const grossProfit      = techSheet.getRange('D4').getValue();
@@ -572,13 +573,15 @@ function archiveTechnicianData(techSheet, mainSheet, mainRow) {
   } catch (e) {
     console.warn('Service sheet lookup failed: ' + e.message);
   }
+  // Get Email from column K in Main sheet
+  const email = mainSheet.getRange(mainRow, 11).getValue(); // K
 
   const rowData = [
     techName, department, position, baseRate,
     totalHourlyPay, regularHours, overtimeHours, ptoHours,
     bonus, yardSignSpiff, totalInstallPay, leadSetSale, callByCallScore,
     completedRevenue, totalSales, grossProfit, totalPay,
-    stampDate, payrollPeriod, completedJobs
+    stampDate, payrollPeriod, completedJobs, email, c15Data // Add c15Data to the end of rowData
   ];
 
   // Write header if the sheet is empty (idempotent)
@@ -588,7 +591,7 @@ function archiveTechnicianData(techSheet, mainSheet, mainRow) {
       'Total Hourly Pay', 'Regular Hours', 'Overtime Hours', 'PTO/Sick/Holiday',
       'Bonus', 'Yard Sign Spiff', 'Total Install Pay', 'Lead Set Sale',
       'Call by Call Score', 'Completed Revenue', 'Total Sales', 'Gross Profit',
-      'Total Pay', 'Stamp Date', 'Payroll Period', 'Completed Jobs'
+      'Total Pay', 'Stamp Date', 'Payroll Period', 'Completed Jobs', 'Email', 'C15 Data' // Add column header
     ]);
   }
 

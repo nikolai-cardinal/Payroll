@@ -507,5 +507,4 @@ Modules.LeadSet.Main.menuProcessAllLeadSet = menuProcessAllLeadSet;
 Modules.LeadSet.Main.processAllLeadSet = processAllLeadSet;
 Modules.LeadSet.Main.handleLeadEntryInColumnJ = handleLeadEntryInColumnJ;
 Modules.LeadSet.Main.updateLeadSetForTechnician = updateLeadSetForTechnician;
-Modules.LeadSet.Main.processAllLeadSets = processAllLeadSets;
-Modules.LeadSet.Main.processLeadSetForTechnician = processLeadSetForTechnician; 
+Modules.LeadSet.Main.processAllLeadSets = processAllLeadSets; 
