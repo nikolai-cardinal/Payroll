@@ -481,6 +481,25 @@ function processAllLeadSets() {
   }
 }
 
+/**
+ * Global function to process lead set for an individual technician.
+ * This is called from the core Main module when processing individual technicians.
+ * 
+ * @param {string} technicianName The name of the technician to process.
+ */
+function processLeadSetForTechnician(technicianName) {
+  if (!technicianName) return;
+  
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const leadSetSheet = Modules.LeadSet.Utilities.findLeadSetSheet(ss);
+    return Modules.LeadSet.Main.updateLeadSetForTechnician(ss, leadSetSheet, technicianName);
+  } catch (error) {
+    console.error(`Error in processLeadSetForTechnician: ${error.message}`);
+    return { success: false, error: error.message };
+  }
+}
+
 // Attach all Main functions to namespace
 Modules.LeadSet.Main.initLeadSet = initLeadSet;
 Modules.LeadSet.Main.addLeadSetMenuItem = addLeadSetMenuItem;
@@ -488,4 +507,5 @@ Modules.LeadSet.Main.menuProcessAllLeadSet = menuProcessAllLeadSet;
 Modules.LeadSet.Main.processAllLeadSet = processAllLeadSet;
 Modules.LeadSet.Main.handleLeadEntryInColumnJ = handleLeadEntryInColumnJ;
 Modules.LeadSet.Main.updateLeadSetForTechnician = updateLeadSetForTechnician;
-Modules.LeadSet.Main.processAllLeadSets = processAllLeadSets; 
+Modules.LeadSet.Main.processAllLeadSets = processAllLeadSets;
+Modules.LeadSet.Main.processLeadSetForTechnician = processLeadSetForTechnician; 
