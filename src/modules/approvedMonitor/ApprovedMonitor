@@ -612,8 +612,8 @@ function archiveTechnicianData(techSheet, mainSheet, mainRow) {
       const employeeVal = techName;
 
       const lastRowTech = techSheet.getLastRow();
-      // Iterate rows starting at 3 to skip header rows (A1 and possibly row 2)
-      for (let r = 3; r <= lastRowTech; r++) {
+      // Iterate rows starting at 2 to include row 2 data
+      for (let r = 2; r <= lastRowTech; r++) {
         const customer = techSheet.getRange(r, 5).getValue(); // column E
         if (!customer) continue; // skip blank rows
 
