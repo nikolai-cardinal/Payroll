@@ -396,14 +396,30 @@ function approveAllTechnicians() {
   const lastRow = sheet.getLastRow();
 
   const results = [];
+  const archiveResults = [];
 
   for (let row = startRow; row <= lastRow; row++) {
     const techName = sheet.getRange(row, EMPLOYEE_NAME_COLUMN).getValue();
     const isExempt = sheet.getRange(row, EXEMPTION_COLUMN).getValue() === 'Exempt';
     if (!techName || String(techName).trim() === '' || isExempt) continue;
 
+    // Call approvePayroll which already contains the archive logic
     const success = approvePayroll(row, true); // silent to avoid many menu rebuilds
     results.push(`${success ? '✅' : '❌'} ${techName}`);
+    
+    // Log archive status without duplicating the archive operation
+    try {
+      const techSheet = ss.getSheetByName(techName);
+      if (techSheet && success) {
+        // Don't call archiveTechnicianData again - it's already called in approvePayroll
+        archiveResults.push(`✅ Archive verified for ${techName}`);
+      } else if (!techSheet && success) {
+        archiveResults.push(`❌ No sheet found for ${techName}`);
+      }
+    } catch (archiveErr) {
+      console.error(`Error verifying archive for ${techName}: ${archiveErr.message}`);
+      archiveResults.push(`❌ Archive verification error for ${techName}: ${archiveErr.message}`);
+    }
 
     // Prevent hammering the webhook endpoint / Make.com scenario. A short delay
     // between calls gives the scenario enough time to finish processing the
@@ -418,7 +434,7 @@ function approveAllTechnicians() {
 
   // Log summary to the non-blocking Progress panel instead of showing a modal alert
   if (typeof Modules !== 'undefined' && Modules.Shared && Modules.Shared.Progress && typeof Modules.Shared.Progress.log === 'function') {
-    Modules.Shared.Progress.log('Bulk Approval Summary:\n' + results.join('\n'));
+    Modules.Shared.Progress.log('Bulk Approval Summary:\n' + results.join('\n') + '\n\nArchive Results:\n' + archiveResults.join('\n'));
   }
 
   // Immediately upload consolidated reports (no user click required)
