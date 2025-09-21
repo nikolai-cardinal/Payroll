@@ -19,7 +19,8 @@ Modules.Menu = Modules.Menu || {};
       .addItem('Yard Signs', 'yardSignPrompt')
       .addItem('Timesheet', 'timesheetPrompt')
       .addItem('Lead Set', 'leadSetPrompt')
-      .addItem('Service', 'servicePrompt');
+      .addItem('Service', 'servicePrompt')
+      .addItem('Call by Call', 'callByCallPrompt');
   };
 
   /**

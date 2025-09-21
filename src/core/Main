@@ -657,6 +657,62 @@ function servicePrompt() {
   }
 }
 
+// Prompt user to run Call by Call for everyone or an individual technician.
+function callByCallPrompt() {
+  var ui = SpreadsheetApp.getUi();
+  var choice = ui.alert(
+    'Call by Call',
+    'Process Call by Call score for EVERYONE (Yes) or an INDIVIDUAL technician (No)?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (choice === ui.Button.YES) {
+    try {
+      // Process for all technicians
+      if (Modules.TechKPI && typeof Modules.TechKPI.processAll === 'function') {
+        Modules.TechKPI.processAll();
+        ui.alert('Success', 'Call by Call processing completed for all technicians.', ui.ButtonSet.OK);
+      } else {
+        ui.alert('Error', 'Call by Call module not available. Please ensure the module is loaded.', ui.ButtonSet.OK);
+      }
+    } catch (err) {
+      if (Modules.Shared && Modules.Shared.PayrollLogger) {
+        Modules.Shared.PayrollLogger.error('Error processing Call by Call for all:', err);
+      }
+      ui.alert('Error', 'Failed to process Call by Call: ' + (err.message || err), ui.ButtonSet.OK);
+    }
+  } else if (choice === ui.Button.NO) {
+    // Process for individual technician
+    var resp = ui.prompt('Individual Call by Call', 'Enter the technician\'s name:', ui.ButtonSet.OK_CANCEL);
+    if (resp.getSelectedButton() !== ui.Button.OK) return;
+    var techName = (resp.getResponseText() || '').trim();
+    if (!techName) return;
+
+    try {
+      if (Modules.TechKPI && typeof Modules.TechKPI.processForTechnician === 'function') {
+        var score = Modules.TechKPI.processForTechnician(techName);
+        if (score !== undefined) {
+          var percentage = (score * 100).toFixed(1);
+          ui.alert('Success', 'Call by Call processing complete for ' + techName + '\nScore: ' + percentage + '%', ui.ButtonSet.OK);
+        } else {
+          ui.alert('Success', 'Call by Call processing complete for ' + techName, ui.ButtonSet.OK);
+        }
+      } else if (typeof pullTechnicianKPI === 'function') {
+        // Fallback to direct function call
+        pullTechnicianKPI(techName);
+        ui.alert('Success', 'Call by Call processing complete for ' + techName, ui.ButtonSet.OK);
+      } else {
+        ui.alert('Error', 'Call by Call module not available for individual processing.', ui.ButtonSet.OK);
+      }
+    } catch (err) {
+      if (Modules.Shared && Modules.Shared.PayrollLogger) {
+        Modules.Shared.PayrollLogger.error('Error processing Call by Call for ' + techName + ':', err);
+      }
+      ui.alert('Error', 'Failed to process Call by Call for ' + techName + ': ' + (err.message || err), ui.ButtonSet.OK);
+    }
+  }
+}
+
 Modules.Main = {
   onOpen: onOpen,
   onEdit: onEdit,
@@ -669,4 +725,5 @@ Modules.Main = {
   timesheetPrompt: timesheetPrompt,
   yardSignPrompt: yardSignPrompt,
   servicePrompt: servicePrompt,
+  callByCallPrompt: callByCallPrompt,
 }; 
